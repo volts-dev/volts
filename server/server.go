@@ -1,0 +1,103 @@
+package server
+
+import (
+	"context"
+	"crypto/tls"
+	//	"errors"
+	//	"fmt"
+	///	"log"
+	"reflect"
+	//	"runtime"
+	"unicode"
+	"unicode/utf8"
+	rpcsrv "vectors/rpc/server/net"
+)
+
+const (
+	// ReaderBuffsize is used for bufio reader.
+	ReaderBuffsize = 1024
+	// WriterBuffsize is used for bufio writer.
+	WriterBuffsize = 1024
+)
+
+var (
+	// RemoteConnContextKey is a context key. It can be used in
+	// services with context.WithValue to access the connection arrived on.
+	// The associated value will be of type net.Conn.
+	RemoteConnContextKey = &contextKey{"remote-conn"}
+	// StartRequestContextKey records the start time
+	StartRequestContextKey = &contextKey{"start-parse-request"}
+	// StartSendRequestContextKey records the start time
+	StartSendRequestContextKey = &contextKey{"start-send-request"}
+)
+
+// contextKey is a value for use with context.WithValue. It's used as
+// a pointer so it fits in an interface{} without allocation.
+type contextKey struct {
+	name string
+}
+
+func (k *contextKey) String() string { return "rpcx context value " + k.name }
+
+// ContextKey defines key type in context.
+type ContextKey string
+
+// ReqMetaDataKey is used to set metatdata in context of requests.
+var ReqMetaDataKey = ContextKey("__req_metadata")
+
+// ResMetaDataKey is used to set metatdata in context of responses.
+var ResMetaDataKey = ContextKey("__res_metadata")
+
+// Precompute the reflect type for error. Can't use error directly
+// because Typeof takes an empty interface value. This is annoying.
+var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
+
+// Precompute the reflect type for context.
+var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
+
+type (
+	// Server is rpc server that use TCP or UDP.
+	TServer struct {
+		Router *TRouter // 路由类
+		// BlockCrypt for kcp.BlockCrypt
+		options map[string]interface{}
+
+		// TLSConfig for creating tls tcp connection.
+		tlsConfig *tls.Config
+	}
+)
+
+func isExported(name string) bool {
+	rune, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(rune)
+}
+
+func isExportedOrBuiltinType(t reflect.Type) bool {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	// PkgPath will be non-empty even for an exported type,
+	// so we need to check the type name as well.
+	return isExported(t.Name()) || t.PkgPath() == ""
+}
+
+// NewServer returns a server.
+func NewServer(config ...FConfig) *TServer {
+	s := &TServer{
+		//Plugins: &pluginContainer{},
+		//options: make(map[string]interface{}),
+	}
+
+	for _, fn := range config {
+		fn(s)
+	}
+
+	return s
+}
+
+// Serve starts and listens RPC requests.
+// It is blocked until receiving connectings from clients.
+func (s *TServer) Listen(network, address string) (err error) {
+
+	return rpcsrv.ListenAndServe(network, address, nil)
+}
