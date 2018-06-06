@@ -4,13 +4,21 @@ import (
 	//	"context"
 	//	"fmt"
 	"reflect"
+	"unicode"
+	"unicode/utf8"
 	//	"sync"
-	log "vectors/logger"
-	"vectors/utils"
 	"vectors/web"
+
+	log "github.com/VectorsOrigin/logger"
+	"github.com/VectorsOrigin/utils"
 )
 
 type (
+	IModule interface {
+		// 返回Module所有Routes 理论上只需被调用一次
+		GetRoutes() *web.TTree
+	}
+
 	// 服务模块 每个服务代表一个对象
 	TModule struct {
 		tree *web.TTree
@@ -22,10 +30,32 @@ type (
 	}
 )
 
-func NewModule() *TModule {
-	return &TModule{
-		tree: web.NewRouteTree(),
+func isExported(name string) bool {
+	rune, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(rune)
+}
+
+func isExportedOrBuiltinType(t reflect.Type) bool {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
 	}
+	// PkgPath will be non-empty even for an exported type,
+	// so we need to check the type name as well.
+	return isExported(t.Name()) || t.PkgPath() == ""
+}
+
+func NewModule() *TModule {
+	tree := web.NewRouteTree()
+	tree.IgnoreCase = true
+	tree.DelimitChar = '.' // 修改为xxx.xxx
+
+	return &TModule{
+		tree: tree,
+	}
+}
+
+func (self *TModule) GetRoutes() *web.TTree {
+	return self.tree
 }
 
 // suitableMethods returns suitable Rpc methods of typ, it will report
@@ -165,35 +195,84 @@ func (self *TModule) addFunc(aType web.RouteType, path, name string, function in
 		//Host:     host,
 		//Scheme:   scheme,
 	}
-	t := f.Type()
+	method := f.Type()
 	mt := web.TMethodType{
 		Func:     f,
-		FuncType: t}
+		FuncType: method}
 
-	for i := 0; i < t.NumIn(); i++ {
-		mt.ArgType = append(mt.ArgType, t.In(i)) // 添加参数类型
+	/*
+		for i := 0; i < t.NumIn(); i++ {
+			mt.ArgType = append(mt.ArgType, t.In(i)) // 添加参数类型
+		}
+			// return 值
+		for i := 0; i < t.NumOut(); i++ {
+			mt.ReplyType = append(mt.ReplyType, t.Out(i)) // 添加参数类型
+		}
+
+	*/
+	// Method must be exported.
+	if method.PkgPath() != "" {
+		return
 	}
 
-	// return 值
-	for i := 0; i < t.NumOut(); i++ {
-		mt.ReplyType = append(mt.ReplyType, t.Out(i)) // 添加参数类型
+	log.Dbg("NumIn", method.NumIn(), method.String())
+	// Method needs four ins: receiver, context.Context, *args, *reply.
+	if method.NumIn() != 4 {
+		log.Info("method", name, "has wrong number of ins:", method.NumIn())
 	}
+	if method.NumIn() != 3 {
+		log.Infof("rpcx.registerFunction: has wrong number of ins: %s", method.String())
+		return
+	}
+	if method.NumOut() != 1 {
+		log.Infof("rpcx.registerFunction: has wrong number of outs: %s", method.String())
+		return
+	}
+
+	// First arg must be context.Context
+	ctxType := method.In(0)
+	if !ctxType.Implements(typeOfContext) {
+		log.Info("method", name, " must use context.Context as the first parameter")
+		return
+	}
+
+	// Second arg need not be a pointer.
+	argType := method.In(1)
+	if !isExportedOrBuiltinType(argType) {
+		log.Info(name, "parameter type not exported:", argType)
+		return
+	}
+	// Third arg must be a pointer.
+	replyType := method.In(2)
+	if replyType.Kind() != reflect.Ptr {
+
+		log.Info("method", name, "reply type not a pointer:", replyType)
+
+		return
+	}
+
+	mt.ArgType = argType
+	mt.ReplyType = replyType
 
 	route.MainCtrl = mt
+	route.Ctrls = append(route.Ctrls, route.MainCtrl)
 
-	self.tree.AddRoute("rpc", path+"."+name, route)
+	log.Dbg("addFunc", path+"."+name)
+	self.tree.AddRoute("HEAD", path+"."+name, route)
 	//self.method[strings.ToLower(name)] = route
 	//mm.mmLocker.Unlock()
 }
 
-func (self *TModule) Register(obj interface{}) {
+func (self *TModule) RegisterFunction(object_name, name string, function interface{}) {
+	self.addFunc(web.CommomRoute, object_name, name, function)
+}
+
+func (self *TModule) RegisterName(object_name string, obj interface{}) {
 	if obj == nil {
 		panic("obj can't be nil")
 	}
 	v := reflect.ValueOf(obj)
 	t := v.Type()
-
-	object_name := utils.DotCasedName(utils.Obj2Name(obj))
 	n := t.NumMethod()
 	var (
 		name   string
@@ -211,8 +290,15 @@ func (self *TModule) Register(obj interface{}) {
 		}
 
 		if method.CanInterface() {
+			log.Dbg("RegisterName", object_name, name, method)
 			// 添加注册方法
 			self.addFunc(web.CommomRoute, object_name, name, method)
 		}
 	}
+}
+
+// 注册对象
+func (self *TModule) Register(obj interface{}) {
+	object_name := utils.DotCasedName(utils.Obj2Name(obj))
+	self.RegisterName(object_name, obj)
 }

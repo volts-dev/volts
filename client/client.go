@@ -136,9 +136,10 @@ func (client *TClient) send(ctx context.Context, call *Call) {
 
 		req.Payload = data
 	}
-
+	
+// 编码
 	data := req.Encode()
-
+// 返回编译过的数据
 	_, err := client.Conn.Write(data)
 	if err != nil {
 		client.mutex.Lock()

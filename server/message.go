@@ -68,8 +68,9 @@ type (
 		ServicePath   string //Route path
 		ServiceMethod string //Route name
 		Metadata      map[string]string
-		Payload       []byte
-		data          []byte
+		Payload       []byte // 主题内容
+
+		data []byte // 消息主体
 	}
 )
 

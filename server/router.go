@@ -1,7 +1,9 @@
 package server
 
 import (
+
 	//	"context"
+
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	log "vectors/logger"
 	"vectors/rpc/codec"
+
+	log "github.com/VectorsOrigin/logger"
 	//	"vectors/utils"
 	"vectors/web"
 )
@@ -22,6 +25,7 @@ var connected = "200 Connected to Go RPC"
 
 type (
 	TRouter struct {
+		sync.RWMutex
 		handlerMapMu sync.RWMutex
 		handlerMap   map[string]*TModule
 		readTimeout  time.Duration
@@ -32,27 +36,40 @@ type (
 
 		Server *TServer
 		tree   *web.TTree
-		lock   sync.RWMutex
 	}
 )
 
 func NewRouter() *TRouter {
-	router := &TRouter{}
+	tree := web.NewRouteTree()
+	tree.IgnoreCase = true
+	tree.DelimitChar = '.' // 修改为xxx.xxx
+
+	router := &TRouter{
+		tree:       tree,
+		handlerMap: make(map[string]*TModule),
+		objectPool: web.NewPool(),
+	}
 
 	router.msgPool.New = func() interface{} {
-		return func() interface{} {
-			header := Header([12]byte{})
-			header[0] = magicNumber
 
-			return &TMessage{
-				Header: &header,
-			}
+		header := Header([12]byte{})
+		header[0] = magicNumber
+
+		return &TMessage{
+			Header: &header,
 		}
+
 	}
+
 	return router
 }
 
-func (self *TRouter) RegisterModule(aMd web.IModule, build_path ...bool) {
+func (self *TRouter) init() {
+	self.tree.PrintTrees()
+
+}
+
+func (self *TRouter) RegisterModule(aMd IModule, build_path ...bool) {
 	if aMd == nil {
 		log.Warn("RegisterModule is nil")
 		return
@@ -68,11 +85,11 @@ func (self *TRouter) RegisterModule(aMd web.IModule, build_path ...bool) {
 
 	//self.Logger.("RegisterModules:", reflect.TypeOf(aMd))
 
-	self.lock.Lock() //<-锁
+	self.Lock() //<-锁
 	self.tree.Conbine(aMd.GetRoutes())
 	///self.Routes = append(self.Routes, lRoutes...) // 注意要加[省略号] !!!暂时有重复合并问题
 	//self.Routes = MergeMaps(self.Routes, m.Routes) // 合并两个Maps安全点
-	self.lock.Unlock() //<-
+	self.Unlock() //<-
 
 	/*
 		//#创建文件夹
@@ -117,8 +134,125 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	self.ServeTCP(conn)
 }
 
-func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, aActionValue reflect.Value) []reflect.Value {
-	return function.Call(args)
+func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, aActionValue reflect.Value) (reflect.Value, error) {
+	log.Dbg("call")
+	// Invoke the method, providing a new value for the reply.
+	returnValues := function.Call(args)
+	// The return value for the method is an error.
+	errInter := returnValues[0].Interface()
+	if errInter != nil {
+		return reflect.ValueOf(nil), errInter.(error)
+	}
+
+	return args[2], nil
+}
+
+// 执行控制器
+func (self *TRouter) handleRequest(req *TMessage) (*TMessage, error) {
+
+	var (
+		coder      codec.ICodec
+		args       []reflect.Value //handler参数
+		replyv     reflect.Value
+		lActionVal reflect.Value
+		//lActionTyp reflect.Type
+		parm reflect.Type
+		//		lIn           interface{}
+		//CtrlValidable bool
+		err error
+	)
+	serviceName := req.ServicePath
+	//methodName := req.ServiceMethod
+
+	// 克隆
+	resraw := self.msgPool.Get().(*TMessage)
+	res := req.Clone(resraw)
+	self.msgPool.Put(resraw)
+
+	res.SetMessageType(Response)
+	// 匹配路由树
+	log.Dbg(req.ServicePath + "." + req.ServiceMethod)
+	route, _ := self.tree.Match("HEAD", req.ServicePath+"."+req.ServiceMethod)
+	if route == nil {
+		err = errors.New("rpc: can't match route " + serviceName)
+		return handleError(res, err)
+	}
+
+	// 获取支持的序列模式
+	coder = codec.Codecs[req.SerializeType()]
+	if coder == nil {
+		err = fmt.Errorf("can not find codec for %d", req.SerializeType())
+		return handleError(res, err)
+	}
+
+	// 序列化
+	var argv = self.objectPool.Get(route.MainCtrl.ArgType)
+	err = coder.Decode(req.Payload, argv.Interface())
+	if err != nil {
+		return handleError(res, err)
+	}
+
+	replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
+	log.Dbg("ctrl", argv, replyv)
+	args = append(args, reflect.Zero(typeOfContext))
+	args = append(args, argv)
+	args = append(args, replyv)
+	for _, ctrl := range route.Ctrls {
+		log.Dbg("ctrl", ctrl, ctrl.FuncType.NumIn())
+		// 获取参数值
+		for i := 0; i < ctrl.FuncType.NumIn(); i++ {
+			parm = ctrl.FuncType.In(i) // 获得参数
+
+			//self.Logger.DbgLn("lParm%d:", i, lParm, lParm.Name())
+			switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
+			/*case reflect.TypeOf(lHandler): // if is a pointer of THandler
+			{
+				//args = append(args, reflect.ValueOf(lHandler)) // 这里将传递本函数先前创建的handle 给请求函数
+				args = append(args, lHandler.val) // 这里将传递本函数先前创建的handle 给请求函数
+			}
+			*/
+			default:
+				// 处理结构体指针
+				//Trace("lParm->default")
+				log.Dbg("default", parm.Kind(), parm.String())
+				if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
+					//lActionTyp = parm
+					log.Dbg("default")
+					lActionVal = self.objectPool.Get(parm)
+					if !lActionVal.IsValid() {
+						lActionVal = reflect.New(parm).Elem() //由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
+					}
+					args = append(args, lActionVal) //插入该类型空值
+					break
+				}
+
+				// STEP#:
+				//args = append(args, reflect.Zero(parm)) //插入该类型空值
+
+			}
+		}
+
+		replyv, err = self.safelyCall(ctrl.Func, args, lActionVal) //传递参数给函数.<<<
+		if err != nil {
+			log.Errf("", err.Error())
+		}
+		log.Dbg("adf", *replyv.Interface().(*Reply))
+		//s.Plugins.DoPreWriteResponse(newCtx, req)
+
+	}
+
+	if !req.IsOneway() {
+		data, err := coder.Encode(replyv.Interface())
+		//argsReplyPools.Put(mtype.ReplyType, replyv)
+		if err != nil {
+			return handleError(res, err)
+
+		}
+		log.Dbg("data", replyv.Interface(), string(data))
+		res.Payload = data
+	}
+
+	return res, nil
 }
 
 func (self *TRouter) routeHandler(conn net.Conn) {
@@ -156,103 +290,11 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 
 		//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
 
-		//res, err := s.handleRequest(newCtx, req)
-		//if err != nil {
-		//	log.Warnf("rpcx: failed to handle request: %v", err)
-		//}
-		// 执行控制器
-		var (
-			coder      codec.ICodec
-			args       []reflect.Value //handler参数
-			replyv     []reflect.Value
-			lActionVal reflect.Value
-			//lActionTyp reflect.Type
-			parm reflect.Type
-			//		lIn           interface{}
-			//CtrlValidable bool
-		)
-		serviceName := req.ServicePath
-		//methodName := req.ServiceMethod
-
-		// 克隆
-		resraw := self.msgPool.Get().(*TMessage)
-		res := req.Clone(resraw)
-		self.msgPool.Put(resraw)
-
-		res.SetMessageType(Response)
-		// 匹配路由树
-		route, _ := self.tree.Match("rpc", req.Path)
-		if route == nil {
-			err = errors.New("rpcx: can't match route " + serviceName)
-			res, err = handleError(res, err)
-			goto ret
-		}
-
-		// 获取支持的序列模式
-		coder = codec.Codecs[req.SerializeType()]
-		if coder == nil {
-			err = fmt.Errorf("can not find codec for %d", req.SerializeType())
-			res, err = handleError(res, err)
-			goto ret
-		}
-
-		// 序列化
-		//var argv = self.objectPool.Get(route.MainCtrl.ArgType)
-		err = coder.Decode(req.Payload, route.MainCtrl.ArgType)
+		res, err := self.handleRequest(req)
 		if err != nil {
-			res, err = handleError(res, err)
-			goto ret
+			log.Warnf("rpcx: failed to handle request: %v", err)
 		}
 
-		//replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
-		for _, ctrl := range route.Ctrls {
-			// 获取参数值
-			for i := 0; i < ctrl.FuncType.NumIn(); i++ {
-				parm = ctrl.FuncType.In(i) // 获得参数
-
-				//self.Logger.DbgLn("lParm%d:", i, lParm, lParm.Name())
-				switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
-				/*case reflect.TypeOf(lHandler): // if is a pointer of THandler
-				{
-					//args = append(args, reflect.ValueOf(lHandler)) // 这里将传递本函数先前创建的handle 给请求函数
-					args = append(args, lHandler.val) // 这里将传递本函数先前创建的handle 给请求函数
-				}
-				*/
-				default:
-					// 处理结构体指针
-					//Trace("lParm->default")
-					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
-						//lActionTyp = parm
-						lActionVal = self.objectPool.Get(parm)
-						if !lActionVal.IsValid() {
-							lActionVal = reflect.New(parm).Elem() //由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
-						}
-						args = append(args, lActionVal) //插入该类型空值
-						break
-					}
-
-					// STEP#:
-					args = append(args, reflect.Zero(parm)) //插入该类型空值
-
-				}
-			}
-
-			replyv = self.safelyCall(ctrl.Func, args, lActionVal) //传递参数给函数.<<<
-
-			//s.Plugins.DoPreWriteResponse(newCtx, req)
-
-		}
-		if !req.IsOneway() {
-			data, err := coder.Encode(replyv)
-			//argsReplyPools.Put(mtype.ReplyType, replyv)
-			if err != nil {
-				res, err = handleError(res, err)
-				goto ret
-			}
-			res.Payload = data
-		}
-
-	ret:
 		// 组织完成非单程 必须返回的
 		if !req.IsOneway() {
 			if len(resMetadata) > 0 { //copy meta in context to request

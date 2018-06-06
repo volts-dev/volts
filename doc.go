@@ -1,4 +1,4 @@
-package micro
+package rpc
 
 /*
 #模板全局默认变量
@@ -6,8 +6,8 @@ package micro
 	│
 	├─cmd 命令接口目录
 	├─transport 通讯接口目录
-	│  ├─grpc 
-	│  ├─http 
+	│  ├─grpc
+	│  ├─http
 	│  └─src 资源文件
 	│
 	├─deploy 部署文件目录

@@ -8,8 +8,7 @@ import (
 	///	"log"
 	"reflect"
 	//	"runtime"
-	"unicode"
-	"unicode/utf8"
+
 	rpcsrv "vectors/rpc/server/net"
 )
 
@@ -58,6 +57,7 @@ var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
 type (
 	// Server is rpc server that use TCP or UDP.
 	TServer struct {
+		TModule
 		Router *TRouter // 路由类
 		// BlockCrypt for kcp.BlockCrypt
 		options map[string]interface{}
@@ -67,23 +67,11 @@ type (
 	}
 )
 
-func isExported(name string) bool {
-	rune, _ := utf8.DecodeRuneInString(name)
-	return unicode.IsUpper(rune)
-}
-
-func isExportedOrBuiltinType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	// PkgPath will be non-empty even for an exported type,
-	// so we need to check the type name as well.
-	return isExported(t.Name()) || t.PkgPath() == ""
-}
-
 // NewServer returns a server.
 func NewServer(config ...FConfig) *TServer {
 	s := &TServer{
+		TModule: *NewModule(),
+		Router:  NewRouter(),
 		//Plugins: &pluginContainer{},
 		//options: make(map[string]interface{}),
 	}
@@ -95,9 +83,16 @@ func NewServer(config ...FConfig) *TServer {
 	return s
 }
 
+func (self *TServer) RegisterModule(obj IModule) {
+	self.Router.RegisterModule(obj)
+}
+
 // Serve starts and listens RPC requests.
 // It is blocked until receiving connectings from clients.
-func (s *TServer) Listen(network, address string) (err error) {
+func (self *TServer) Listen(network, address string) (err error) {
+	//注册主Route
+	self.Router.RegisterModule(self)
+	self.Router.init()
 
-	return rpcsrv.ListenAndServe(network, address, nil)
+	return rpcsrv.ListenAndServe(network, address, self.Router)
 }
