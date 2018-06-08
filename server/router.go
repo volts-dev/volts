@@ -236,7 +236,7 @@ func (self *TRouter) handleRequest(req *TMessage) (*TMessage, error) {
 		if err != nil {
 			log.Errf("", err.Error())
 		}
-		log.Dbg("adf", *replyv.Interface().(*Reply))
+		//log.Dbg("adf", *replyv.Interface().(*Reply))
 		//s.Plugins.DoPreWriteResponse(newCtx, req)
 
 	}

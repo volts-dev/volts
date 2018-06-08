@@ -16,7 +16,7 @@ var ErrServerClosed = errors.New("rpc: Server closed")
 
 type (
 
-	// A Handler responds to an HTTP request.
+	// A dispatcher responds to an HTTP request.
 	//
 	// ServeHTTP should write reply headers and data to the ResponseWriter
 	// and then return. Returning signals that the request is finished; it
@@ -37,19 +37,19 @@ type (
 	// that the effect of the panic was isolated to the active request.
 	// It recovers the panic, logs a stack trace to the server error log,
 	// and either closes the network connection or sends an HTTP/2
-	// RST_STREAM, depending on the HTTP protocol. To abort a handler so
+	// RST_STREAM, depending on the HTTP protocol. To abort a dispatcher so
 	// the client sees an interrupted response but the server doesn't log
 	// an error, panic with the value ErrAbortHandler.
-	Handler interface {
+	IDispatcher interface {
 		ServeTCP(net.Conn)
 		ServeHTTP(w http.ResponseWriter, req *http.Request)
 	}
 
 	// Server is rpc server that use TCP or UDP.
 	TServer struct {
-		Address      string
-		Network      string
-		Handler      Handler // handler to invoke, http.DefaultServeMux if nil
+		address      string
+		network      string
+		dispatcher   IDispatcher // dispatcher to invoke, http.DefaultServeMux if nil
 		ln           net.Listener
 		readTimeout  time.Duration
 		writeTimeout time.Duration
@@ -82,26 +82,22 @@ type (
 )
 
 // NewServer returns a new Server.
-func NewServer(network, address string, handler Handler) *TServer {
+func NewServer(network, address string, dispatcher IDispatcher) *TServer {
 	return &TServer{
-		Address: address,
-		Network: network,
-		Handler: handler}
+		address:    address,
+		network:    network,
+		dispatcher: dispatcher}
 }
 
-func ListenAndServe(network, address string, handler Handler) error {
-	s := &TServer{
-		Address: address,
-		Network: network,
-		Handler: handler}
+func ListenAndServe(network, address string, dispatcher IDispatcher) (*TServer, error) {
+	s := NewServer(network, address, dispatcher)
 
-	ln, err := s.makeListener(network, address)
+	err := s.ListenAndServe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return s.serve(ln)
-
+	return s, nil
 }
 
 // ListenAndServe listens on the TCP network address srv.Addr and then
@@ -110,7 +106,7 @@ func ListenAndServe(network, address string, handler Handler) error {
 // If srv.Addr is blank, ":http" is used.
 // ListenAndServe always returns a non-nil error.
 func (self *TServer) ListenAndServe() error {
-	ln, err := self.makeListener(self.Network, self.Address)
+	ln, err := self.makeListener(self.network, self.address)
 	if err != nil {
 		return err
 	}
@@ -118,8 +114,12 @@ func (self *TServer) ListenAndServe() error {
 	return self.serve(ln)
 }
 
+func (self *TServer) Address() net.Addr {
+	return self.ln.Addr()
+}
+
 func (s *TServer) serve(ln net.Listener) error {
-	if s.Network == "http" {
+	if s.network == "http" {
 		// http 协议传输
 		// serveByHTTP serves by HTTP.
 		// if rpcPath is an empty string, use share.DefaultRPCPath.
@@ -133,7 +133,7 @@ func (s *TServer) serve(ln net.Listener) error {
 		//			rpcPath = share.DefaultRPCPath
 		//		}
 		//http.Handle("", s)
-		srv := &http.Server{Handler: s.Handler}
+		srv := &http.Server{Handler: s.dispatcher}
 		/*
 			s.mu.Lock()
 			if s.activeConn == nil {
@@ -292,7 +292,7 @@ func (s *TServer) serveConn(conn net.Conn) {
 				continue
 			}*/
 
-		s.Handler.ServeTCP(conn)
+		s.dispatcher.ServeTCP(conn)
 		/*
 			go func() {
 				if req.IsHeartbeat() {

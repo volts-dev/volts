@@ -1,6 +1,8 @@
 package client
 
 import (
+	"time"
+	"bufio"
 	"net"
 	"sync"
 	"vectors/rpc"
@@ -11,17 +13,68 @@ type (
 	TClient struct {
 		Conn  net.Conn
 		mutex sync.Mutex // protects following
+	option Option
 
 		msgPool  sync.Pool
 		pending  map[uint64]*TCall
 		closing  bool // user has called Close
 		shutdown bool // server has told us to stop
+		
+			r    *bufio.Reader
 	}
 )
-
+const (
+	// ReaderBuffsize is used for bufio reader.
+	ReaderBuffsize = 16 * 1024
+	// WriterBuffsize is used for bufio writer.
+	WriterBuffsize = 16 * 1024
+)
 func NewClient() *TClient {
 	return &TClient{}
 }
+
+// Connect connects the server via specified network.
+func (c *TClient) Connect(network, address string) error {
+	var conn net.Conn
+	var err error
+
+	switch network {
+	case "http":
+		//conn, err = newDirectHTTPConn(c, network, address)
+	case "kcp":
+		//conn, err = newDirectKCPConn(c, network, address)
+	case "quic":
+		//conn, err = newDirectQuicConn(c, network, address)
+	case "unix":
+		//conn, err = newDirectConn(c, network, address)
+	default:
+		conn, err = newDirectConn(c, network, address)
+	}
+
+	if err == nil && conn != nil {
+		if c.option.ReadTimeout != 0 {
+			conn.SetReadDeadline(time.Now().Add(c.option.ReadTimeout))
+		}
+		if c.option.WriteTimeout != 0 {
+			conn.SetWriteDeadline(time.Now().Add(c.option.WriteTimeout))
+		}
+
+		c.Conn = conn
+		c.r = bufio.NewReaderSize(conn, ReaderBuffsize)
+		//c.w = bufio.NewWriterSize(conn, WriterBuffsize)
+
+		// start reading and writing since connected
+		go c.input()
+
+		if c.option.Heartbeat && c.option.HeartbeatInterval > 0 {
+			go c.heartbeat()
+		}
+
+	}
+
+	return err
+}
+
 
 // Close calls the underlying codec's Close method. If the connection is already
 // shutting down, ErrShutdown is returned.

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	//	"errors"
 	//	"fmt"
 	///	"log"
@@ -58,7 +59,8 @@ type (
 	// Server is rpc server that use TCP or UDP.
 	TServer struct {
 		TModule
-		Router *TRouter // 路由类
+		Listener *rpcsrv.TServer
+		Router   *TRouter // 路由类
 		// BlockCrypt for kcp.BlockCrypt
 		options map[string]interface{}
 
@@ -94,5 +96,16 @@ func (self *TServer) Listen(network, address string) (err error) {
 	self.Router.RegisterModule(self)
 	self.Router.init()
 
-	return rpcsrv.ListenAndServe(network, address, self.Router)
+	self.Listener, err = rpcsrv.ListenAndServe(network, address, self.Router)
+
+	return err
+}
+
+// Address returns listened address.
+func (self *TServer) Address() net.Addr {
+
+	if self.Listener == nil {
+		return nil
+	}
+	return self.Listener.Address()
 }
