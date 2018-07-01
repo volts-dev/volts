@@ -14,7 +14,7 @@ type (
 		GetServices() []*KVPair
 		WatchService() chan []*KVPair
 		RemoveWatcher(ch chan []*KVPair)
-		Clone(servicePath string) ServiceDiscovery
+		Clone(servicePath string) IDiscovery
 		Close()
 	}
 )

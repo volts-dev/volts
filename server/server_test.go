@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 	"vectors/rpc/codec"
+	"vectors/rpc/message"
 
 	"github.com/VectorsOrigin/logger"
 )
@@ -33,14 +34,14 @@ func (t Arith) Mul(ctx context.Context, args *Args, reply *Reply) error {
 func Test_HandleRequest(t *testing.T) {
 	//use jsoncodec
 	server := NewServer()
-	req := server.Router.msgPool.Get().(*TMessage) // request message
+	req := server.Router.msgPool.Get().(*message.TMessage) // request message
 	//req := protocol.NewMessage()
 	req.SetVersion(0)
-	req.SetMessageType(Request)
+	req.SetMessageType(message.Request)
 	req.SetHeartbeat(false)
 	req.SetOneway(false)
-	req.SetCompressType(None)
-	req.SetMessageStatusType(Normal)
+0	req.SetCompressType(message.None)
+	req.SetMessageStatusType(message.Normal)
 	req.SetSerializeType(codec.JSON)
 	req.SetSeq(1234567890)
 

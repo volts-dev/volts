@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"time"
 	"vectors/rpc/codec"
+	"vectors/rpc/message"
 )
 
 // Option contains all options for creating clients.
@@ -35,7 +36,7 @@ type Option struct {
 	///Breaker Breaker
 
 	SerializeType codec.SerializeType
-	///CompressType  codec.CompressType
+	CompressType  message.CompressType
 
 	Heartbeat         bool
 	HeartbeatInterval time.Duration

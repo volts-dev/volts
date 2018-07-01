@@ -11,6 +11,7 @@ import (
 	//	"runtime"
 
 	rpcsrv "vectors/rpc/server/net"
+	//log "github.com/VectorsOrigin/logger"
 )
 
 const (
@@ -96,16 +97,24 @@ func (self *TServer) Listen(network, address string) (err error) {
 	self.Router.RegisterModule(self)
 	self.Router.init()
 
-	self.Listener, err = rpcsrv.ListenAndServe(network, address, self.Router)
-
-	return err
+	//self.Listener, err = rpcsrv.ListenAndServe(network, address, self.Router)
+	//if err != nil {
+	//	log.Panic("qwerqe", err.Error())
+	//}
+	self.Listener = rpcsrv.NewServer(network, address, self.Router)
+	return self.Listener.ListenAndServe()
 }
 
 // Address returns listened address.
 func (self *TServer) Address() net.Addr {
-
 	if self.Listener == nil {
 		return nil
 	}
+
 	return self.Listener.Address()
+}
+
+// 关闭服务器
+func (self *TServer) Close() error {
+	return nil
 }

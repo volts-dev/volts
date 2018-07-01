@@ -1,5 +1,9 @@
 package client
 
+import (
+	log "github.com/VectorsOrigin/logger"
+)
+
 type (
 	// Call represents an active RPC.
 	TCall struct {
@@ -14,3 +18,13 @@ type (
 		Raw           bool        // raw message or not
 	}
 )
+
+func (call *TCall) done() {
+	select {
+	case call.Done <- call:
+		// ok
+	default:
+		log.Dbg("rpc: discarding Call reply due to insufficient Done chan capacity")
+
+	}
+}

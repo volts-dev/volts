@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"vectors/rpc/codec"
+	"vectors/rpc/message"
 
 	log "github.com/VectorsOrigin/logger"
 	//	"vectors/utils"
@@ -52,10 +53,10 @@ func NewRouter() *TRouter {
 
 	router.msgPool.New = func() interface{} {
 
-		header := Header([12]byte{})
-		header[0] = magicNumber
+		header := message.Header([12]byte{})
+		header[0] = message.MagicNumber
 
-		return &TMessage{
+		return &message.TMessage{
 			Header: &header,
 		}
 
@@ -148,7 +149,7 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, aA
 }
 
 // 执行控制器
-func (self *TRouter) handleRequest(req *TMessage) (*TMessage, error) {
+func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, error) {
 
 	var (
 		coder      codec.ICodec
@@ -165,11 +166,11 @@ func (self *TRouter) handleRequest(req *TMessage) (*TMessage, error) {
 	//methodName := req.ServiceMethod
 
 	// 克隆
-	resraw := self.msgPool.Get().(*TMessage)
+	resraw := self.msgPool.Get().(*message.TMessage)
 	res := req.Clone(resraw)
 	self.msgPool.Put(resraw)
 
-	res.SetMessageType(Response)
+	res.SetMessageType(message.Response)
 	// 匹配路由树
 	log.Dbg(req.ServicePath + "." + req.ServiceMethod)
 	route, _ := self.tree.Match("HEAD", req.ServicePath+"."+req.ServiceMethod)
@@ -256,7 +257,7 @@ func (self *TRouter) handleRequest(req *TMessage) (*TMessage, error) {
 }
 
 func (self *TRouter) routeHandler(conn net.Conn) {
-	req := self.msgPool.Get().(*TMessage) // request message
+	req := self.msgPool.Get().(*message.TMessage) // request message
 
 	// 获得请求参数
 	err := req.Decode(conn)
@@ -278,7 +279,7 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 	go func() {
 		// 心跳包 直接返回
 		if req.IsHeartbeat() {
-			req.SetMessageType(Response)
+			req.SetMessageType(message.Response)
 			data := req.Encode()
 			conn.Write(data)
 			return
@@ -320,8 +321,8 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 	}()
 }
 
-func handleError(res *TMessage, err error) (*TMessage, error) {
-	res.SetMessageStatusType(Error)
+func handleError(res *message.TMessage, err error) (*message.TMessage, error) {
+	res.SetMessageStatusType(message.Error)
 	if res.Metadata == nil {
 		res.Metadata = make(map[string]string)
 	}

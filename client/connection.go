@@ -3,8 +3,10 @@ package client
 import (
 	"crypto/tls"
 	"net"
-)
+	"time"
 
+	log "github.com/VectorsOrigin/logger"
+)
 
 func newDirectConn(c *TClient, network, address string) (net.Conn, error) {
 	var conn net.Conn

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
-	log "vectors/logger"
+
+	log "github.com/VectorsOrigin/logger"
 )
 
 // 替代原来错误提示
@@ -85,7 +87,7 @@ type (
 func NewServer(network, address string, dispatcher IDispatcher) *TServer {
 	return &TServer{
 		address:    address,
-		network:    network,
+		network:    strings.ToLower(network),
 		dispatcher: dispatcher}
 }
 
@@ -108,9 +110,12 @@ func ListenAndServe(network, address string, dispatcher IDispatcher) (*TServer, 
 func (self *TServer) ListenAndServe() error {
 	ln, err := self.makeListener(self.network, self.address)
 	if err != nil {
+		log.Dbg("asdfad", err.Error())
 		return err
 	}
 
+	self.ln = ln
+	log.Dbg("asdfad", ln.Addr(), err, self.ln)
 	return self.serve(ln)
 }
 

@@ -1,4 +1,4 @@
-package server
+package message
 
 import (
 	"bytes"
@@ -7,7 +7,8 @@ import (
 	"io"
 	"sync"
 	"vectors/rpc/codec"
-	"vectors/utils"
+
+	"github.com/VectorsOrigin/utils"
 )
 
 var (
@@ -30,7 +31,7 @@ var (
 )
 
 const (
-	magicNumber byte = 0x08
+	MagicNumber byte = 0x08
 	// ServiceError contains error info of service invocation
 	ServiceError = "__rpcx_error__"
 
@@ -77,7 +78,7 @@ type (
 // NewMessage creates an empty message.
 func NewMessage() *TMessage {
 	header := Header([12]byte{})
-	header[0] = magicNumber
+	header[0] = MagicNumber
 
 	return &TMessage{
 		Header: &header,
@@ -86,7 +87,7 @@ func NewMessage() *TMessage {
 
 // CheckMagicNumber checks whether header starts rpcx magic number.
 func (h Header) CheckMagicNumber() bool {
-	return h[0] == magicNumber
+	return h[0] == MagicNumber
 }
 
 // Version returns version of rpcx protocol.
