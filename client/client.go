@@ -106,14 +106,17 @@ func convertRes2Raw(res *message.TMessage) (map[string]string, []byte, error) {
 	m[XMeta] = urlencode(res.Metadata)
 	m[XSerializeType] = strconv.Itoa(int(res.SerializeType()))
 	m[XMessageID] = strconv.FormatUint(res.Seq(), 10)
-	m[XServicePath] = res.ServicePath
-	m[XServiceMethod] = res.ServiceMethod
+	// TODO
+	m[XServicePath] = res.ServicePath     // 废弃
+	m[XServiceMethod] = res.ServiceMethod // 废弃
 
 	return m, res.Payload, nil
 }
 
-func NewClient() *TClient {
-	cli := &TClient{}
+func NewClient(opt Option) *TClient {
+	cli := &TClient{
+		option: opt,
+	}
 
 	cli.msgPool.New = func() interface{} {
 		header := message.Header([12]byte{})
@@ -316,6 +319,7 @@ func (client *TClient) Call(serviceMethod string, args interface{}, reply interf
 func (client *TClient) Go(serviceMethod string, args interface{}, reply interface{}, done chan *TCall) *TCall {
 	call := new(TCall)
 	call.ServiceMethod = serviceMethod
+	call.Path = serviceMethod
 	call.Args = args
 	call.Reply = reply
 	if done == nil {
@@ -335,8 +339,8 @@ func (client *TClient) Go(serviceMethod string, args interface{}, reply interfac
 	return call
 }
 
+// 发送消息
 func (client *TClient) send(ctx context.Context, call *TCall) {
-
 	// Register this call.
 	client.mutex.Lock()
 	if client.shutdown || client.closing {
@@ -347,6 +351,7 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 	}
 
 	// 获得解码器
+	log.Dbg("codec", client.option.SerializeType)
 	codec := codec.Codecs[client.option.SerializeType]
 	if codec == nil {
 		call.Error = rpc.ErrUnsupportedCodec
@@ -373,7 +378,8 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 	req.SetMessageType(message.Request)
 	req.SetSeq(seq)
 	// heartbeat
-	if call.ServicePath == "" && call.ServiceMethod == "" {
+	//if call.ServicePath == "" && call.ServiceMethod == "" {
+	if call.Path == "" {
 		req.SetHeartbeat(true)
 	} else {
 		req.SetSerializeType(client.option.SerializeType)
@@ -381,11 +387,13 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 			req.Metadata = call.Metadata
 		}
 
-		req.ServicePath = call.ServicePath
-		req.ServiceMethod = call.ServiceMethod
+		req.ServicePath = call.ServicePath     // 废弃
+		req.ServiceMethod = call.ServiceMethod // 废弃
+		req.Path = call.Path
 
 		data, err := codec.Encode(call.Args)
 		if err != nil {
+			//log.Dbg("odec.Encode(call.Args)", err.Error())
 			call.Error = err
 			call.done()
 			return

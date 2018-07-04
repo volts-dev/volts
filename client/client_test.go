@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	"fmt"
+	//"fmt"
 	"testing"
 	"time"
 
@@ -43,11 +43,9 @@ func TestClient_IT(t *testing.T) {
 	defer s.Close()
 	time.Sleep(500 * time.Millisecond)
 
-	fmt.Println("111", s.Address())
 	addr := s.Address().String()
 
-	client := NewClient()
-
+	client := NewClient(DefaultOption)
 	err := client.Connect("tcp", addr)
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
@@ -70,7 +68,7 @@ func TestClient_IT(t *testing.T) {
 	}
 
 	err = client.Call("Arith.Mul", args, reply)
-	if err == nil {
+	if err != nil {
 		t.Fatal("expect an error but got nil")
 	}
 	/*

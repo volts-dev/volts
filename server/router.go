@@ -172,8 +172,9 @@ func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, er
 
 	res.SetMessageType(message.Response)
 	// 匹配路由树
-	log.Dbg(req.ServicePath + "." + req.ServiceMethod)
-	route, _ := self.tree.Match("HEAD", req.ServicePath+"."+req.ServiceMethod)
+	log.Dbg("handleRequest", req.Path, req.ServicePath+"."+req.ServiceMethod)
+	//route, _ := self.tree.Match("HEAD", req.ServicePath+"."+req.ServiceMethod)
+	route, _ := self.tree.Match("HEAD", req.Path)
 	if route == nil {
 		err = errors.New("rpc: can't match route " + serviceName)
 		return handleError(res, err)
@@ -263,11 +264,11 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 	err := req.Decode(conn)
 	if err != nil {
 		if err == io.EOF {
-			log.Info("client has closed this connection: %s", conn.RemoteAddr().String())
+			log.Infof("client has closed this connection: %s", conn.RemoteAddr().String())
 		} else if strings.Contains(err.Error(), "use of closed network connection") {
-			log.Info("rpc: connection %s is closed", conn.RemoteAddr().String())
+			log.Infof("rpc: connection %s is closed", conn.RemoteAddr().String())
 		} else {
-			log.Warn("rpc: failed to read request: %v", err)
+			log.Warnf("rpc: failed to read request: %v", err)
 		}
 		return
 	}

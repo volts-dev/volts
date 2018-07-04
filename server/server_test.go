@@ -40,14 +40,14 @@ func Test_HandleRequest(t *testing.T) {
 	req.SetMessageType(message.Request)
 	req.SetHeartbeat(false)
 	req.SetOneway(false)
-0	req.SetCompressType(message.None)
+	req.SetCompressType(message.None)
 	req.SetMessageStatusType(message.Normal)
 	req.SetSerializeType(codec.JSON)
 	req.SetSeq(1234567890)
 
-	req.ServicePath = "Arith"
-	req.ServiceMethod = "Mul"
-
+	//req.ServicePath = "Arith"
+	//req.ServiceMethod = "Mul"
+	req.Path = "Arith.Mul"
 	argv := &Args{
 		A: 10,
 		B: 20,

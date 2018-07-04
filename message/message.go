@@ -192,13 +192,14 @@ func (m TMessage) Clone(msg *TMessage) *TMessage {
 func (m TMessage) Encode() []byte {
 	meta := encodeMetadata(m.Metadata)
 
+	path_len := len(m.Path)
 	spL := len(m.ServicePath)
 	smL := len(m.ServiceMethod)
 
-	totalL := (4 + spL) + (4 + smL) + (4 + len(meta)) + (4 + len(m.Payload))
+	totalL := (4 + path_len) + (4 + spL) + (4 + smL) + (4 + len(meta)) + (4 + len(m.Payload))
 
 	// header + dataLen + spLen + sp + smLen + sm + metaL + meta + payloadLen + payload
-	metaStart := 12 + 4 + (4 + spL) + (4 + smL)
+	metaStart := 12 + 4 + (4 + path_len) + (4 + spL) + (4 + smL)
 
 	payLoadStart := metaStart + (4 + len(meta))
 	l := 12 + 4 + totalL
@@ -207,13 +208,20 @@ func (m TMessage) Encode() []byte {
 	copy(data, m.Header[:])
 
 	//totalLen
+
 	binary.BigEndian.PutUint32(data[12:16], uint32(totalL))
 
-	binary.BigEndian.PutUint32(data[16:20], uint32(spL))
-	copy(data[20:20+spL], utils.StringToSliceByte(m.ServicePath))
+	binary.BigEndian.PutUint32(data[16:20], uint32(path_len))
+	copy(data[20:20+path_len], utils.StringToSliceByte(m.Path))
 
-	binary.BigEndian.PutUint32(data[20+spL:24+spL], uint32(smL))
-	copy(data[24+spL:metaStart], utils.StringToSliceByte(m.ServiceMethod))
+	bgn := 20 + path_len
+	end := 24 + path_len
+	binary.BigEndian.PutUint32(data[bgn:end], uint32(spL))
+	copy(data[end:end+spL], utils.StringToSliceByte(m.ServicePath))
+
+	bgn = end
+	binary.BigEndian.PutUint32(data[bgn:bgn+4], uint32(smL))
+	copy(data[bgn+4:metaStart], utils.StringToSliceByte(m.ServiceMethod))
 
 	binary.BigEndian.PutUint32(data[metaStart:metaStart+4], uint32(len(meta)))
 	copy(data[metaStart+4:], meta)
@@ -368,10 +376,17 @@ func (m *TMessage) Decode(r io.Reader) error {
 	m.data = data
 
 	n := 0
-	// parse servicePath
+	// parse Path
 	l = binary.BigEndian.Uint32(data[n:4])
 	n = n + 4
 	nEnd := n + int(l)
+	m.Path = utils.SliceByteToString(data[n:nEnd])
+	n = nEnd
+
+	// parse servicePath
+	l = binary.BigEndian.Uint32(data[n : n+4])
+	n = n + 4
+	nEnd = n + int(l)
 	m.ServicePath = utils.SliceByteToString(data[n:nEnd])
 	n = nEnd
 

@@ -41,3 +41,13 @@ type Option struct {
 	Heartbeat         bool
 	HeartbeatInterval time.Duration
 }
+
+// DefaultOption is a common option configuration for client.
+var DefaultOption = Option{
+	Retries: 3,
+	//RPCPath:        share.DefaultRPCPath,
+	ConnectTimeout: 10 * time.Second,
+	SerializeType:  codec.JSON,
+	CompressType:   message.None,
+	BackupLatency:  10 * time.Millisecond,
+}

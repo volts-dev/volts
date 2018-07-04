@@ -7,8 +7,9 @@ import (
 type (
 	// Call represents an active RPC.
 	TCall struct {
-		ServicePath   string            // The name of the service and method to call.
-		ServiceMethod string            // The name of the service and method to call.
+		ServicePath   string // The name of the service and method to call.
+		ServiceMethod string // The name of the service and method to call.
+		Path          string
 		Metadata      map[string]string //metadata
 		ResMetadata   map[string]string
 		Args          interface{} // The argument to the function (*struct).
