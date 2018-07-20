@@ -110,12 +110,10 @@ func ListenAndServe(network, address string, dispatcher IDispatcher) (*TServer, 
 func (self *TServer) ListenAndServe() error {
 	ln, err := self.makeListener(self.network, self.address)
 	if err != nil {
-		log.Dbg("asdfad", err.Error())
 		return err
 	}
 
 	self.ln = ln
-	log.Dbg("asdfad", ln.Addr(), err, self.ln)
 	return self.serve(ln)
 }
 
@@ -253,93 +251,93 @@ func (s *TServer) serveConn(conn net.Conn) {
 	//r := bufio.NewReaderSize(conn, ReaderBuffsize)
 	//w := bufio.NewWriterSize(conn, WriterBuffsize)
 
-	for {
-		// 超时设定
-		t0 := time.Now()
-		if s.readTimeout != 0 {
-			conn.SetReadDeadline(t0.Add(s.readTimeout))
-		}
+	//for {
+	// 超时设定
+	t0 := time.Now()
+	if s.readTimeout != 0 {
+		conn.SetReadDeadline(t0.Add(s.readTimeout))
+	}
 
-		/*  ctx
-		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-		req, err := s.readRequest(ctx, r)
+	/*  ctx
+	ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
+	req, err := s.readRequest(ctx, r)
+	if err != nil {
+		if err == io.EOF {
+			log.Infof("client has closed this connection: %s", conn.RemoteAddr().String())
+		} else if strings.Contains(err.Error(), "use of closed network connection") {
+			log.Infof("rpcx: connection %s is closed", conn.RemoteAddr().String())
+		} else {
+			log.Warnf("rpcx: failed to read request: %v", err)
+		}
+		return
+	}
+	*/
+	if s.writeTimeout != 0 {
+		conn.SetWriteDeadline(t0.Add(s.writeTimeout))
+	}
+
+	/*
+		ctx = context.WithValue(ctx, StartRequestContextKey, time.Now().UnixNano())
+		err = s.auth(ctx, req)
 		if err != nil {
-			if err == io.EOF {
-				log.Infof("client has closed this connection: %s", conn.RemoteAddr().String())
-			} else if strings.Contains(err.Error(), "use of closed network connection") {
-				log.Infof("rpcx: connection %s is closed", conn.RemoteAddr().String())
-			} else {
-				log.Warnf("rpcx: failed to read request: %v", err)
+			s.Plugins.DoPreWriteResponse(ctx, req)
+			if !req.IsOneway() {
+				res := req.Clone()
+				res.SetMessageType(protocol.Response)
+				handleError(res, err)
+				data := res.Encode()
+				conn.Write(data)
+				s.Plugins.DoPostWriteResponse(ctx, req, res, err)
+				protocol.FreeMsg(res)
 			}
-			return
-		}
-		*/
-		if s.writeTimeout != 0 {
-			conn.SetWriteDeadline(t0.Add(s.writeTimeout))
-		}
 
-		/*
-			ctx = context.WithValue(ctx, StartRequestContextKey, time.Now().UnixNano())
-			err = s.auth(ctx, req)
+			protocol.FreeMsg(req)
+			continue
+		}*/
+
+	s.dispatcher.ServeTCP(conn)
+	/*
+		go func() {
+			if req.IsHeartbeat() {
+				req.SetMessageType(protocol.Response)
+				data := req.Encode()
+				conn.Write(data)
+				return
+			}
+
+			resMetadata := make(map[string]string)
+			newCtx := context.WithValue(context.WithValue(ctx, share.ReqMetaDataKey, req.Metadata),
+				share.ResMetaDataKey, resMetadata)
+
+			res, err := s.handleRequest(newCtx, req)
+
 			if err != nil {
-				s.Plugins.DoPreWriteResponse(ctx, req)
-				if !req.IsOneway() {
-					res := req.Clone()
-					res.SetMessageType(protocol.Response)
-					handleError(res, err)
-					data := res.Encode()
-					conn.Write(data)
-					s.Plugins.DoPostWriteResponse(ctx, req, res, err)
-					protocol.FreeMsg(res)
-				}
+				log.Warnf("rpcx: failed to handle request: %v", err)
+			}
 
-				protocol.FreeMsg(req)
-				continue
-			}*/
-
-		s.dispatcher.ServeTCP(conn)
-		/*
-			go func() {
-				if req.IsHeartbeat() {
-					req.SetMessageType(protocol.Response)
-					data := req.Encode()
-					conn.Write(data)
-					return
-				}
-
-				resMetadata := make(map[string]string)
-				newCtx := context.WithValue(context.WithValue(ctx, share.ReqMetaDataKey, req.Metadata),
-					share.ResMetaDataKey, resMetadata)
-
-				res, err := s.handleRequest(newCtx, req)
-
-				if err != nil {
-					log.Warnf("rpcx: failed to handle request: %v", err)
-				}
-
-				//s.Plugins.DoPreWriteResponse(newCtx, req)
-				if !req.IsOneway() {
-					if len(resMetadata) > 0 { //copy meta in context to request
-						meta := res.Metadata
-						if meta == nil {
-							res.Metadata = resMetadata
-						} else {
-							for k, v := range resMetadata {
-								meta[k] = v
-							}
+			//s.Plugins.DoPreWriteResponse(newCtx, req)
+			if !req.IsOneway() {
+				if len(resMetadata) > 0 { //copy meta in context to request
+					meta := res.Metadata
+					if meta == nil {
+						res.Metadata = resMetadata
+					} else {
+						for k, v := range resMetadata {
+							meta[k] = v
 						}
 					}
-
-					data := res.Encode()
-					conn.Write(data)
-					//res.WriteTo(conn)
 				}
-				//s.Plugins.DoPostWriteResponse(newCtx, req, res, err)
 
-				//protocol.FreeMsg(req)
-				//protocol.FreeMsg(res)
-			}()*/
-	}
+				data := res.Encode()
+				conn.Write(data)
+				//res.WriteTo(conn)
+			}
+			//s.Plugins.DoPostWriteResponse(newCtx, req, res, err)
+
+			//protocol.FreeMsg(req)
+			//protocol.FreeMsg(res)
+		}()*/
+	//	}
 }
 
 // block can be nil if the caller wishes to skip encryption in kcp.

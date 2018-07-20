@@ -8,6 +8,8 @@ import (
 	"sync"
 	"vectors/rpc/codec"
 
+	log "github.com/VectorsOrigin/logger"
+
 	"github.com/VectorsOrigin/utils"
 )
 
@@ -349,8 +351,9 @@ func (m *TMessage) Decode(r io.Reader) error {
 	// validate rest length for each step?
 
 	// parse header
-	_, err := io.ReadFull(r, m.Header[:])
+	cnt, err := io.ReadFull(r, m.Header[:])
 	if err != nil {
+		log.Dbg("TMessage.Decode", cnt, err.Error())
 		return err
 	}
 
@@ -358,6 +361,7 @@ func (m *TMessage) Decode(r io.Reader) error {
 	lenData := poolUint32Data.Get().(*[]byte)
 	_, err = io.ReadFull(r, *lenData)
 	if err != nil {
+		log.Dbg("Decode2", err.Error())
 		poolUint32Data.Put(lenData)
 		return err
 	}
@@ -371,6 +375,7 @@ func (m *TMessage) Decode(r io.Reader) error {
 	data := make([]byte, int(l))
 	_, err = io.ReadFull(r, data)
 	if err != nil {
+		log.Dbg("Decode3", err.Error())
 		return err
 	}
 	m.data = data
@@ -405,6 +410,7 @@ func (m *TMessage) Decode(r io.Reader) error {
 	if l > 0 {
 		m.Metadata, err = decodeMetadata(l, data[n:nEnd])
 		if err != nil {
+			log.Dbg("Decode4", err.Error())
 			return err
 		}
 	}

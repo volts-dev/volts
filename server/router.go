@@ -186,14 +186,14 @@ func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, er
 		err = fmt.Errorf("can not find codec for %d", req.SerializeType())
 		return handleError(res, err)
 	}
-
+	log.Dbg("handleRequest", req.SerializeType())
 	// 序列化
 	var argv = self.objectPool.Get(route.MainCtrl.ArgType)
 	err = coder.Decode(req.Payload, argv.Interface())
 	if err != nil {
 		return handleError(res, err)
 	}
-
+	log.Dbg("handleRequest", argv)
 	replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
 	log.Dbg("ctrl", argv, replyv)
 	args = append(args, reflect.Zero(typeOfContext))
@@ -242,7 +242,7 @@ func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, er
 		//s.Plugins.DoPreWriteResponse(newCtx, req)
 
 	}
-
+	log.Dbg("handleRequest", req.IsOneway())
 	if !req.IsOneway() {
 		data, err := coder.Encode(replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
@@ -299,6 +299,7 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 
 		// 组织完成非单程 必须返回的
 		if !req.IsOneway() {
+			log.Dbg("!IsOneway")
 			if len(resMetadata) > 0 { //copy meta in context to request
 				meta := res.Metadata
 				if meta == nil {
@@ -309,9 +310,16 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 					}
 				}
 			}
-
+			log.Dbg("!IsOneway", res)
 			data := res.Encode()
-			conn.Write(data)
+			log.Dbg("!IsOneway", string(res.Payload), string(data), res.Metadata)
+			//time.Sleep(5 * time.Second)
+			log.Dbg("aa", conn.RemoteAddr())
+			_, err = conn.Write(data)
+			if err != nil {
+				log.Dbg(err.Error())
+			}
+
 			//res.WriteTo(conn)
 		}
 

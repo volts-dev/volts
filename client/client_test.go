@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	//"fmt"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,6 +24,7 @@ type (
 
 func (t *Arith) Mul(ctx context.Context, args *Args, reply *Reply) error {
 	reply.C = args.A * args.B
+	fmt.Println("Mul", reply.C)
 	return nil
 }
 
@@ -66,12 +67,14 @@ func TestClient_IT(t *testing.T) {
 	if reply.C != 200 {
 		t.Fatalf("expect 200 but got %d", reply.C)
 	}
-
-	err = client.Call("Arith.Mul", args, reply)
-	if err != nil {
-		t.Fatal("expect an error but got nil")
-	}
 	/*
+		err = client.Call("Arith.Mul", args, reply)
+		if err != nil {
+			t.Fatal("expect an error but got nil")
+		}
+	*/
+	/*
+
 		client.option.SerializeType = protocol.MsgPack
 		reply = &Reply{}
 		err = client.Call(context.Background(), "Arith", "Mul", args, reply)
