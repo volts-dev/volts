@@ -1,15 +1,14 @@
-package message
+package protocol
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
-	"sync"
 	"vectors/rpc/codec"
 
 	log "github.com/VectorsOrigin/logger"
-
 	"github.com/VectorsOrigin/utils"
 )
 
@@ -23,13 +22,6 @@ var (
 	ErrMetaKVMissing = errors.New("wrong metadata lines. some keys or values are missing")
 	// ErrMessageToLong message is too long
 	ErrMessageToLong = errors.New("message is too long")
-
-	poolUint32Data = sync.Pool{
-		New: func() interface{} {
-			data := make([]byte, 4)
-			return &data
-		},
-	}
 )
 
 const (
@@ -183,7 +175,8 @@ func (h *Header) SetSeq(seq uint64) {
 
 // Clone clones from an message.
 func (m TMessage) Clone(msg *TMessage) *TMessage {
-	header := *m.Header
+	var header Header
+	copy(header[:], m.Header[:])
 	msg.Header = &header
 	msg.ServicePath = m.ServicePath
 	msg.ServiceMethod = m.ServiceMethod
@@ -348,12 +341,30 @@ func Read(r io.Reader) (*TMessage, error) {
 
 // Decode decodes a message from reader.
 func (m *TMessage) Decode(r io.Reader) error {
+	var err error
 	// validate rest length for each step?
+	//log.Dbg("TMessage.Decode", m.Header[:])
+
+	//buf := make([]byte, 1)
+	/*	_, err = r.Read(m.Header[:1])
+		if err != nil {
+			log.Dbg("TMessage.Decode", m.Header[:], err.Error())
+			return err
+		}*/
 
 	// parse header
-	cnt, err := io.ReadFull(r, m.Header[:])
+	_, err = io.ReadFull(r, m.Header[:1])
 	if err != nil {
-		log.Dbg("TMessage.Decode", cnt, err.Error())
+		return err
+	}
+
+	//log.Dbg("aafa", m.Header[:1], err)
+	if !m.Header.CheckMagicNumber() {
+		return fmt.Errorf("wrong magic number: %v", m.Header[0])
+	}
+
+	_, err = io.ReadFull(r, m.Header[1:])
+	if err != nil {
 		return err
 	}
 
@@ -361,7 +372,6 @@ func (m *TMessage) Decode(r io.Reader) error {
 	lenData := poolUint32Data.Get().(*[]byte)
 	_, err = io.ReadFull(r, *lenData)
 	if err != nil {
-		log.Dbg("Decode2", err.Error())
 		poolUint32Data.Put(lenData)
 		return err
 	}
@@ -375,7 +385,6 @@ func (m *TMessage) Decode(r io.Reader) error {
 	data := make([]byte, int(l))
 	_, err = io.ReadFull(r, data)
 	if err != nil {
-		log.Dbg("Decode3", err.Error())
 		return err
 	}
 	m.data = data
@@ -410,7 +419,6 @@ func (m *TMessage) Decode(r io.Reader) error {
 	if l > 0 {
 		m.Metadata, err = decodeMetadata(l, data[n:nEnd])
 		if err != nil {
-			log.Dbg("Decode4", err.Error())
 			return err
 		}
 	}

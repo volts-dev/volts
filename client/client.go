@@ -13,7 +13,7 @@ import (
 	"time"
 	"vectors/rpc"
 	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/rpc/protocol"
 
 	log "github.com/VectorsOrigin/logger"
 )
@@ -48,14 +48,13 @@ type (
 		mutex  sync.Mutex // protects following
 		option Option
 
-		msgPool  sync.Pool
 		seq      uint64            // Call任务列队序号
 		pending  map[uint64]*TCall // Call任务列队
 		closing  bool              // user has called Close
 		shutdown bool              // server has told us to stop
 
 		r                 *bufio.Reader
-		ServerMessageChan chan<- *message.TMessage
+		ServerMessageChan chan<- *protocol.TMessage
 	}
 )
 
@@ -84,7 +83,7 @@ func urlencode(data map[string]string) string {
 	s := buf.String()
 	return s[0 : len(s)-1]
 }
-func convertRes2Raw(res *message.TMessage) (map[string]string, []byte, error) {
+func convertRes2Raw(res *protocol.TMessage) (map[string]string, []byte, error) {
 	m := make(map[string]string)
 	m[XVersion] = strconv.Itoa(int(res.Version()))
 	if res.IsHeartbeat() {
@@ -93,13 +92,13 @@ func convertRes2Raw(res *message.TMessage) (map[string]string, []byte, error) {
 	if res.IsOneway() {
 		m[XOneway] = "true"
 	}
-	if res.MessageStatusType() == message.Error {
+	if res.MessageStatusType() == protocol.Error {
 		m[XMessageStatusType] = "Error"
 	} else {
 		m[XMessageStatusType] = "Normal"
 	}
 
-	if res.CompressType() == message.Gzip {
+	if res.CompressType() == protocol.Gzip {
 		m["Content-Encoding"] = "gzip"
 	}
 
@@ -118,14 +117,6 @@ func NewClient(opt Option) *TClient {
 		option: opt,
 	}
 
-	cli.msgPool.New = func() interface{} {
-		header := message.Header([12]byte{})
-		header[0] = message.MagicNumber
-
-		return &message.TMessage{
-			Header: &header,
-		}
-	}
 	return cli
 }
 
@@ -158,8 +149,8 @@ func (self *TClient) Connect(network, address string) error {
 		self.Conn = conn
 
 		self.r = bufio.NewReaderSize(conn, ReaderBuffsize)
-		//self.w = bufio.NewWriterSize(conn, WriterBuffsize)
 		log.Dbg("Connect", self.Conn.RemoteAddr(), self.r.Buffered())
+		log.Dbg("NewCli", self.Conn.LocalAddr())
 		// start reading and writing since connected
 		go self.input()
 
@@ -172,7 +163,7 @@ func (self *TClient) Connect(network, address string) error {
 	return err
 }
 
-func (client *TClient) handleServerRequest(msg *message.TMessage) {
+func (client *TClient) handleServerRequest(msg *protocol.TMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errf("ServerMessageChan may be closed so client remove it. Please add it again if you want to handle server requests. error is %v", r)
@@ -207,7 +198,8 @@ func (client *TClient) heartbeat() {
 
 func (client *TClient) input() {
 	var err error
-	var msg = message.NewMessage()
+	//var msg = protocol.NewMessage()
+	msg := protocol.GetMessageFromPool()
 
 	for err == nil {
 		if client.option.ReadTimeout != 0 {
@@ -215,6 +207,10 @@ func (client *TClient) input() {
 		}
 		log.Dbg("input", client.r.Size())
 		//time.Sleep(5 * time.Second)
+		//buf := make([]byte, 6500)
+		//cnt, err := client.r.Read(buf)
+		//log.Dbg("buf", buf, cnt, err)
+
 		// 从Reader解码到Msg
 		err = msg.Decode(client.r)
 		log.Dbg("input1", client.r.Size())
@@ -226,7 +222,7 @@ func (client *TClient) input() {
 
 		seq := msg.Seq()
 		var call *TCall
-		isServerMessage := (msg.MessageType() == message.Request && !msg.IsHeartbeat() && msg.IsOneway())
+		isServerMessage := (msg.MessageType() == protocol.Request && !msg.IsHeartbeat() && msg.IsOneway())
 		if !isServerMessage {
 			client.mutex.Lock()
 			call = client.pending[seq]
@@ -239,13 +235,13 @@ func (client *TClient) input() {
 			if isServerMessage {
 				if client.ServerMessageChan != nil {
 					go client.handleServerRequest(msg)
-					msg = message.NewMessage()
+					msg = protocol.NewMessage()
 				}
 				continue
 			}
-		case msg.MessageStatusType() == message.Error:
+		case msg.MessageStatusType() == protocol.Error:
 			// We've got an error response. Give this to the request;
-			call.Error = ServiceError(msg.Metadata[message.ServiceError])
+			call.Error = ServiceError(msg.Metadata[protocol.ServiceError])
 			call.ResMetadata = msg.Metadata
 
 			if call.Raw {
@@ -263,9 +259,10 @@ func (client *TClient) input() {
 					if codec == nil {
 						call.Error = ServiceError(ErrUnsupportedCodec.Error())
 					} else {
+						// 解码内容
 						err = codec.Decode(data, call.Reply)
 						if err != nil {
-							log.Dbg("2", err.Error())
+							//log.Dbg("2", err.Error())
 							call.Error = ServiceError(err.Error())
 						}
 					}
@@ -351,11 +348,11 @@ func (client *TClient) Call(serviceMethod string, args interface{}, reply interf
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (client *TClient) Go(serviceMethod string, args interface{}, reply interface{}, done chan *TCall) *TCall {
+func (client *TClient) Go(path string, args interface{}, reply interface{}, done chan *TCall) *TCall {
 	// TODO 缓存
 	call := new(TCall)
-	call.ServiceMethod = serviceMethod // 废弃
-	call.Path = serviceMethod
+	call.ServiceMethod = path // 废弃
+	call.Path = path
 	call.Args = args
 	call.Reply = reply
 
@@ -412,8 +409,8 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 
 	// TODO  服务器和客户端共享使用一个msgPool缓冲池
 	//req := protocol.GetPooledMsg()
-	req := client.msgPool.Get().(*message.TMessage) // request message
-	req.SetMessageType(message.Request)
+	req := protocol.GetMessageFromPool() // request protocol
+	req.SetMessageType(protocol.Request)
 	req.SetSeq(seq)
 	// heartbeat
 	//if call.ServicePath == "" && call.ServiceMethod == "" {
@@ -436,8 +433,8 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 			call.done()
 			return
 		}
-		if len(data) > 1024 && client.option.CompressType == message.Gzip {
-			data, err = message.Zip(data)
+		if len(data) > 1024 && client.option.CompressType == protocol.Gzip {
+			data, err = protocol.Zip(data)
 			if err != nil {
 				call.Error = err
 				call.done()
@@ -467,7 +464,7 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 		}
 	}
 
-	//message.FreeMsg(req)
+	//protocol.FreeMsg(req)
 
 	if req.IsOneway() {
 		client.mutex.Lock()

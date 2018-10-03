@@ -7,22 +7,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
+
+	//	"net"
 	"net/http"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/rpc/protocol"
+	"vectors/rpc/server/listener/rpc"
 
 	log "github.com/VectorsOrigin/logger"
+
 	//	"vectors/utils"
 	"vectors/web"
 )
 
 // Can connect to RPC service using HTTP CONNECT to rpcPath.
-var connected = "200 Connected to Go RPC"
+var connected = "200 Connected to RPC"
 
 type (
 	TRouter struct {
@@ -32,7 +34,7 @@ type (
 		readTimeout  time.Duration
 		writeTimeout time.Duration
 
-		msgPool    sync.Pool
+		//msgPool    sync.Pool
 		objectPool *web.TPool
 
 		Server *TServer
@@ -50,18 +52,18 @@ func NewRouter() *TRouter {
 		handlerMap: make(map[string]*TModule),
 		objectPool: web.NewPool(),
 	}
+	/*
+		router.msgPool.New = func() interface{} {
 
-	router.msgPool.New = func() interface{} {
+			header := message.Header([12]byte{})
+			header[0] = message.MagicNumber
 
-		header := message.Header([12]byte{})
-		header[0] = message.MagicNumber
+			return &message.TMessage{
+				Header: &header,
+			}
 
-		return &message.TMessage{
-			Header: &header,
 		}
-
-	}
-
+	*/
 	return router
 }
 
@@ -109,8 +111,8 @@ func (self *TRouter) RegisterModule(aMd IModule, build_path ...bool) {
 	*/
 }
 
-func (self *TRouter) ServeTCP(msg net.Conn) {
-	self.routeHandler(msg)
+func (self *TRouter) ServeTCP(w rpc.Response, req *rpc.Request) {
+	self.routeHandler(w, req)
 }
 
 func (self *TRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -132,7 +134,15 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		s.activeConn[conn] = struct{}{}
 		s.mu.Unlock()
 	*/
-	self.ServeTCP(conn)
+
+	msg, err := protocol.Read(conn)
+	if err != nil {
+		log.Info("rpc Read ", err.Error())
+		return
+	}
+
+	r := rpc.NewRequest(msg, req.Context())
+	self.ServeTCP(w, r)
 }
 
 func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, aActionValue reflect.Value) (reflect.Value, error) {
@@ -149,7 +159,7 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, aA
 }
 
 // 执行控制器
-func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, error) {
+func (self *TRouter) handleRequest(msg *protocol.TMessage) (*protocol.TMessage, error) {
 
 	var (
 		coder      codec.ICodec
@@ -162,34 +172,36 @@ func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, er
 		//CtrlValidable bool
 		err error
 	)
-	serviceName := req.ServicePath
-	//methodName := req.ServiceMethod
+	//msg := req.Message
+	serviceName := msg.ServicePath
+	//methodName := msg.ServiceMethod
+	//log.Dbg("3333", msg.SerializeType())
 
 	// 克隆
-	resraw := self.msgPool.Get().(*message.TMessage)
-	res := req.Clone(resraw)
-	self.msgPool.Put(resraw)
-
-	res.SetMessageType(message.Response)
+	resraw := protocol.GetMessageFromPool()
+	res := msg.Clone(resraw)
+	//protocol.PutMessageToPool(resraw)
+	//log.Dbg("handleRequest", msg.SerializeType(), res.SerializeType())
+	res.SetMessageType(protocol.Response)
 	// 匹配路由树
-	log.Dbg("handleRequest", req.Path, req.ServicePath+"."+req.ServiceMethod)
-	//route, _ := self.tree.Match("HEAD", req.ServicePath+"."+req.ServiceMethod)
-	route, _ := self.tree.Match("HEAD", req.Path)
+	log.Dbg("handleRequest", msg.Path, msg.ServicePath+"."+msg.ServiceMethod)
+	//route, _ := self.tree.Match("HEAD", msg.ServicePath+"."+msg.ServiceMethod)
+	route, _ := self.tree.Match("CONNECT", msg.Path)
 	if route == nil {
 		err = errors.New("rpc: can't match route " + serviceName)
 		return handleError(res, err)
 	}
 
 	// 获取支持的序列模式
-	coder = codec.Codecs[req.SerializeType()]
+	coder = codec.Codecs[msg.SerializeType()]
 	if coder == nil {
-		err = fmt.Errorf("can not find codec for %d", req.SerializeType())
+		err = fmt.Errorf("can not find codec for %d", msg.SerializeType())
 		return handleError(res, err)
 	}
-	log.Dbg("handleRequest", req.SerializeType())
+	log.Dbg("handleRequest", msg.SerializeType())
 	// 序列化
 	var argv = self.objectPool.Get(route.MainCtrl.ArgType)
-	err = coder.Decode(req.Payload, argv.Interface())
+	err = coder.Decode(msg.Payload, argv.Interface())
 	if err != nil {
 		return handleError(res, err)
 	}
@@ -239,11 +251,11 @@ func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, er
 			log.Errf("", err.Error())
 		}
 		//log.Dbg("adf", *replyv.Interface().(*Reply))
-		//s.Plugins.DoPreWriteResponse(newCtx, req)
+		//s.Plugins.DoPreWriteResponse(newCtx, msg)
 
 	}
-	log.Dbg("handleRequest", req.IsOneway())
-	if !req.IsOneway() {
+	log.Dbg("handleRequest", msg.IsOneway())
+	if !msg.IsOneway() {
 		data, err := coder.Encode(replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
 		if err != nil {
@@ -257,81 +269,56 @@ func (self *TRouter) handleRequest(req *message.TMessage) (*message.TMessage, er
 	return res, nil
 }
 
-func (self *TRouter) routeHandler(conn net.Conn) {
-	req := self.msgPool.Get().(*message.TMessage) // request message
-
-	// 获得请求参数
-	err := req.Decode(conn)
-	if err != nil {
-		if err == io.EOF {
-			log.Infof("client has closed this connection: %s", conn.RemoteAddr().String())
-		} else if strings.Contains(err.Error(), "use of closed network connection") {
-			log.Infof("rpc: connection %s is closed", conn.RemoteAddr().String())
-		} else {
-			log.Warnf("rpc: failed to read request: %v", err)
-		}
+func (self *TRouter) routeHandler(w rpc.Response, req *rpc.Request) {
+	// 心跳包 直接返回
+	if req.Message.IsHeartbeat() {
+		//data := req.Message.Encode()
+		//w.Write(data)
+		//TODO 补全状态吗
 		return
 	}
 
-	if self.writeTimeout != 0 {
-		conn.SetWriteDeadline(time.Now().Add(self.writeTimeout))
+	resMetadata := make(map[string]string)
+	//newCtx := context.WithValue(context.WithValue(ctx, share.ReqMetaDataKey, req.Metadata),
+	//	share.ResMetaDataKey, resMetadata)
+
+	//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
+
+	res, err := self.handleRequest(req.Message)
+	if err != nil {
+		log.Warnf("rpc: failed to handle request: %v", err)
 	}
-
-	go func() {
-		// 心跳包 直接返回
-		if req.IsHeartbeat() {
-			req.SetMessageType(message.Response)
-			data := req.Encode()
-			conn.Write(data)
-			return
-		}
-
-		resMetadata := make(map[string]string)
-		//newCtx := context.WithValue(context.WithValue(ctx, share.ReqMetaDataKey, req.Metadata),
-		//	share.ResMetaDataKey, resMetadata)
-
-		//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-
-		res, err := self.handleRequest(req)
-		if err != nil {
-			log.Warnf("rpcx: failed to handle request: %v", err)
-		}
-
-		// 组织完成非单程 必须返回的
-		if !req.IsOneway() {
-			log.Dbg("!IsOneway")
-			if len(resMetadata) > 0 { //copy meta in context to request
-				meta := res.Metadata
-				if meta == nil {
-					res.Metadata = resMetadata
-				} else {
-					for k, v := range resMetadata {
-						meta[k] = v
-					}
+	log.Dbg("ttttt", *req)
+	// 组织完成非单程 必须返回的
+	if !req.Message.IsOneway() {
+		log.Dbg("!IsOneway")
+		if len(resMetadata) > 0 { //copy meta in context to request
+			meta := res.Metadata
+			if meta == nil {
+				res.Metadata = resMetadata
+			} else {
+				for k, v := range resMetadata {
+					meta[k] = v
 				}
 			}
-			log.Dbg("!IsOneway", res)
-			data := res.Encode()
-			log.Dbg("!IsOneway", string(res.Payload), string(data), res.Metadata)
-			//time.Sleep(5 * time.Second)
-			log.Dbg("aa", conn.RemoteAddr())
-			_, err = conn.Write(data)
-			if err != nil {
-				log.Dbg(err.Error())
-			}
-
-			//res.WriteTo(conn)
 		}
+		//log.Dbg("!IsOneway", res)
+		//data := res.Encode()
+		//log.Dbg("!IsOneway", string(res.Payload), string(data), res.Metadata)
+		//time.Sleep(5 * time.Second)
+		var cnt int
+		log.Dbg("aa", string(res.Payload))
+		cnt, err = w.Write(res.Payload)
+		if err != nil {
+			log.Dbg(err.Error())
+		}
+		log.Dbg("aa", cnt, string(res.Payload))
 
-		//s.Plugins.DoPostWriteResponse(newCtx, req, res, err)
-
-		//protocol.FreeMsg(req)
-		//protocol.FreeMsg(res)
-	}()
+	}
 }
 
-func handleError(res *message.TMessage, err error) (*message.TMessage, error) {
-	res.SetMessageStatusType(message.Error)
+func handleError(res *protocol.TMessage, err error) (*protocol.TMessage, error) {
+	res.SetMessageStatusType(protocol.Error)
 	if res.Metadata == nil {
 		res.Metadata = make(map[string]string)
 	}

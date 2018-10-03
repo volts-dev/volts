@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"unicode"
 	"unicode/utf8"
+
 	//	"sync"
 	"vectors/web"
 
@@ -258,7 +259,7 @@ func (self *TModule) addFunc(aType web.RouteType, path, name string, function in
 	route.Ctrls = append(route.Ctrls, route.MainCtrl)
 
 	log.Dbg("addFunc", path+"."+name)
-	self.tree.AddRoute("HEAD", path+"."+name, route)
+	self.tree.AddRoute("CONNECT", path+"."+name, route)
 	//self.method[strings.ToLower(name)] = route
 	//mm.mmLocker.Unlock()
 }

@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"net/http"
+	"strings"
+
 	//	"errors"
 	//	"fmt"
 	///	"log"
 	"reflect"
 	//	"runtime"
-
-	rpcsrv "vectors/rpc/server/net"
+	listener "vectors/rpc/server/listener"
+	rpc "vectors/rpc/server/listener/rpc"
 	//log "github.com/VectorsOrigin/logger"
 )
 
@@ -31,6 +34,8 @@ var (
 	// StartSendRequestContextKey records the start time
 	StartSendRequestContextKey = &contextKey{"start-send-request"}
 )
+
+type ()
 
 // contextKey is a value for use with context.WithValue. It's used as
 // a pointer so it fits in an interface{} without allocation.
@@ -60,13 +65,20 @@ type (
 	// Server is rpc server that use TCP or UDP.
 	TServer struct {
 		TModule
-		Listener *rpcsrv.TServer
+		//Listener *rpcsrv.TServer
+		Listener net.Listener
+		listener listener.IListeners
 		Router   *TRouter // 路由类
 		// BlockCrypt for kcp.BlockCrypt
 		options map[string]interface{}
 
 		// TLSConfig for creating tls tcp connection.
 		tlsConfig *tls.Config
+
+		address string
+		network string
+		//dispatcher IDispatcher // dispatcher to invoke, http.DefaultServeMux if nil
+		//ln net.Listener
 	}
 )
 
@@ -97,12 +109,35 @@ func (self *TServer) Listen(network, address string) (err error) {
 	self.Router.RegisterModule(self)
 	self.Router.init()
 
-	//self.Listener, err = rpcsrv.ListenAndServe(network, address, self.Router)
-	//if err != nil {
-	//	log.Panic("qwerqe", err.Error())
-	//}
-	self.Listener = rpcsrv.NewServer(network, address, self.Router)
-	return self.Listener.ListenAndServe()
+	self.address = address
+	self.network = strings.ToLower(network)
+	//self.Dispatcher = self.Router
+
+	// new a listener
+	ln, err := listener.NewListener(self.tlsConfig, self.network, self.address)
+	if err != nil {
+		return err
+	}
+	self.Listener = ln
+	return self.serve(ln)
+}
+
+// TODO 实现同端口不同协议
+func (s *TServer) serve(ln net.Listener) error {
+	switch s.network {
+	case "http": // serve as a http server
+		// register dispatcher
+		http_srv := &http.Server{Handler: s.Router}
+		s.listener = http_srv
+		return http_srv.Serve(ln)
+	default: // serve as a RPC server
+		// register dispatcher
+		rpc_srv := &rpc.TServer{Dispatcher: s.Router}
+		s.listener = rpc_srv
+		return rpc_srv.Serve(ln)
+	}
+
+	return nil
 }
 
 // Address returns listened address.
@@ -111,10 +146,18 @@ func (self *TServer) Address() net.Addr {
 		return nil
 	}
 
-	return self.Listener.Address()
+	return self.Listener.Addr()
 }
 
 // 关闭服务器
 func (self *TServer) Close() error {
-	return nil
+	return self.listener.Close()
+}
+
+func (self *TServer) Shutdown() error {
+	return self.listener.Shutdown(nil)
+}
+
+func (self *TServer) LoadConfigFile(filepath string) {
+
 }

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/rpc/protocol"
 
 	"github.com/VectorsOrigin/logger"
 )
@@ -34,14 +34,14 @@ func (t Arith) Mul(ctx context.Context, args *Args, reply *Reply) error {
 func Test_HandleRequest(t *testing.T) {
 	//use jsoncodec
 	server := NewServer()
-	req := server.Router.msgPool.Get().(*message.TMessage) // request message
+	req := protocol.GetMessageFromPool() // request message
 	//req := protocol.NewMessage()
 	req.SetVersion(0)
-	req.SetMessageType(message.Request)
+	req.SetMessageType(protocol.Request)
 	req.SetHeartbeat(false)
 	req.SetOneway(false)
-	req.SetCompressType(message.None)
-	req.SetMessageStatusType(message.Normal)
+	req.SetCompressType(protocol.None)
+	req.SetMessageStatusType(protocol.Normal)
 	req.SetSerializeType(codec.JSON)
 	req.SetSeq(1234567890)
 
@@ -67,7 +67,7 @@ func Test_HandleRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to hand request: %v", err)
 	}
-	t.Log(res.Payload)
+
 	if res.Payload == nil {
 		t.Fatalf("expect reply but got %s", res.Payload)
 	}
@@ -78,7 +78,7 @@ func Test_HandleRequest(t *testing.T) {
 	if code == nil {
 		t.Fatalf("can not find codec %c", code)
 	}
-
+	t.Log(string(res.Payload), res.SerializeType())
 	err = code.Decode(res.Payload, reply)
 	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)

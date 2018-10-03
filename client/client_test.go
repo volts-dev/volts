@@ -1,72 +1,54 @@
 package client
 
 import (
-	"context"
-	"fmt"
+	//	"context"
+	//	"fmt"
 	"testing"
-	"time"
 
-	"vectors/rpc/server"
+	//	"time"
+	"vectors/rpc/test"
 )
 
-type (
-	Args struct {
-		A int
-		B int
-	}
-
-	Reply struct {
-		C int
-	}
-
-	Arith int
-)
-
-func (t *Arith) Mul(ctx context.Context, args *Args, reply *Reply) error {
-	reply.C = args.A * args.B
-	fmt.Println("Mul", reply.C)
-	return nil
-}
-
-/*
-type PBArith int
-
-func (t *PBArith) Mul(ctx context.Context, args *testutils.ProtoArgs, reply *testutils.ProtoReply) error {
-	reply.C = args.A * args.B
-	return nil
-}
-*/
 func TestClient_IT(t *testing.T) {
-	s := server.NewServer()
+	/*s := server.NewServer()
 	s.RegisterName("Arith", new(Arith))
 	//s.RegisterName("PBArith", new(PBArith), "")
 	go s.Listen("tcp", "127.0.0.1:0")
 	defer s.Close()
 	time.Sleep(500 * time.Millisecond)
-
-	addr := s.Address().String()
+	*/
+	addr := "127.0.0.1:5999" //s.Address().String()
 
 	client := NewClient(DefaultOption)
 	err := client.Connect("tcp", addr)
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer client.Close()
 
-	args := &Args{
-		A: 10,
-		B: 20,
+	//defer client.Close()
+	args := &test.Args{
+		Num1: 10,
+		Num2: 20,
 	}
 
-	reply := &Reply{}
+	reply := &test.Reply{}
 	err = client.Call("Arith.Mul", args, reply)
 	if err != nil {
 		t.Fatalf("failed to call: %v", err)
 	}
 
-	if reply.C != 200 {
-		t.Fatalf("expect 200 but got %d", reply.C)
+	if reply.Num != 200 {
+		t.Fatalf("expect 200 but got %d", reply.Num)
 	}
+
+	args.Num1 = 20
+	err = client.Call("Arith.Mul", args, reply)
+	if err != nil {
+		t.Fatalf("failed to call: %v", err)
+	}
+
+	t.Log("complete", reply)
+
 	/*
 		err = client.Call("Arith.Mul", args, reply)
 		if err != nil {

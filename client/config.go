@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"time"
 	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/rpc/protocol"
 )
 
 // Option contains all options for creating clients.
@@ -36,7 +36,7 @@ type Option struct {
 	///Breaker Breaker
 
 	SerializeType codec.SerializeType
-	CompressType  message.CompressType
+	CompressType  protocol.CompressType
 
 	Heartbeat         bool
 	HeartbeatInterval time.Duration
@@ -48,6 +48,6 @@ var DefaultOption = Option{
 	//RPCPath:        share.DefaultRPCPath,
 	ConnectTimeout: 10 * time.Second,
 	SerializeType:  codec.JSON,
-	CompressType:   message.None,
+	CompressType:   protocol.None,
 	BackupLatency:  10 * time.Millisecond,
 }
