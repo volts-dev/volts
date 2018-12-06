@@ -5,12 +5,11 @@ import (
 )
 
 type (
-	// 代表一个控制集
-	THandler struct {
-		name string        // name of service
-		rcvr reflect.Value // receiver of methods for the service
-		typ  reflect.Type  // type of the receiver
-		//method   map[string]*methodType   // registered methods
-		//function map[string]*functionType // registered functions
+	IHandler interface {
+		Request() IRequest
+		Response() IResponse
+		ValueModel() reflect.Value
+		TypeModel() reflect.Type
+		Done() bool //response data is done
 	}
 )

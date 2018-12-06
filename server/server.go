@@ -3,9 +3,14 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/VectorsOrigin/logger"
+
+	"github.com/VectorsOrigin/utils"
 
 	//	"errors"
 	//	"fmt"
@@ -66,17 +71,20 @@ type (
 	TServer struct {
 		TModule
 		//Listener *rpcsrv.TServer
-		Listener net.Listener
+		ln       net.Listener
 		listener listener.IListeners
 		Router   *TRouter // 路由类
+		Config   *TConfig // 配置类
 		// BlockCrypt for kcp.BlockCrypt
 		options map[string]interface{}
 
 		// TLSConfig for creating tls tcp connection.
 		tlsConfig *tls.Config
 
-		address string
-		network string
+		name            string // server name
+		address         string
+		network         string
+		config_filename string
 		//dispatcher IDispatcher // dispatcher to invoke, http.DefaultServeMux if nil
 		//ln net.Listener
 	}
@@ -84,41 +92,78 @@ type (
 
 // NewServer returns a server.
 func NewServer(config ...FConfig) *TServer {
-	s := &TServer{
+	srv := &TServer{
 		TModule: *NewModule(),
 		Router:  NewRouter(),
+		Config:  NewConfig(),
 		//Plugins: &pluginContainer{},
 		//options: make(map[string]interface{}),
 	}
+	// 传递
+	srv.Router.Server = srv // 传递服务器指针
 
 	for _, fn := range config {
-		fn(s)
+		fn(srv)
 	}
 
-	return s
+	return srv
 }
 
 func (self *TServer) RegisterModule(obj IModule) {
 	self.Router.RegisterModule(obj)
 }
 
+// 注册中间件
+// 中间件可以使用在Conntroller，全局Object 上
+func (self *TServer) RegisterMiddleware(obj ...IMiddleware) {
+	self.Router.RegisterMiddleware(obj...)
+
+}
+
 // Serve starts and listens RPC requests.
 // It is blocked until receiving connectings from clients.
-func (self *TServer) Listen(network, address string) (err error) {
+func (self *TServer) Listen(network string, address ...string) (err error) {
+	// 解析地址
+	host, port := self.parse_addr(address)
+
+	// 加载配置文件
+	self.Config.LoadFromFile(self.config_filename)
+	// 确认配置已经被加载加载
+	// 配置最终处理
+	sec, err := self.Config.GetSection(self.name)
+	if err != nil {
+
+		// 存储默认
+		sec, err = self.Config.NewSection(self.name)
+		if err != nil {
+			logger.Panic("creating ini' section faild! Name:%s Error:%s", self.name, err.Error())
+		}
+		if host != "" {
+			self.Config.Host = host
+		}
+		self.Config.Port = port
+		sec.ReflectFrom(self.Config)
+	}
+	// 映射到服务器配置结构里
+	sec.MapTo(self.Config) // 加载
+	self.Config.Save()     // 保存文件
+
+	// 显示系统信息
+	new_addr := fmt.Sprintf("%s:%d", self.Config.Host, self.Config.Port)
+	self.address = new_addr
+	self.network = strings.ToLower(network)
+
 	//注册主Route
 	self.Router.RegisterModule(self)
 	self.Router.init()
-
-	self.address = address
-	self.network = strings.ToLower(network)
-	//self.Dispatcher = self.Router
 
 	// new a listener
 	ln, err := listener.NewListener(self.tlsConfig, self.network, self.address)
 	if err != nil {
 		return err
 	}
-	self.Listener = ln
+	self.ln = ln
+	logger.Info("Listening on address: %s", new_addr)
 	return self.serve(ln)
 }
 
@@ -140,13 +185,28 @@ func (s *TServer) serve(ln net.Listener) error {
 	return nil
 }
 
+func (self *TServer) parse_addr(addr []string) (host string, port int) {
+	// 如果已经配置了端口则不使用
+	if len(addr) != 0 {
+		lAddrSplitter := strings.Split(addr[0], ":")
+		if len(lAddrSplitter) != 2 {
+			logger.Err("Address %s of server %s is unavailable!", addr[0], self.name)
+		} else {
+			host = lAddrSplitter[0]
+			port = utils.StrToInt(lAddrSplitter[1])
+		}
+	}
+
+	return
+}
+
 // Address returns listened address.
 func (self *TServer) Address() net.Addr {
-	if self.Listener == nil {
+	if self.ln == nil {
 		return nil
 	}
 
-	return self.Listener.Addr()
+	return self.ln.Addr()
 }
 
 // 关闭服务器
@@ -159,5 +219,5 @@ func (self *TServer) Shutdown() error {
 }
 
 func (self *TServer) LoadConfigFile(filepath string) {
-
+	self.config_filename = filepath
 }

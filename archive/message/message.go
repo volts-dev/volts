@@ -1,14 +1,13 @@
-package protocol
+package message
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
+	"sync"
 	"vectors/rpc/codec"
 
-	//log "github.com/VectorsOrigin/logger"
 	"github.com/VectorsOrigin/utils"
 )
 
@@ -22,6 +21,13 @@ var (
 	ErrMetaKVMissing = errors.New("wrong metadata lines. some keys or values are missing")
 	// ErrMessageToLong message is too long
 	ErrMessageToLong = errors.New("message is too long")
+
+	poolUint32Data = sync.Pool{
+		New: func() interface{} {
+			data := make([]byte, 4)
+			return &data
+		},
+	}
 )
 
 const (
@@ -175,8 +181,7 @@ func (h *Header) SetSeq(seq uint64) {
 
 // Clone clones from an message.
 func (m TMessage) Clone(msg *TMessage) *TMessage {
-	var header Header
-	copy(header[:], m.Header[:])
+	header := *m.Header
 	msg.Header = &header
 	msg.ServicePath = m.ServicePath
 	msg.ServiceMethod = m.ServiceMethod
@@ -341,29 +346,10 @@ func Read(r io.Reader) (*TMessage, error) {
 
 // Decode decodes a message from reader.
 func (m *TMessage) Decode(r io.Reader) error {
-	var err error
 	// validate rest length for each step?
-	//log.Dbg("TMessage.Decode", m.Header[:])
-
-	//buf := make([]byte, 1)
-	/*	_, err = r.Read(m.Header[:1])
-		if err != nil {
-			log.Dbg("TMessage.Decode", m.Header[:], err.Error())
-			return err
-		}*/
 
 	// parse header
-	_, err = io.ReadFull(r, m.Header[:1])
-	if err != nil {
-		return err
-	}
-
-	//log.Dbg("aafa", m.Header[:1], err)
-	if !m.Header.CheckMagicNumber() {
-		return fmt.Errorf("wrong magic number: %v", m.Header[0])
-	}
-
-	_, err = io.ReadFull(r, m.Header[1:])
+	_, err := io.ReadFull(r, m.Header[:])
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package rpc
 import (
 	"bufio"
 	"net"
+	"reflect"
 	"vectors/rpc/protocol"
 )
 
@@ -15,7 +16,7 @@ type (
 		conn net.Conn
 		req  *Request      // request for this response
 		w    *bufio.Writer // buffers output in chunks to chunkWriter
-
+		Val  reflect.Value
 	}
 )
 
@@ -40,4 +41,7 @@ func (self *response) write(data []byte) (n int, err error) {
 
 func (w *response) finishRequest() {
 
+}
+func (self *response) Value() reflect.Value {
+	return self.Val
 }

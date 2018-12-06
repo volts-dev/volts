@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"unicode"
 	"unicode/utf8"
-
 	//	"sync"
+	"vectors/web"
 
 	log "github.com/VectorsOrigin/logger"
 	"github.com/VectorsOrigin/utils"
@@ -16,12 +16,12 @@ import (
 type (
 	IModule interface {
 		// 返回Module所有Routes 理论上只需被调用一次
-		GetRoutes() *TTree
+		GetRoutes() *web.TTree
 	}
 
 	// 服务模块 每个服务代表一个对象
 	TModule struct {
-		tree *TTree
+		tree *web.TTree
 		name string        // name of service
 		rcvr reflect.Value // receiver of methods for the service
 		typ  reflect.Type  // type of the receiver
@@ -45,7 +45,7 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 }
 
 func NewModule() *TModule {
-	tree := NewRouteTree()
+	tree := web.NewRouteTree()
 	tree.IgnoreCase = true
 	tree.DelimitChar = '.' // 修改为xxx.xxx
 
@@ -54,7 +54,7 @@ func NewModule() *TModule {
 	}
 }
 
-func (self *TModule) GetRoutes() *TTree {
+func (self *TModule) GetRoutes() *web.TTree {
 	return self.tree
 }
 
@@ -156,7 +156,7 @@ func (self *TModule) __suitableMethods(typ reflect.Type, reportErr bool) {
 // name is the method name
 // function is a func or bound method
 // option includes Mode, Simple, Oneway and NameSpace
-func (self *TModule) addFunc(aType RouteType, path, name string, function interface{}) {
+func (self *TModule) addFunc(aType web.RouteType, path, name string, function interface{}) {
 	if name == "" {
 		panic("name can't be empty")
 	}
@@ -167,7 +167,6 @@ func (self *TModule) addFunc(aType RouteType, path, name string, function interf
 	if !ok {
 		f = reflect.ValueOf(function)
 	}
-
 	if f.Kind() != reflect.Func {
 		panic("function must be func or bound method")
 	}
@@ -185,7 +184,7 @@ func (self *TModule) addFunc(aType RouteType, path, name string, function interf
 	//	mm.MethodNames = append(mm.MethodNames, name)
 	//}
 
-	route := &TRoute{
+	route := &web.TRoute{
 		Path: path,
 		//FilePath: "",
 		Model:  self.name,
@@ -197,7 +196,7 @@ func (self *TModule) addFunc(aType RouteType, path, name string, function interf
 		//Scheme:   scheme,
 	}
 	method := f.Type()
-	mt := TMethodType{
+	mt := web.TMethodType{
 		Func:     f,
 		FuncType: method}
 
@@ -259,13 +258,13 @@ func (self *TModule) addFunc(aType RouteType, path, name string, function interf
 	route.Ctrls = append(route.Ctrls, route.MainCtrl)
 
 	log.Dbg("addFunc", path+"."+name)
-	self.tree.AddRoute("CONNECT", path+"."+name, route)
+	self.tree.AddRoute("HEAD", path+"."+name, route)
 	//self.method[strings.ToLower(name)] = route
 	//mm.mmLocker.Unlock()
 }
 
 func (self *TModule) RegisterFunction(object_name, name string, function interface{}) {
-	self.addFunc(CommomRoute, object_name, name, function)
+	self.addFunc(web.CommomRoute, object_name, name, function)
 }
 
 func (self *TModule) RegisterName(object_name string, obj interface{}) {
@@ -293,7 +292,7 @@ func (self *TModule) RegisterName(object_name string, obj interface{}) {
 		if method.CanInterface() {
 			log.Dbg("RegisterName", object_name, name, method)
 			// 添加注册方法
-			self.addFunc(CommomRoute, object_name, name, method)
+			self.addFunc(web.CommomRoute, object_name, name, method)
 		}
 	}
 }
