@@ -17,8 +17,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"vectors/volts"
 
-	httpx "vectors/rpc/server/listener/http"
+	httpx "vectors/volts/server/listener/http"
 
 	"github.com/VectorsOrigin/logger"
 	"github.com/VectorsOrigin/template"
@@ -35,6 +36,7 @@ const (
 )
 
 var (
+	WebHandlerType       = reflect.TypeOf(TWebHandler{})
 	cookieNameSanitizer  = strings.NewReplacer("\n", "-", "\r", "-")
 	cookieValueSanitizer = strings.NewReplacer("\n", " ", "\r", " ", ";", " ")
 
@@ -88,6 +90,7 @@ type (
 
 	// TWebHandler 负责所有请求任务,每个Handle表示有一个请求
 	TWebHandler struct {
+		volts.ILogger
 		httpx.IResponseWriter
 		response httpx.IResponseWriter //http.ResponseWriter
 		request  *http.Request         //
@@ -120,6 +123,7 @@ type (
 		isApplies bool          // -- 已经提交过
 		finalCall reflect.Value // -- handler 结束执行的动作处理器
 		val       reflect.Value
+		typ       reflect.Type
 	}
 
 	// 反向代理
@@ -180,11 +184,12 @@ func NewParamsSet(hd *TWebHandler) *TParamsSet {
 	}
 }
 
-func NewHandler() *TWebHandler {
+func NewWebHandler(router *TRouter) *TWebHandler {
 	//func NewHandler(router *TRouter, route *TRoute, writer iResponseWriter, request *http.Request) *TWebHandler {
 	hd := &TWebHandler{
-		//Router:          router,
-		//Route:           route,
+		ILogger: router.server.logger,
+		Router:  router,
+		//Route:   route,
 		//iResponseWriter: writer,
 		//Response:        writer,
 		//Request:         request,
@@ -203,6 +208,7 @@ func NewHandler() *TWebHandler {
 	//	hd.MethodParams=NewParamsSet(hd)
 	hd.pathParams = NewParamsSet(hd)
 	hd.val = reflect.ValueOf(hd)
+	hd.typ = hd.val.Type()
 	return hd
 }
 
@@ -279,11 +285,15 @@ func (self *TWebHandler) Response() IResponse {
 func (self *TWebHandler) Done() bool {
 	return false
 }
+
+// the reflect model of Value
 func (self *TWebHandler) ValueModel() reflect.Value {
 	return self.val
 }
+
+// the reflect model of Type
 func (self *TWebHandler) TypeModel() reflect.Type {
-	return nil
+	return self.typ
 }
 
 //TODO 添加验证Request 防止多次解析
@@ -380,14 +390,12 @@ func (self *TWebHandler) UpdateSession() {
 #刷新Handler的新请求数据
 */
 // Inite and Connect a new ResponseWriter when a new request is coming
-func (self *TWebHandler) connect(rw httpx.IResponseWriter, req *http.Request, Router *TRouter, Route *TRoute) {
-	self.request = req
-	self.response = rw
-	self.IResponseWriter = rw
-	self.Router = Router
-	self.Route = Route
-	//self.Logger = Router.Server.Logger
-	self.Template = Router.Template
+func (self *TWebHandler) connect(rw IResponse, req IRequest, router *TRouter, route *TRoute) {
+	self.request = req.(*http.Request)
+	self.response = rw.(*httpx.TResponseWriter)
+	self.IResponseWriter = rw.(*httpx.TResponseWriter)
+	self.Route = route
+	self.Template = router.Template
 	self.TemplateSrc = ""
 	self.ContentType = ""
 	self.RenderArgs = make(map[string]interface{}) // 清空
@@ -404,6 +412,11 @@ func (self *TWebHandler) connect(rw httpx.IResponseWriter, req *http.Request, Ro
 	//self.getMethodParams(32) //废弃 #获得Form[请求参数]
 	//self.GetCookie()
 	//self.finalCall = reflect.Zero(self.finalCall.Type()) // -- handler 结束执行的动作处理器
+}
+
+// TODO 修改API名称  设置response数据
+func (self *TWebHandler) setData(v interface{}) {
+	// self.Result = v.([]byte)
 }
 
 // 执行所以变动
@@ -603,14 +616,12 @@ func (self *TWebHandler) Abort(status int, body string) {
 	//self.Result = body
 }
 
-func (self *TWebHandler) RespondString(aBody string) {
-	//self.response.Write([]byte(aBody))
-	self.Result = []byte(aBody)
+func (self *TWebHandler) RespondString(content string) {
+	self.Result = []byte(content)
 }
 
-func (self *TWebHandler) Respond(aBody []byte) {
-	self.Result = aBody
-	//self.response.Write(aBody)
+func (self *TWebHandler) Respond(content []byte) {
+	self.Result = content
 }
 
 func (self *TWebHandler) RespondError(error string) {

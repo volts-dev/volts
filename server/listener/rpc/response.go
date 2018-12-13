@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"net"
 	"reflect"
-	"vectors/rpc/protocol"
+	"vectors/volts/protocol"
 )
 
 type (

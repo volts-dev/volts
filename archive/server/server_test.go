@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/volts/codec"
+	"vectors/volts/message"
 
 	"github.com/VectorsOrigin/logger"
 )

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"vectors/rpc/codec"
+	"vectors/volts/codec"
 
 	"github.com/VectorsOrigin/utils"
 )

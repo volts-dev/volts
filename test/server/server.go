@@ -1,8 +1,8 @@
 package main
 
 import (
-	"vectors/rpc/server"
-	"vectors/rpc/test"
+	"vectors/volts/server"
+	"vectors/volts/test"
 )
 
 func main() {

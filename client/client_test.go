@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	//	"time"
-	"vectors/rpc/test"
+	"vectors/volts/test"
 )
 
 func TestClient_IT(t *testing.T) {

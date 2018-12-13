@@ -12,10 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"vectors/rpc/codec"
-	"vectors/rpc/protocol"
-	"vectors/rpc/server/listener/http"
-	"vectors/rpc/server/listener/rpc"
+	"vectors/volts/codec"
+	"vectors/volts/protocol"
+	"vectors/volts/server/listener/http"
+	"vectors/volts/server/listener/rpc"
 
 	"github.com/VectorsOrigin/utils"
 
@@ -42,11 +42,12 @@ type (
 		show_route   bool
 
 		//msgPool    sync.Pool
-		objectPool  *TPool
-		handlerPool sync.Pool
-		respPool    sync.Pool
+		objectPool     *TPool
+		webHandlerPool sync.Pool
+		rpcHandlerPool sync.Pool
+		respPool       sync.Pool
 
-		Server     *TServer
+		server     *TServer
 		tree       *TTree
 		middleware *TMiddlewareManager // 中间件
 
@@ -61,9 +62,15 @@ func NewRouter() *TRouter {
 	router := &TRouter{
 		tree:       tree,
 		handlerMap: make(map[string]*TModule),
+		GVar:       map[string]interface{}{},
 		objectPool: NewPool(),
 		//handlerPool: NewPool(),
+		middleware: NewMiddlewareManager(),
 	}
+
+	//router.GVar["Version"] = ROUTER_VER
+	router.GVar["StratDateTime"] = time.Now().UTC()
+
 	/*
 		router.msgPool.New = func() interface{} {
 
@@ -76,14 +83,32 @@ func NewRouter() *TRouter {
 
 		}
 	*/
+	router.webHandlerPool.New = func() interface{} {
+		return NewWebHandler(router)
+	}
+
+	router.rpcHandlerPool.New = func() interface{} {
+		return NewRpcHandler(router)
+	}
+
+	// inite HandlerPool New function
+	router.respPool.New = func() interface{} {
+		return http.NewResponser()
+	}
+
 	return router
 }
 
+// init when the router is active
 func (self *TRouter) init() {
-	if self.Server.Config.PrintRouterTree {
+	if self.server.Config.PrintRouterTree {
 		self.tree.PrintTrees()
 	}
+}
 
+// return the server
+func (self *TRouter) Server() *TServer {
+	return self.server
 }
 
 func (self *TRouter) RegisterModule(aMd IModule, build_path ...bool) {
@@ -147,6 +172,7 @@ func (self *TRouter) routeBefore(route *TRoute, hd IHandler, ctrl reflect.Value)
 					}
 				}
 
+				// TODO 优化去除Call
 				lMethod = lField.MethodByName("Request")
 				//Warn("routeBefore", key, lMethod.IsValid())
 				if lMethod.IsValid() {
@@ -399,10 +425,10 @@ func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
 			lParm = ctrl.FuncType.In(i) // 获得参数
 
 			//self.Logger.DbgLn("lParm%d:", i, lParm, lParm.Name())
+
 			switch lParm { //arg0.Elem() { //获得Handler的第一个参数类型.
-			case handler.TypeModel(): // if is a pointer of TWebHandler
+			case handler.TypeModel(): // TODO 优化调用 // if is a pointer of TWebHandler
 				{
-					//args = append(args, reflect.ValueOf(handler)) // 这里将传递本函数先前创建的handle 给请求函数
 					args = append(args, handler.ValueModel()) // 这里将传递本函数先前创建的handle 给请求函数
 				}
 			default:
@@ -412,10 +438,8 @@ func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
 					if i == 0 && lParm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
 						lActionTyp = lParm
 						lActionVal = self.objectPool.Get(lParm)
-						if !lActionVal.IsValid() {
-							lActionVal = reflect.New(lParm).Elem() //由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
-						}
-						args = append(args, lActionVal) //插入该类型空值
+						// lActionVal 由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
+						args = append(args, lActionVal.Elem()) //插入该类型空值
 						break
 					}
 
@@ -462,11 +486,11 @@ func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
 	}
 }
 
-func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, hd IHandler, ctrl reflect.Value) (reflect.Value, error) {
+func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, hd IHandler, ctrl reflect.Value) {
 	// 错误处理
 	defer func() {
 		if err := recover(); err != nil {
-			if self.Server.Config.RecoverPanic { //是否绕过错误处理直接关闭程序
+			if self.server.Config.RecoverPanic { //是否绕过错误处理直接关闭程序
 				self.routePanic(route, hd, ctrl)
 
 				for i := 1; ; i++ {
@@ -484,14 +508,9 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, ro
 
 	// TODO 优化速度GO2
 	// Invoke the method, providing a new value for the reply.
-	returnValues := function.Call(args)
-	// The return value for the method is an error.
-	errInter := returnValues[0].Interface()
-	if errInter != nil {
-		return reflect.ValueOf(nil), errInter.(error)
-	}
-
-	return args[2], nil
+	return_values := function.Call(args)
+	//logger.Dbg(hd, return_values)
+	hd.setData(return_values)
 }
 
 func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMessage, error) {
@@ -561,9 +580,11 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMess
 	//args = append(args, reflect.Zero(typeOfContext))
 	//args = append(args, argv)
 	//args = append(args, replnjb.xv..gpotvyyv)
+	handler := self.rpcHandlerPool.Get().(*TRpcHandler)
+	handler.connect(w, req, self, route)
 
 	// 执行控制器
-	self.callCtrl(route, nil)
+	self.callCtrl(route, handler)
 	/*
 		res, err := self.handleRequest(req.Message)
 		if err != nil {
@@ -576,11 +597,10 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMess
 	if !msg.IsOneway() {
 		log.Dbg("!IsOneway")
 		// 序列化数据
-		data, err := coder.Encode(replyv.Interface())
+		data, err := coder.Encode(handler.replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
 		if err != nil {
 			return handleError(res, err)
-
 		}
 		log.Dbg("data", replyv.Interface(), string(data))
 		res.Payload = data
@@ -623,7 +643,6 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 		logger.Info("[Path]%v [Route]%v", lPath, lRoute.FilePath)
 	}
 
-	//opy(lParam, Param)
 	if lRoute == nil {
 		self.routeHttpStatic(req, w) // # serve as a static file link
 		return
@@ -637,9 +656,10 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	*/
 
 	// # init Handler
-	handler := self.handlerPool.Get().(*TWebHandler)
+	handler := self.webHandlerPool.Get().(*TWebHandler)
 	handler.connect(w, req, self, lRoute)
 
+	// init dy url parm to handler
 	for _, param := range lParam {
 		handler.setPathParams(param.Name, param.Value)
 		//self.Logger.DbgLn("lParam", param.Name, param.Value)
@@ -660,20 +680,20 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	//设置默认的 content-type
 	//TODO 由Tree完成
 	//tm := time.Now().UTC()
-	lHandler.SetHeader(true, "Engine", "vectors web") //取当前时间
-	//lHandler.SetHeader(true, "Date", WebTime(tm)) //
-	//lHandler.SetHeader(true, "Content-Type", "text/html; charset=utf-8")
-	if lHandler.TemplateSrc != "" {
+	handler.SetHeader(true, "Engine", "Volts") //取当前时间
+	//handler.SetHeader(true, "Date", WebTime(tm)) //
+	//handler.SetHeader(true, "Content-Type", "text/html; charset=utf-8")
+	if handler.TemplateSrc != "" {
 		//添加[static]静态文件路径
 		logger.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR))
 		//	self.AddVar(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)) //添加[static]静态文件路径
-		lHandler.RenderArgs[STATIC_DIR] = path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)
+		handler.RenderArgs[STATIC_DIR] = path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)
 	}
 
 	// 结束Route并返回内容
-	lHandler.Apply()
+	handler.Apply()
 
-	self.handlerPool.Put(lHandler) // Pool 回收Handler
+	self.webHandlerPool.Put(handler) // Pool 回收Handler
 	return
 }
 

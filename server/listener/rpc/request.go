@@ -2,7 +2,7 @@ package rpc
 
 import (
 	"context"
-	"vectors/rpc/protocol"
+	"vectors/volts/protocol"
 )
 
 type (

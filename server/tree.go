@@ -164,6 +164,7 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 	if path == "" {
 		panic("echo: path cannot be empty")
 	}
+
 	if r.DelimitChar == '/' && path[0] != '/' {
 		path = "/" + path
 	}
@@ -342,6 +343,7 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 func (r *TTree) matchNode(aNode *TNode, aUrl string, aParams *Params) *TNode {
 	var retnil bool
 	if aNode.Type == StaticNode { // 静态节点
+		// match static node
 		if strings.HasPrefix(aUrl, aNode.Text) {
 			//fmt.Println("J态", aUrl, " | ", aNode.Text[1:])
 			if len(aUrl) == len(aNode.Text) {
@@ -478,16 +480,19 @@ func (r *TTree) matchNode(aNode *TNode, aUrl string, aParams *Params) *TNode {
 	return nil
 }
 
-func (r *TTree) Match(method string, url string) (*TRoute, Params) {
+func (r *TTree) Match(method string, path string) (*TRoute, Params) {
 	lRoot := r.Root[method]
 
-	var lParams = make(Params, 0, strings.Count(url, string(r.DelimitChar)))
-	for _, n := range lRoot.Children {
-		e := r.matchNode(n, url, &lParams)
-		if e != nil {
-			return e.Route, lParams
+	if lRoot != nil {
+		var lParams = make(Params, 0, strings.Count(path, string(r.DelimitChar)))
+		for _, n := range lRoot.Children {
+			e := r.matchNode(n, path, &lParams)
+			if e != nil {
+				return e.Route, lParams
+			}
 		}
 	}
+
 	return nil, nil
 }
 
@@ -530,10 +535,10 @@ func validNodes(nodes []*TNode) bool {
 
 // 添加路由到Tree
 func (self *TTree) AddRoute(aMethod, path string, aRoute *TRoute) {
-	// 解析并创建为Nodes的List形式
+	// to parse path as a List node
 	lNodes, lIsDyn := self.parsePath(path)
 
-	// 标记为动态路由
+	// marked as a dynamic route
 	aRoute.isDynRoute = lIsDyn // 即将Hook的新Route是动态地址
 
 	// 绑定Route到最后一个Node

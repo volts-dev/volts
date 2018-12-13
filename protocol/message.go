@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"vectors/rpc/codec"
+	"vectors/volts/codec"
 
 	//log "github.com/VectorsOrigin/logger"
 	"github.com/VectorsOrigin/utils"

@@ -1,6 +1,13 @@
 package server
 
 import (
+	"path"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/VectorsOrigin/logger"
+
 	//	"context"
 	//	"fmt"
 	"reflect"
@@ -14,6 +21,21 @@ import (
 )
 
 type (
+	// [scheme:][//[userinfo@]host][/[path]/controller.action][?query][#fragment]
+	TUrl struct {
+		Scheme string
+		Opaque string // encoded opaque data
+		//User       *Userinfo // username and password information
+		Host       string // host or host:port
+		Path       string // path (relative paths may omit leading slash)
+		Controller string
+		Action     string
+		//RawPath    string    // encoded path hint (see EscapedPath method); added in Go 1.5
+		//ForceQuery bool      // append a query ('?') even if RawQuery is empty; added in Go 1.7
+		//RawQuery   string    // encoded query values, without '?'
+		//Fragment   string    // fragment for references, without '#'
+	}
+
 	IModule interface {
 		// 返回Module所有Routes 理论上只需被调用一次
 		GetRoutes() *TTree
@@ -22,11 +44,14 @@ type (
 	// 服务模块 每个服务代表一个对象
 	TModule struct {
 		tree *TTree
-		name string        // name of service
-		rcvr reflect.Value // receiver of methods for the service
+		name string        // name of module
+		rcvr reflect.Value // receiver of methods for the module
 		typ  reflect.Type  // type of the receiver
 		//method   map[string]*web.TRoute   // registered methods
 		//function map[string]*functionType // registered functions
+
+		path     string // URL 路径
+		filePath string // 短文件系统路径-当前文件夹名称
 	}
 )
 
@@ -44,262 +69,229 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 	return isExported(t.Name()) || t.PkgPath() == ""
 }
 
-func NewModule() *TModule {
-	tree := NewRouteTree()
-	tree.IgnoreCase = true
-	tree.DelimitChar = '.' // 修改为xxx.xxx
+// get current file path without file name
+func cur_path() string {
+	_, file, _, _ := runtime.Caller(2) // level 3
+	path, _ := path.Split(file)
+	return path
+}
 
-	return &TModule{
-		tree: tree,
+// 随文件引用层次而变
+// get current file dir name
+func cur_dir_name() string {
+	_, file, _, _ := runtime.Caller(3) // level 3
+	path, _ := path.Split(file)
+	return filepath.Base(path)
+}
+
+func NewModule(paths ...interface{}) *TModule {
+	mod := &TModule{}
+
+	// 获取路径文件夹名称
+	_, file, _, _ := runtime.Caller(1) // level 3
+	file_path, _ := path.Split(file)
+	dir_name := filepath.Base(file_path) // TODO 过滤验证文件夹名称
+	//log.Dbg("vv", dir_name, file_path)
+	//TODO　验证文件夹名称
+
+	// 模块名称唯一的
+	mod.name = dir_name
+	mod.path = dir_name     // AaAaa>aa_aaa
+	mod.filePath = dir_name // static files path
+	if len(paths) != 0 {
+		mod.path = utils.DotCasedName(utils.Obj2Name(paths[0])) // AaAaa>aa_aaa
+
+		// 修改为指定文件路径
+		if len(paths) == 2 {
+			mod.filePath = paths[1].(string)
+		}
 	}
+
+	// init router tree
+	mod.tree = NewRouteTree()
+	mod.tree.IgnoreCase = true
+	//mod.tree.DelimitChar = '.' // 修改为xxx.xxx
+
+	return mod
+}
+
+func (self *TModule) Name() string {
+	return self.name
 }
 
 func (self *TModule) GetRoutes() *TTree {
 	return self.tree
 }
 
-// suitableMethods returns suitable Rpc methods of typ, it will report
-// error using log if reportErr is true.
-func (self *TModule) __suitableMethods(typ reflect.Type, reportErr bool) {
-	/*	methods := make(map[string]*methodType)
-		for m := 0; m < typ.NumMethod(); m++ {
-			method := typ.Method(m)
-			mtype := method.Type
-			mname := method.Name
-			// Method must be exported.
-			if method.PkgPath != "" {
-				continue
-			}
-			// Method needs four ins: receiver, context.Context, *args, *reply.
-			if mtype.NumIn() != 4 {
-				if reportErr {
-					log.Info("method", mname, "has wrong number of ins:", mtype.NumIn())
-				}
-				continue
-			}
-			// First arg must be context.Context
-			ctxType := mtype.In(1)
-			if !ctxType.Implements(typeOfContext) {
-				if reportErr {
-					log.Info("method", mname, " must use context.Context as the first parameter")
-				}
-				continue
-			}
-
-			// Second arg need not be a pointer.
-			argType := mtype.In(2)
-			if !isExportedOrBuiltinType(argType) {
-				if reportErr {
-					log.Info(mname, "parameter type not exported:", argType)
-				}
-				continue
-			}
-			// Third arg must be a pointer.
-			replyType := mtype.In(3)
-			if replyType.Kind() != reflect.Ptr {
-				if reportErr {
-					log.Info("method", mname, "reply type not a pointer:", replyType)
-				}
-				continue
-			}
-			// Reply type must be exported.
-			if !isExportedOrBuiltinType(replyType) {
-				if reportErr {
-					log.Info("method", mname, "reply type not exported:", replyType)
-				}
-				continue
-			}
-			// Method needs one out.
-			if mtype.NumOut() != 1 {
-				if reportErr {
-					log.Info("method", mname, "has wrong number of outs:", mtype.NumOut())
-				}
-				continue
-			}
-			// The return type of the method must be error.
-			if returnType := mtype.Out(0); returnType != typeOfError {
-				if reportErr {
-					log.Info("method", mname, "returns", returnType.String(), "not error")
-				}
-				continue
-			}
-			methods[mname] = &methodType{method: method, ArgType: argType, ReplyType: replyType}
-
-			//	argsReplyPools.Init(argType)
-			//	argsReplyPools.Init(replyType)
-		}
-
-		//	self.method = methods
-
-		// 错误提示
-		/*
-			if len(self.method) == 0 {
-				var errorStr string
-
-				// To help the user, see if a pointer receiver would work.
-				method := suitableMethods(reflect.PtrTo(service.typ), false)
-				if len(method) != 0 {
-					errorStr = "rpcx.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
-				} else {
-					errorStr = "rpcx.Register: type " + sname + " has no exported methods of suitable type"
-				}
-				log.Error(errorStr)
-				return errors.New(errorStr)
-			}*/
-
-	return
-
+func (self *TModule) GetPath() string {
+	return self.path
 }
 
-// 添加路由到Tree
-// AddFunction publish a func or bound method
-// name is the method name
-// function is a func or bound method
-// option includes Mode, Simple, Oneway and NameSpace
-func (self *TModule) addFunc(aType RouteType, path, name string, function interface{}) {
-	if name == "" {
-		panic("name can't be empty")
+func (self *TModule) GetFilePath() string {
+	return self.filePath
+}
+
+// 重组添加模块[URL]
+func (self *TModule) Url(method string, path string, controller interface{}) *TRoute {
+	switch strings.ToUpper(method) {
+	case "GET":
+		return self.url(CommomRoute, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
+
+	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE", "REST":
+		return self.url(CommomRoute, []string{method}, &TUrl{Path: path}, controller)
+
+	case "CONNECT": // RPC WS
+		return self.url(CommomRoute, []string{method}, &TUrl{Path: path}, controller)
+
+	default:
+		log.Panic("the params in Module.Url() %V:%V is invaild", method, path)
 	}
-	if function == nil {
-		panic("function can't be nil")
+
+	return nil
+}
+
+/*
+pos: true 为插入Before 反之After
+*/
+func (self *TModule) url(route_type RouteType, methods []string, url *TUrl, controller interface{}) *TRoute {
+	// check vaild
+	if route_type != ProxyRoute && controller == nil {
+		logger.Panic("the route must binding a controller!")
 	}
-	f, ok := function.(reflect.Value)
+
+	ctrl_value, ok := controller.(reflect.Value)
 	if !ok {
-		f = reflect.ValueOf(function)
+		ctrl_value = reflect.ValueOf(controller)
 	}
+	ctrl_type := ctrl_value.Type()
 
-	if f.Kind() != reflect.Func {
-		panic("function must be func or bound method")
-	}
-	/*
-		var options Options
-		if len(option) > 0 {
-			options = option[0]
+	if ctrl_value.Kind() == reflect.Struct {
+		object_name := utils.DotCasedName(utils.Obj2Name(controller))
+
+		n := ctrl_type.NumMethod()
+		var (
+			name   string
+			method reflect.Value
+			typ    reflect.Type
+		)
+
+		isREST := utils.InStrings("REST", methods...) > 0
+
+		for i := 0; i < n; i++ {
+			name = ctrl_type.Method(i).Name
+			method = ctrl_value.Method(i)
+			typ = method.Type()
+
+			// the rpc method needs one output.
+			if isREST && typ.NumOut() != 1 {
+				//log.Info("method", name, "has wrong number of outs:", typ.NumOut())
+				continue
+			}
+
+			if method.CanInterface() {
+				//log.Dbg("RegisterName", object_name, name, method)
+				// 添加注册方法
+				if isREST {
+					// 方法为对象方法名称 url 只注册对象名称
+					self.url(route_type, []string{typ.Name()}, &TUrl{Path: url.Path, Controller: object_name}, method)
+				} else {
+					self.url(route_type, methods, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
+				}
+			}
 		}
-		if options.NameSpace != "" && name != "*" {
-			name = options.NameSpace + "_" + name
-		}*/
 
-	//mm.mmLocker.Lock()
-	//if self.method[strings.ToLower(name)] == nil {
-	//	mm.MethodNames = append(mm.MethodNames, name)
-	//}
+		// the end of the struct mapping
+		return nil //TODO 返回路由
+
+	} else if ctrl_value.Kind() != reflect.Func {
+		panic("controller must be func or bound method")
+
+	}
+
+	// trim the Url to including "/" on begin of path
+	if !strings.HasPrefix(url.Path, "/") && url.Path != "/" {
+		url.Path = "/" + url.Path
+	}
 
 	route := &TRoute{
-		Path: path,
-		//FilePath: "",
-		Model:  self.name,
-		Action: name, //
-		Type:   aType,
-		//HookCtrl: make(map[string][]web.TMethodType),
-		//Ctrls:    make(map[string][]web.TMethodType),
+		Url:      url,
+		Path:     url.Path,
+		FilePath: self.filePath,
+		Model:    self.name,
+		Action:   "", //
+		Type:     route_type,
+		Ctrls:    make([]TMethodType, 0),
+		//HookCtrl: make([]TMethodType, 0),
 		//Host:     host,
 		//Scheme:   scheme,
+
 	}
-	method := f.Type()
-	mt := TMethodType{
-		Func:     f,
-		FuncType: method}
 
-	/*
-		for i := 0; i < t.NumIn(); i++ {
-			mt.ArgType = append(mt.ArgType, t.In(i)) // 添加参数类型
+	/*// # is it proxy route
+	if scheme != "" && host != "" {
+		route.Host = &urls.path{
+			Scheme: scheme,
+			Host:   host,
 		}
-			// return 值
-		for i := 0; i < t.NumOut(); i++ {
-			mt.ReplyType = append(mt.ReplyType, t.Out(i)) // 添加参数类型
-		}
-
+		route.isReverseProxy = true
+	}
 	*/
-	// Method must be exported.
-	if method.PkgPath() != "" {
-		return
-	}
+	mt := TMethodType{
+		Func:     ctrl_value,
+		FuncType: ctrl_type}
 
-	log.Dbg("NumIn", method.NumIn(), method.String())
-	// Method needs four ins: receiver, context.Context, *args, *reply.
-	if method.NumIn() != 4 {
-		log.Info("method", name, "has wrong number of ins:", method.NumIn())
-	}
-	if method.NumIn() != 3 {
-		log.Infof("rpcx.registerFunction: has wrong number of ins: %s", method.String())
-		return
-	}
-	if method.NumOut() != 1 {
-		log.Infof("rpcx.registerFunction: has wrong number of outs: %s", method.String())
-		return
-	}
+	// RPC route validate
+	if utils.InStrings("CONNECT", methods...) > 1 {
+		// Method must be exported.
+		if ctrl_type.PkgPath() != "" {
+			return route
+		}
 
-	// First arg must be context.Context
-	ctxType := method.In(0)
-	if !ctxType.Implements(typeOfContext) {
-		log.Info("method", name, " must use context.Context as the first parameter")
-		return
+		log.Dbg("NumIn", ctrl_type.NumIn(), ctrl_type.String())
+		// Method needs four ins: receiver, context.Context, *args, *reply.
+		if ctrl_type.NumIn() != 4 {
+			log.Info("method", url.Action, "has wrong number of ins:", ctrl_type.NumIn())
+		}
+		if ctrl_type.NumIn() != 3 {
+			log.Infof("rpcx.registerFunction: has wrong number of ins: %s", ctrl_type.String())
+			return route
+		}
+		if ctrl_type.NumOut() != 1 {
+			log.Infof("rpcx.registerFunction: has wrong number of outs: %s", ctrl_type.String())
+			return route
+		}
+
+		// First arg must be context.Context
+		ctxType := ctrl_type.In(0)
+		if !ctxType.Implements(typeOfContext) {
+			log.Info("method", url.Action, " must use context.Context as the first parameter")
+			return route
+		}
+
+		// Second arg need not be a pointer.
+		argType := ctrl_type.In(1)
+		if !isExportedOrBuiltinType(argType) {
+			log.Info(url.Action, "parameter type not exported:", argType)
+			return route
+		}
+		// Third arg must be a pointer.
+		replyType := ctrl_type.In(2)
+		if replyType.Kind() != reflect.Ptr {
+			log.Info("method", url.Action, "reply type not a pointer:", replyType)
+			return route
+		}
+
+		mt.ArgType = argType
+		mt.ReplyType = replyType
 	}
-
-	// Second arg need not be a pointer.
-	argType := method.In(1)
-	if !isExportedOrBuiltinType(argType) {
-		log.Info(name, "parameter type not exported:", argType)
-		return
-	}
-	// Third arg must be a pointer.
-	replyType := method.In(2)
-	if replyType.Kind() != reflect.Ptr {
-
-		log.Info("method", name, "reply type not a pointer:", replyType)
-
-		return
-	}
-
-	mt.ArgType = argType
-	mt.ReplyType = replyType
 
 	route.MainCtrl = mt
 	route.Ctrls = append(route.Ctrls, route.MainCtrl)
 
-	log.Dbg("addFunc", path+"."+name)
-	self.tree.AddRoute("CONNECT", path+"."+name, route)
-	//self.method[strings.ToLower(name)] = route
-	//mm.mmLocker.Unlock()
-}
-
-func (self *TModule) RegisterFunction(object_name, name string, function interface{}) {
-	self.addFunc(CommomRoute, object_name, name, function)
-}
-
-func (self *TModule) RegisterName(object_name string, obj interface{}) {
-	if obj == nil {
-		panic("obj can't be nil")
+	// register route
+	for _, m := range methods {
+		self.tree.AddRoute(m, url.Path, route)
 	}
-	v := reflect.ValueOf(obj)
-	t := v.Type()
-	n := t.NumMethod()
-	var (
-		name   string
-		method reflect.Value
-		typ    reflect.Type
-	)
-	for i := 0; i < n; i++ {
-		name = t.Method(i).Name
-		method = v.Method(i)
-		typ = method.Type()
-		// Method needs one out.
-		if typ.NumOut() != 1 {
-			log.Info("method", name, "has wrong number of outs:", typ.NumOut())
-			continue
-		}
 
-		if method.CanInterface() {
-			log.Dbg("RegisterName", object_name, name, method)
-			// 添加注册方法
-			self.addFunc(CommomRoute, object_name, name, method)
-		}
-	}
-}
-
-// 注册对象
-func (self *TModule) Register(obj interface{}) {
-	object_name := utils.DotCasedName(utils.Obj2Name(obj))
-	self.RegisterName(object_name, obj)
+	return route
 }

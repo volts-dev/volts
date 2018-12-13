@@ -6,20 +6,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
+	"vectors/volts"
+	listener "vectors/volts/server/listener"
+	rpc "vectors/volts/server/listener/rpc"
 
 	"github.com/VectorsOrigin/logger"
-
 	"github.com/VectorsOrigin/utils"
-
-	//	"errors"
-	//	"fmt"
-	///	"log"
-	"reflect"
-	//	"runtime"
-	listener "vectors/rpc/server/listener"
-	rpc "vectors/rpc/server/listener/rpc"
-	//log "github.com/VectorsOrigin/logger"
 )
 
 const (
@@ -75,6 +69,8 @@ type (
 		listener listener.IListeners
 		Router   *TRouter // 路由类
 		Config   *TConfig // 配置类
+		logger   volts.ILogger
+
 		// BlockCrypt for kcp.BlockCrypt
 		options map[string]interface{}
 
@@ -96,11 +92,12 @@ func NewServer(config ...FConfig) *TServer {
 		TModule: *NewModule(),
 		Router:  NewRouter(),
 		Config:  NewConfig(),
+		logger:  logger.NewLogger(""), // TODO 添加配置
 		//Plugins: &pluginContainer{},
 		//options: make(map[string]interface{}),
 	}
 	// 传递
-	srv.Router.Server = srv // 传递服务器指针
+	srv.Router.server = srv // 传递服务器指针
 
 	for _, fn := range config {
 		fn(srv)
@@ -120,7 +117,8 @@ func (self *TServer) RegisterMiddleware(obj ...IMiddleware) {
 
 }
 
-// Serve starts and listens RPC requests.
+// Serve starts and listens network requests.
+// newwork:tcp,http,rpc
 // It is blocked until receiving connectings from clients.
 func (self *TServer) Listen(network string, address ...string) (err error) {
 	// 解析地址
@@ -171,6 +169,7 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 func (s *TServer) serve(ln net.Listener) error {
 	switch s.network {
 	case "http": // serve as a http server
+
 		// register dispatcher
 		http_srv := &http.Server{Handler: s.Router}
 		s.listener = http_srv
@@ -200,6 +199,11 @@ func (self *TServer) parse_addr(addr []string) (host string, port int) {
 	return
 }
 
+// return the name of server
+func (self *TServer) Name() string {
+	return self.name
+}
+
 // Address returns listened address.
 func (self *TServer) Address() net.Addr {
 	if self.ln == nil {
@@ -209,13 +213,23 @@ func (self *TServer) Address() net.Addr {
 	return self.ln.Addr()
 }
 
-// 关闭服务器
+// close the server gracefully
 func (self *TServer) Close() error {
 	return self.listener.Close()
 }
 
+// shutdown the server forcedly
 func (self *TServer) Shutdown() error {
 	return self.listener.Shutdown(nil)
+}
+
+// Set the new logger for server
+func (self *TServer) SetLogger(log volts.ILogger) {
+	self.logger = log
+}
+
+func (self *TServer) Logger() volts.ILogger {
+	return self.logger
 }
 
 func (self *TServer) LoadConfigFile(filepath string) {

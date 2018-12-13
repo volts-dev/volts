@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"vectors/rpc"
-	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/volts"
+	"vectors/volts/codec"
+	"vectors/volts/message"
 
 	log "github.com/VectorsOrigin/logger"
 )

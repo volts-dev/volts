@@ -3,8 +3,8 @@ package client
 import (
 	"crypto/tls"
 	"time"
-	"vectors/rpc/codec"
-	"vectors/rpc/message"
+	"vectors/volts/codec"
+	"vectors/volts/message"
 )
 
 // Option contains all options for creating clients.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"vectors/rpc/server"
+	"vectors/volts/server"
 )
 
 type (

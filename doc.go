@@ -1,4 +1,4 @@
-package rpc
+package volts
 
 /*
 #模板全局默认变量

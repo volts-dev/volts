@@ -11,8 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"vectors/rpc/protocol"
-	listener "vectors/rpc/server/listener"
+	"vectors/volts/protocol"
+	listener "vectors/volts/server/listener"
 
 	log "github.com/VectorsOrigin/logger"
 )

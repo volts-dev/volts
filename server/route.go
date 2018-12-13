@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	// TODO 重新命名
 	CommomRoute RouteType = iota // extenion route
 	HookBeforeRoute
 	HookAfterRoute
@@ -39,6 +40,7 @@ type (
 		FileName       string
 		Type           RouteType // Route 类型 决定合并的形式
 		Host           *url.URL
+		Url            *TUrl
 		isReverseProxy bool //# 是反向代理
 		isDynRoute     bool // 是否*动态路由   /base/*.html
 
@@ -81,6 +83,13 @@ func (self *TRoute) CombineController(aFrom *TRoute) {
 		self.MainCtrl = aFrom.MainCtrl
 		self.Ctrls = []TMethodType{self.MainCtrl}
 		//logger.Dbg("CombineController", self.MainCtrl, aFrom.MainCtrl)
+	}
+}
+func (self *TRoute) GetProtocol() string {
+	if self.rpcHandler == nil {
+		return "HTTP"
+	} else {
+		return "RPC"
 	}
 }
 

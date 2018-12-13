@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"time"
-
 	"net"
+	"time"
 )
 
 type (
@@ -35,6 +34,7 @@ func init() {
 	listeners["tcp"] = tcpMakeListener
 	listeners["tcp4"] = tcpMakeListener
 	listeners["tcp6"] = tcp4MakeListener
+	listeners["rpc"] = tcp4MakeListener
 	listeners["http"] = tcp6MakeListener
 }
 

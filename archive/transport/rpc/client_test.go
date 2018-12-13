@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"vectors/rpc/client"
+	"vectors/volts/client"
 )
 
 func TestDirectSelector_Call(t *testing.T) {
