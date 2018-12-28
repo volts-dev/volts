@@ -135,6 +135,14 @@ func (self *TModule) GetFilePath() string {
 	return self.filePath
 }
 
+func (self *TModule) SetPath(path string) {
+	self.path = path
+}
+
+func (self *TModule) SetFilePath(filePath string) {
+	self.filePath = filePath
+}
+
 // set the var of the template
 func (self *TModule) SetTemplateVar(key string, value interface{}) {
 	self.templateVar[key] = value
