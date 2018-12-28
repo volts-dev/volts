@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"reflect"
