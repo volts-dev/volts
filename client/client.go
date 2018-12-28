@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"vectors/volts"
+	rpc "vectors/volts"
 	"vectors/volts/codec"
 	"vectors/volts/protocol"
 

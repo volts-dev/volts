@@ -17,7 +17,7 @@ func TestClient_IT(t *testing.T) {
 	defer s.Close()
 	time.Sleep(500 * time.Millisecond)
 	*/
-	addr := "127.0.0.1:5999" //s.Address().String()
+	addr := "127.0.0.1:16888" //s.Address().String()
 
 	client := NewClient(DefaultOption)
 	err := client.Connect("tcp", addr)

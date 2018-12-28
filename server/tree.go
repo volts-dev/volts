@@ -5,8 +5,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
-	"github.com/VectorsOrigin/logger"
+	"vectors/logger"
 
 	"github.com/VectorsOrigin/utils"
 )
@@ -24,11 +25,12 @@ import (
 	'/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
 */
 const (
-	StaticNode  NodeType    = iota // static, should equal
-	VariantNode                    // named node, match a non-/ is ok
-	AnyNode                        // catch-all node, match any
-	RegexpNode                     // regex node, should match
-	AllType     ContentType = iota
+	StaticNode  NodeType = iota // static, should equal
+	VariantNode                 // named node, match a non-/ is ok
+	AnyNode                     // catch-all node, match any
+	RegexpNode                  // regex node, should match
+
+	AllType ContentType = iota
 	NumberType
 	CharType
 )
@@ -77,11 +79,14 @@ type (
 		regexp *regexp.Regexp
 	}
 
+	// safely tree
 	TTree struct {
-		Text        string
-		Root        map[string]*TNode
-		IgnoreCase  bool
-		DelimitChar byte // Delimit Char xxx.xxx
+		sync.RWMutex // lock for conbine action
+		Text         string
+		Root         map[string]*TNode
+		IgnoreCase   bool
+		DelimitChar  byte // Delimit Char xxx<.>xxx
+		PrefixChar   byte // the Prefix Char </>xxx.xxx
 		//lock sync.RWMutex
 	}
 )
@@ -139,6 +144,7 @@ func NewRouteTree(config_fn ...ConfigOption) *TTree {
 	lTree := &TTree{
 		Root:        make(map[string]*TNode),
 		DelimitChar: '/',
+		PrefixChar:  '/',
 	}
 
 	/*
@@ -484,6 +490,12 @@ func (r *TTree) Match(method string, path string) (*TRoute, Params) {
 	lRoot := r.Root[method]
 
 	if lRoot != nil {
+		prefix_char := string(r.PrefixChar)
+		// trim the Url to including "/" on begin of path
+		if !strings.HasPrefix(path, prefix_char) && path != prefix_char {
+			path = prefix_char + path
+		}
+
 		var lParams = make(Params, 0, strings.Count(path, string(r.DelimitChar)))
 		for _, n := range lRoot.Children {
 			e := r.matchNode(n, path, &lParams)
@@ -548,7 +560,7 @@ func (self *TTree) AddRoute(aMethod, path string, aRoute *TRoute) {
 	lNode.Path = path
 	// 验证合法性
 	if !validNodes(lNodes) {
-		logger.Panic("express %s is not supported", path)
+		logger.Panicf("express %s is not supported", path)
 	}
 
 	// 插入该节点到Tree
@@ -593,6 +605,9 @@ func (self *TTree) conbine(aDes, aSrc *TNode) {
 
 // conbine 2 tree together
 func (self *TTree) Conbine(aTree *TTree) *TTree {
+	self.Lock()
+	defer self.Unlock()
+
 	for method, snode := range aTree.Root {
 		// 如果主树没有该方法叉则直接移植
 		if _, has := self.Root[method]; !has {

@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/VectorsOrigin/logger"
+	"vectors/logger"
+
 	"github.com/VectorsOrigin/utils"
 	"github.com/go-ini/ini"
 )

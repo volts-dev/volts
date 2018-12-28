@@ -14,7 +14,7 @@ import (
 	"vectors/volts/protocol"
 	listener "vectors/volts/server/listener"
 
-	log "github.com/VectorsOrigin/logger"
+	log "vectors/logger"
 )
 
 // 替代原来错误提示
@@ -42,6 +42,7 @@ var (
 type (
 	IDispatcher interface {
 		ServeTCP(w Response, req *Request)
+		ConnectBroke(w Response, req *Request)
 	}
 
 	// Server is rpc server that use TCP or UDP.
@@ -228,7 +229,6 @@ func (self *TServer) serve(conn net.Conn) {
 	// 保持连接
 	for {
 		// 服务器关闭检测
-		log.Info("loop start1")
 		if isShutdown(self) {
 			closeChannel(self, conn)
 			return
@@ -239,7 +239,7 @@ func (self *TServer) serve(conn net.Conn) {
 		if self.readTimeout != 0 {
 			conn.SetReadDeadline(t0.Add(self.readTimeout))
 		}
-		log.Info("loop start2")
+
 		//  ctx
 		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
 		w, err := self.readRequest(ctx, conn)
@@ -251,9 +251,10 @@ func (self *TServer) serve(conn net.Conn) {
 			} else {
 				log.Warnf("rpc: failed to read request: %v", err)
 			}
+
+			self.Dispatcher.ConnectBroke(w, w.req)
 			return
 		}
-		log.Info("loop start3")
 		if self.writeTimeout != 0 {
 			conn.SetWriteDeadline(t0.Add(self.writeTimeout))
 		}
@@ -283,9 +284,8 @@ func (self *TServer) serve(conn net.Conn) {
 
 			// 路由入口
 			self.Dispatcher.ServeTCP(w, w.req)
-			log.Info("out of  ServeTCP")
+			// save message to cache
 			protocol.PutMessageToPool(w.req.Message)
-			log.Info("out of  ServeTCP")
 			// TODO 添加中间件
 		}()
 	}
@@ -337,13 +337,15 @@ func (s *TServer) getDoneChanLocked() chan struct{} {
 	}
 	return s.doneChan
 }
+
+// TODO 修改函数名称 添加request独立返回值
 func (self *TServer) readRequest(ctx context.Context, r net.Conn) (w *response, err error) {
 	//@ 获取空白通讯包
 	msg := protocol.GetMessageFromPool() // request message
 
 	// TODO 自定义通讯包结构
 	// 获得请求参数
-	err = msg.Decode(r)
+	err = msg.Decode(r) // 等待读取客户端信号
 	if err != nil {
 		return nil, err
 	}

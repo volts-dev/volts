@@ -17,6 +17,7 @@ type (
 	}
 )
 
+// TODO 使用字符串名称
 // TODO 测试效率
 func NewPool() *TPool {
 	return &TPool{
@@ -74,8 +75,8 @@ func (self *TPool) Put(typ reflect.Type, val reflect.Value) {
 	if pool, ok := self.pools[typ]; ok {
 		pool.Put(val)
 	} else {
-		var lPool sync.Pool
-		lPool.Put(val)
-		self.pools[typ] = lPool
+		var pool sync.Pool
+		pool.Put(val)
+		self.pools[typ] = pool
 	}
 }

@@ -174,7 +174,7 @@ func (h *Header) SetSeq(seq uint64) {
 }
 
 // Clone clones from an message.
-func (m TMessage) Clone(msg *TMessage) *TMessage {
+func (m TMessage) CloneTo(msg *TMessage) *TMessage {
 	var header Header
 	copy(header[:], m.Header[:])
 	msg.Header = &header

@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 	"vectors/volts"
 	listener "vectors/volts/server/listener"
 	rpc "vectors/volts/server/listener/rpc"
 
-	"github.com/VectorsOrigin/logger"
+	"vectors/logger"
+
 	"github.com/VectorsOrigin/utils"
 )
 
@@ -59,6 +61,8 @@ var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 
 // Precompute the reflect type for context.
 var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
+
+//var typeOfRpcHandler = reflect.TypeOf((*TRpcHandler)(nil)).Elem()
 
 type (
 	// Server is rpc server that use TCP or UDP.
@@ -134,7 +138,7 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 		// 存储默认
 		sec, err = self.Config.NewSection(self.name)
 		if err != nil {
-			logger.Panic("creating ini' section faild! Name:%s Error:%s", self.name, err.Error())
+			self.logger.Panicf("creating ini' section faild! Name:%s Error:%s", self.name, err.Error())
 		}
 		if host != "" {
 			self.Config.Host = host
@@ -161,17 +165,23 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 		return err
 	}
 	self.ln = ln
-	logger.Info("Listening on address: %s", new_addr)
+	logger.Infof("%s listening on address: %s", network, new_addr)
 	return self.serve(ln)
 }
 
-// TODO 实现同端口不同协议
+// TODO 实现同端口不同协议 超时，加密
 func (s *TServer) serve(ln net.Listener) error {
 	switch s.network {
 	case "http": // serve as a http server
 
 		// register dispatcher
-		http_srv := &http.Server{Handler: s.Router}
+		http_srv := &http.Server{
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  120 * time.Second,
+			//TLSConfig:    s.Config.tlsConfig,
+			Handler: s.Router,
+		}
 		s.listener = http_srv
 		return http_srv.Serve(ln)
 	default: // serve as a RPC server

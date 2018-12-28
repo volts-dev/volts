@@ -3,8 +3,7 @@ package server
 import (
 	"fmt"
 	"sync"
-
-	"github.com/VectorsOrigin/logger"
+	"vectors/logger"
 )
 
 /**
@@ -28,22 +27,32 @@ var (
 )
 
 type (
-	IMiddleware interface {
-		/*
-			this will call before current ruote
-			@controller: the action interface which middleware bindding
-			@hd: the Handler interface for controller
-		*/
-		Request(controller interface{}, route *TRoute)
+	IMiddleware interface{}
 
-		/*
-			this will call after current ruote
-			@controller: the action interface which middleware bindding
-			@hd: the Handler interface for controller
-		*/
-		Response(controller interface{}, route *TRoute)
+	IMiddlewareInit interface {
+		Init(*TRouter)
+	}
 
-		Panic(controller interface{}, route *TRoute)
+	/*
+		this will call before current ruote
+		@controller: the action interface which middleware bindding
+		@hd: the Handler interface for controller
+	*/
+	IMiddlewareRequest interface {
+		Request(controller interface{}, route *TController)
+	}
+
+	/*
+		this will call after current ruote
+		@controller: the action interface which middleware bindding
+		@hd: the Handler interface for controller
+	*/
+	IMiddlewareResponse interface {
+		Response(controller interface{}, route *TController)
+	}
+
+	IMiddlewarePanic interface {
+		Panic(controller interface{}, route *TController)
 	}
 
 	TMiddlewareManager struct {

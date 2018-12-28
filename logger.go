@@ -1,9 +1,5 @@
 package volts
 
-import (
-	log "github.com/VectorsOrigin/logger"
-)
-
 /*
 	logger 负责Web框架的日志打印
 	@不提供给其他程序使用
@@ -20,22 +16,11 @@ type (
 		Warnf(format string, v ...interface{})
 		Infof(format string, v ...interface{})
 
-		Panic(v ...interface{})
+		//Panic(v ...interface{})
 		Dbg(v ...interface{})
 		Atk(v ...interface{})
-		Err(v ...interface{}) error
+		Err(v ...interface{})
 		Warn(v ...interface{})
 		Info(v ...interface{})
 	}
 )
-
-var (
-	logger = log.NewLogger("")
-)
-
-func init() {
-}
-
-func Logger() *log.TLogger {
-	return logger
-}

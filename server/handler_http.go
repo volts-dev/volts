@@ -21,7 +21,8 @@ import (
 
 	httpx "vectors/volts/server/listener/http"
 
-	"github.com/VectorsOrigin/logger"
+	"vectors/logger"
+
 	"github.com/VectorsOrigin/template"
 	"github.com/VectorsOrigin/utils"
 )
@@ -95,35 +96,29 @@ type (
 		response httpx.IResponseWriter //http.ResponseWriter
 		request  *http.Request         //
 
-		Router *TRouter
-		Route  *TRoute //执行本次Handle的Route
-		//Logger   *logger.TLogger
-		Template *template.TTemplateSet // 概念改进  为Hd添加 hd.Template.Params.Set("模板数据",Val)/Get()/Del()
-
-		//PostBody []byte          //废弃 Post 整体数据
-
-		//GET          map[string]string //废弃
-		//POST         map[string]string //废弃
-		COOKIE       map[string]string //
-		methodParams *TParamsSet       //map[string]string // Post Get 传递回来的参数
-		pathParams   *TParamsSet       //map[string]string // Url 传递回来的参数
+		Router       *TRouter
+		Route        *TRoute                //执行本次Handle的Route
+		Template     *template.TTemplateSet // 概念改进  为Hd添加 hd.Template.Params.Set("模板数据",Val)/Get()/Del()
+		methodParams *TParamsSet            //map[string]string // Post Get 传递回来的参数
+		pathParams   *TParamsSet            //map[string]string // Url 传递回来的参数
 		body         *TContentBody
 
 		// 模板
 		TemplateSrc string                 // 模板名称
-		RenderArgs  map[string]interface{} // TODO (name TemplateData) Args passed to the template.
+		templateVar map[string]interface{} // TODO (name TemplateData) Args passed to the template.
 
 		// 返回
 		ContentType string
-		Data        map[string]interface{} // 数据缓存在各个Controler间调用
+		_Data       map[string]interface{} // 数据缓存在各个Controler间调用
 		Result      []byte                 // 最终返回数据由Apply提交
 
-		CtrlIndex int // -- 提示目前控制器Index
+		ControllerIndex int // -- 提示目前控制器Index
 		//CtrlCount int           // --
-		isApplies bool          // -- 已经提交过
-		finalCall reflect.Value // -- handler 结束执行的动作处理器
-		val       reflect.Value
-		typ       reflect.Type
+		isDone    bool // -- 已经提交过
+		finalCall func(handler *TWebHandler)
+		//finalCall reflect.Value // -- handler 结束执行的动作处理器
+		val reflect.Value
+		typ reflect.Type
 	}
 
 	// 反向代理
@@ -185,7 +180,6 @@ func NewParamsSet(hd *TWebHandler) *TParamsSet {
 }
 
 func NewWebHandler(router *TRouter) *TWebHandler {
-	//func NewHandler(router *TRouter, route *TRoute, writer iResponseWriter, request *http.Request) *TWebHandler {
 	hd := &TWebHandler{
 		ILogger: router.server.logger,
 		Router:  router,
@@ -193,16 +187,11 @@ func NewWebHandler(router *TRouter) *TWebHandler {
 		//iResponseWriter: writer,
 		//Response:        writer,
 		//Request:         request,
-		//GET:    map[string]string{},
-		//POST:   map[string]string{},
-		COOKIE: map[string]string{},
-		//		SESSION:      map[string]interface{}{},
 		//MethodParams: map[string]string{},
 		//PathParams:   map[string]string{},
-		RenderArgs: make(map[string]interface{}),
-		Data:       make(map[string]interface{}),
+		templateVar: make(map[string]interface{}),
+		//Data:       make(map[string]interface{}),
 	} // 这个handle将传递给 请求函数的头一个参数func test(hd *webgo.TWebHandler) {}
-	//hd.Update(writer, request)
 
 	// 必须不为nil
 	//	hd.MethodParams=NewParamsSet(hd)
@@ -256,8 +245,8 @@ func (self *TParamsSet) AsFloat(name string) float64 {
 }
 
 // Call in the end of all controller
-func (self *TWebHandler) FinalCall(aFunc func(*TWebHandler)) {
-	self.finalCall = reflect.ValueOf(aFunc)
+func (self *TWebHandler) FinalCall(handler func(*TWebHandler)) {
+	self.finalCall = handler // reflect.ValueOf(handler)
 }
 
 /*
@@ -282,8 +271,8 @@ func (self *TWebHandler) Response() IResponse {
 	return self.response
 }
 
-func (self *TWebHandler) Done() bool {
-	return false
+func (self *TWebHandler) IsDone() bool {
+	return self.isDone
 }
 
 // the reflect model of Value
@@ -300,31 +289,31 @@ func (self *TWebHandler) TypeModel() reflect.Type {
 func (self *TWebHandler) MethodParams() *TParamsSet {
 	if self.methodParams == nil {
 		self.methodParams = NewParamsSet(self)
-	}
 
-	// 获得GET
-	q := self.request.URL.Query()
-	for key, _ := range q {
-		//Debug("key:", key)
-		self.methodParams.params[key] = q.Get(key)
-	}
+		// 获得GET
+		q := self.request.URL.Query()
+		for key, _ := range q {
+			//Debug("key:", key)
+			self.methodParams.params[key] = q.Get(key)
+		}
 
-	// 获得POST
-	ct := self.request.Header.Get("Content-Type")
-	ct, _, _ = mime.ParseMediaType(ct)
-	if ct == "multipart/form-data" {
-		self.request.ParseMultipartForm(256)
-	} else {
-		self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
-	}
+		// 获得POST
+		ct := self.request.Header.Get("Content-Type")
+		ct, _, _ = mime.ParseMediaType(ct)
+		if ct == "multipart/form-data" {
+			self.request.ParseMultipartForm(256)
+		} else {
+			self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
+		}
 
-	for key, _ := range self.request.Form {
-		//Debug("key2:", key)
-		self.methodParams.params[key] = self.request.FormValue(key)
-	}
+		for key, _ := range self.request.Form {
+			//Debug("key2:", key)
+			self.methodParams.params[key] = self.request.FormValue(key)
+		}
 
-	//self.PostBody, _ = ioutil.ReadAll(self.Request.Body) // 返回Body 但POST 的时候
-	//fmt.Println("PostBody", string(self.PostBody))
+		//self.PostBody, _ = ioutil.ReadAll(self.Request.Body) // 返回Body 但POST 的时候
+		//fmt.Println("PostBody", string(self.PostBody))
+	}
 
 	return self.methodParams
 }
@@ -344,36 +333,6 @@ func (self *TWebHandler) Body() *TContentBody {
 	return self.body
 }
 
-// 值由调用创建
-func (self *TWebHandler) _setMethodParams(MAX_FORM_SIZE int64) {
-	if self.methodParams == nil {
-		self.methodParams = NewParamsSet(self)
-	}
-
-	// 获得GET
-	q := self.request.URL.Query()
-	for key, _ := range q {
-		self.methodParams.params[key] = q.Get(key)
-	}
-
-	// 获得POST
-	ct := self.request.Header.Get("Content-Type")
-	ct, _, _ = mime.ParseMediaType(ct)
-	if ct == "multipart/form-data" {
-		self.request.ParseMultipartForm(MAX_FORM_SIZE)
-	} else {
-		self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
-	}
-
-	for key, _ := range self.request.Form {
-		self.methodParams.params[key] = self.request.FormValue(key)
-	}
-
-	//self.PostBody, _ = ioutil.ReadAll(self.Request.Body) // 返回Body 但POST 的时候
-	//fmt.Println("PostBody", string(self.PostBody))
-	return
-}
-
 // 值由Router 赋予
 func (self *TWebHandler) setPathParams(name, val string) {
 	self.pathParams.params[name] = val
@@ -390,21 +349,23 @@ func (self *TWebHandler) UpdateSession() {
 #刷新Handler的新请求数据
 */
 // Inite and Connect a new ResponseWriter when a new request is coming
-func (self *TWebHandler) connect(rw IResponse, req IRequest, router *TRouter, route *TRoute) {
+func (self *TWebHandler) reset(rw IResponse, req IRequest, router *TRouter, route *TRoute) {
+	self.pathParams = nil
+	self.methodParams = nil
 	self.request = req.(*http.Request)
 	self.response = rw.(*httpx.TResponseWriter)
 	self.IResponseWriter = rw.(*httpx.TResponseWriter)
 	self.Route = route
-	self.Template = router.Template
+	self.Template = router.template
 	self.TemplateSrc = ""
 	self.ContentType = ""
-	self.RenderArgs = make(map[string]interface{}) // 清空
-	self.Data = make(map[string]interface{})       // 清空
+	self.templateVar = make(map[string]interface{}) // 清空
+	//self.Data = make(map[string]interface{})       // 清空
 	self.body = nil
 	self.Result = nil
-	self.CtrlIndex = 0 // -- 提示目前控制器Index
+	self.ControllerIndex = 0 // -- 提示目前控制器Index
 	//self.CtrlCount = 0     // --
-	self.isApplies = false // -- 已经提交过
+	self.isDone = false // -- 已经提交过
 
 	//CookieSessions.ConnectSession(rw, req)
 	//MemorySessions.ConnectSession(rw, req)
@@ -421,12 +382,12 @@ func (self *TWebHandler) setData(v interface{}) {
 
 // 执行所以变动
 func (self *TWebHandler) Apply() {
-	if !self.isApplies {
+	if !self.isDone {
 		// 如果有模板文件输入
 		if self.TemplateSrc != "" {
 			self.SetHeader(true, "Content-Type", self.ContentType)
 			//self.Template.Render(self.TemplateSrc, self.response, self.RenderArgs)
-			err := self.Template.RenderToWriter(self.TemplateSrc, self.RenderArgs, self.response)
+			err := self.Template.RenderToWriter(self.TemplateSrc, self.templateVar, self.response)
 			if err != nil {
 				http.Error(self.response, "Apply fail:"+err.Error(), http.StatusInternalServerError)
 			}
@@ -434,15 +395,16 @@ func (self *TWebHandler) Apply() {
 			self.Write(self.Result)
 		}
 
-		self.isApplies = true
+		self.isDone = true
 	}
 
 	return
 }
 
-func (self *TWebHandler) CtrlCount() int {
+func (self *TWebHandler) _CtrlCount() int {
 	return len(self.Route.Ctrls)
 }
+
 func (self *TWebHandler) IP() (res []string) {
 	ip := strings.Split(self.request.RemoteAddr, ":")
 	if len(ip) > 0 {
@@ -479,7 +441,7 @@ func (self *TWebHandler) GetModulePath() string {
 	return self.Route.FileName
 }
 
-// RemoteAddr returns more real IP address.
+// RemoteAddr returns more real IP address of visitor.
 func (self *TWebHandler) RemoteAddr() string {
 	addr := self.request.Header.Get("X-Real-IP")
 	if len(addr) == 0 {
@@ -614,6 +576,7 @@ func (self *TWebHandler) Abort(status int, body string) {
 	self.response.WriteHeader(status)
 	self.response.Write([]byte(body))
 	//self.Result = body
+	self.isDone = true
 }
 
 func (self *TWebHandler) RespondString(content string) {
@@ -629,6 +592,9 @@ func (self *TWebHandler) RespondError(error string) {
 	self.Header().Set("X-Content-Type-Options", "nosniff")
 	self.WriteHeader(http.StatusInternalServerError)
 	fmt.Fprintln(self, error)
+
+	// stop run next ctrl
+	self.isDone = true
 }
 
 func (self *TWebHandler) NotModified() {
@@ -660,8 +626,12 @@ func (self *TWebHandler) Redirect(urlStr string, status ...int) {
 	self.WriteHeader(lStatusCode)
 	//self.Write([]byte("Redirecting to: " + urlStr))
 	self.Result = []byte("Redirecting to: " + urlStr)
+
+	// stop run next ctrl
+	//self.isDone = true
 }
 
+// return a download file redirection for client
 func (self *TWebHandler) Download(file_path string) error {
 	f, err := os.Open(file_path)
 	if err != nil {
@@ -679,48 +649,36 @@ func (self *TWebHandler) ServeFile(file_path string) {
 	http.ServeFile(self.response, self.request, file_path)
 }
 
-// 废弃 Ck
-// X+Org渲染 自动组合文件路径[根据Route的优先读取Module里Templete]
-func (self *TWebHandler) __RenderToResponse(aTemplateFile string, w http.ResponseWriter, context interface{}) {
-	var lContext map[string]interface{}
-	var ok bool
-	if lContext, ok = context.(map[string]interface{}); ok {
-		utils.MergeMaps(self.Router.GVar, lContext) // 添加Router的全局变量到Templete
+// render the template and return to the end
+func (self *TWebHandler) RenderTemplate(tmpl string, args interface{}) {
+	self.ContentType = "text/html; charset=utf-8"
+	if vars, ok := args.(map[string]interface{}); ok {
+		self.templateVar = utils.MergeMaps(self.Router.templateVar, vars) // 添加Router的全局变量到Templete
 	} else {
-		lContext = self.Router.GVar // 添加Router的全局变量到Templete
+		self.templateVar = self.Router.templateVar // 添加Router的全局变量到Templete
 	}
 
 	if self.Route.FilePath == "" {
-		err := self.Router.Template.RenderToWriter(filepath.Join(TEMPLATE_DIR, aTemplateFile), lContext, w)
-		if err != nil {
-			logger.Err(err.Error())
-			//Trace("RenderToResponse:", filepath.Join(MODULE_DIR, self.Route.FilePath,TEMPLATE_DIR, aTemplateFile))
-		}
+		self.TemplateSrc = filepath.Join(TEMPLATE_DIR, tmpl)
 	} else {
-		err := self.Router.Template.RenderToWriter(filepath.Join(MODULE_DIR, self.Route.FilePath, TEMPLATE_DIR, aTemplateFile), lContext, w)
-		if err != nil {
-			logger.Err(err.Error())
-			//Trace("RenderToResponse:", filepath.Join(MODULE_DIR, self.Route.FilePath,TEMPLATE_DIR, aTemplateFile))
-		}
+		self.TemplateSrc = filepath.Join(MODULE_DIR, self.Route.FilePath, TEMPLATE_DIR, tmpl)
+		//self.TemplateSrc = filepath.Join(self.Route.FilePath,TEMPLATE_DIR, tmpl)
+
 	}
 }
 
-func (self *TWebHandler) RenderTemplate(aTemplateFile string, aArgs interface{}) {
-	self.ContentType = "text/html; charset=utf-8"
-	if a, ok := aArgs.(map[string]interface{}); ok {
-		self.RenderArgs = utils.MergeMaps(self.Router.GVar, a) // 添加Router的全局变量到Templete
-	} else {
-		self.RenderArgs = self.Router.GVar // 添加Router的全局变量到Templete
-	}
+// remove the var from the template
+func (self *TWebHandler) DelTemplateVar(key string) {
+	delete(self.templateVar, key)
+}
 
-	if self.Route.FilePath == "" {
-		self.TemplateSrc = filepath.Join(TEMPLATE_DIR, aTemplateFile)
-	} else {
-		self.TemplateSrc = filepath.Join(MODULE_DIR, self.Route.FilePath, TEMPLATE_DIR, aTemplateFile)
-		//self.TemplateSrc = filepath.Join(self.Route.FilePath,TEMPLATE_DIR, aTemplateFile)
+func (self *TWebHandler) GetTemplateVar() map[string]interface{} {
+	return self.templateVar
+}
 
-	}
-	logger.Info("RenderTemplate", self.Route.FilePath, self.TemplateSrc)
+// set the var of the template
+func (self *TWebHandler) SetTemplateVar(key string, value interface{}) {
+	self.templateVar[key] = value
 }
 
 // Responds with 404 Not Found
@@ -731,32 +689,6 @@ func (self *TWebHandler) RespondWithNotFound(message ...string) {
 		return
 	}
 	self.Abort(http.StatusNotFound, message[0])
-}
-
-// Responds with 404 Not Found
-func (self *TWebHandler) RespondWithNotFoundPage(HtmlFile string) {
-	//self.Router.RenderTemplate(TEMPLATES_ROOT+"/"+HtmlFile, self, nil)
-	//	self.Router.Server.Template.RenderToWriter(filepath.Join(MODULE_DIR, self.Route.Path, TEMPLATE_DIR, HtmlFile), nil, self)
-}
-
-// Checks whether the HTTP method is GET or not
-func (self *TWebHandler) IsGet() bool {
-	return self.request.Method == "GET"
-}
-
-// Checks whether the HTTP method is POST or not
-func (self *TWebHandler) IsPost() bool {
-	return self.request.Method == "POST"
-}
-
-// Checks whether the HTTP method is PUT or not
-func (self *TWebHandler) IsPut() bool {
-	return self.request.Method == "PUT"
-}
-
-// Checks whether the HTTP method is DELETE or not
-func (self *TWebHandler) IsDelete() bool {
-	return self.request.Method == "DELETE"
 }
 
 func singleJoiningSlash(a, b string) string {
@@ -944,15 +876,6 @@ func sanitizeOrWarn(fieldName string, valid func(byte) bool, v string) string {
 func validCookieValueByte(b byte) bool {
 	return 0x20 < b && b < 0x7f && b != '"' && b != ',' && b != ';' && b != '\\'
 }
-
-/*
-func init() {
-	CookieSessions, _ = xsession.NewManager("cookie", `{"cookieName":"IV_C","enableSetCookie":true,"gclifetime":3600,"maxLifetime":86400,"ProviderConfig":"{\"cookieName\":\"agosessionid\",\"securityKey\":\"beegocookiehashkey\"}"}`)
-	go CookieSessions.GC()
-	MemorySessions, _ = xsession.NewManager("memory", `{"cookieName":"IV_M","gclifetime":3600,"maxLifetime":172800}`)
-	go MemorySessions.GC()
-}
-*/
 
 func (m *maxLatencyWriter) Write(p []byte) (int, error) {
 	m.mu.Lock()

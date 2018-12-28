@@ -3,9 +3,12 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"time"
+
+	quicconn "github.com/marten-seemann/quic-conn"
 )
 
 type (
@@ -36,6 +39,7 @@ func init() {
 	listeners["tcp6"] = tcp4MakeListener
 	listeners["rpc"] = tcp4MakeListener
 	listeners["http"] = tcp6MakeListener
+	listeners["http3"] = http3Listener // the 3rd generation of http QUIC
 }
 
 // RegisterMakeListener registers a MakeListener for network.
@@ -80,4 +84,11 @@ func tcp6MakeListener(config *tls.Config, address string) (ln net.Listener, err 
 	}
 
 	return ln, err
+}
+
+func http3Listener(config *tls.Config, address string) (ln net.Listener, err error) {
+	if config == nil {
+		return nil, errors.New("TLSConfig must be configured in server.Options")
+	}
+	return quicconn.Listen("udp", address, config)
 }

@@ -1,0 +1,17 @@
+<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+	<head>
+		<title >∷ {% block title %}{% endblock %} ∷ </title>
+	  	<script src="/{{.static}}/lib/components/webcomponentsjs/webcomponents.js"></script>
+		<link rel="icon" href="/{{.static}}/src/img/ryron.ico" />
+		<link rel="stylesheet" type="text/css" href="/{{.static}}/src/css/admin.css" shim-shadowdom />
+		<!--link rel="stylesheet" href="	http://fonts.googleapis.com/css?family=Oswald:400,300,700" /!-->
+		
+		<link rel="import" href="/{{.static}}/lib/app/app.html">
+		{% block head %}{% endblock %}
+		{% block script %}{% endblock %}
+	</head>
+	<body id="app">
+		{{.VOLTS}}
+	</body>
+</html>

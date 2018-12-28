@@ -17,11 +17,10 @@ import (
 	"vectors/volts/server/listener/http"
 	"vectors/volts/server/listener/rpc"
 
-	"github.com/VectorsOrigin/utils"
+	log "vectors/logger"
 
-	"github.com/VectorsOrigin/logger"
-	log "github.com/VectorsOrigin/logger"
 	"github.com/VectorsOrigin/template"
+	"github.com/VectorsOrigin/utils"
 )
 
 // Can connect to RPC service using HTTP CONNECT to rpcPath.
@@ -32,10 +31,8 @@ type (
 		sync.RWMutex
 		handlerMapMu sync.RWMutex
 		handlerMap   map[string]*TModule
-		// TODO 全局变量. 需改进
-		GVar map[string]interface{}
+
 		// TODO 修改进其他包 或者独立出来
-		Template *template.TTemplateSet
 
 		readTimeout  time.Duration
 		writeTimeout time.Duration
@@ -47,10 +44,11 @@ type (
 		rpcHandlerPool sync.Pool
 		respPool       sync.Pool
 
-		server     *TServer
-		tree       *TTree
-		middleware *TMiddlewareManager // 中间件
-
+		server      *TServer
+		tree        *TTree
+		middleware  *TMiddlewareManager // 中间件
+		template    *template.TTemplateSet
+		templateVar map[string]interface{} // TODO 全局变量. 需改进
 	}
 )
 
@@ -62,14 +60,15 @@ func NewRouter() *TRouter {
 	router := &TRouter{
 		tree:       tree,
 		handlerMap: make(map[string]*TModule),
-		GVar:       map[string]interface{}{},
 		objectPool: NewPool(),
 		//handlerPool: NewPool(),
-		middleware: NewMiddlewareManager(),
+		middleware:  NewMiddlewareManager(),
+		template:    template.NewTemplateSet(),
+		templateVar: make(map[string]interface{}),
 	}
 
 	//router.GVar["Version"] = ROUTER_VER
-	router.GVar["StratDateTime"] = time.Now().UTC()
+	router.templateVar["StratDateTime"] = time.Now().UTC()
 
 	/*
 		router.msgPool.New = func() interface{} {
@@ -104,6 +103,15 @@ func (self *TRouter) init() {
 	if self.server.Config.PrintRouterTree {
 		self.tree.PrintTrees()
 	}
+
+	// init middleware
+	for _, name := range self.middleware.Names {
+		ml := self.middleware.Get(name)
+		if m, ok := ml.(IMiddlewareInit); ok {
+			m.Init(self)
+		}
+
+	}
 }
 
 // return the server
@@ -111,20 +119,20 @@ func (self *TRouter) Server() *TServer {
 	return self.server
 }
 
-func (self *TRouter) RegisterModule(aMd IModule, build_path ...bool) {
-	if aMd == nil {
-		log.Warn("RegisterModule is nil")
+func (self *TRouter) RegisterModule(mod IModule, build_path ...bool) {
+	if mod == nil {
+		self.server.logger.Warn("RegisterModule is nil")
 		return
 	}
 
-	self.Lock() //<-锁
-	self.tree.Conbine(aMd.GetRoutes())
-	self.Unlock() //<-
+	self.tree.Conbine(mod.GetRoutes())
+
+	utils.MergeMaps(mod.GetTemplateVar(), self.templateVar)
 }
 
 // 注册中间件
-func (self *TRouter) RegisterMiddleware(aMd ...IMiddleware) {
-	for _, m := range aMd {
+func (self *TRouter) RegisterMiddleware(mod ...IMiddleware) {
+	for _, m := range mod {
 		lType := reflect.TypeOf(m)
 		if lType.Kind() == reflect.Ptr {
 			lType = lType.Elem()
@@ -135,148 +143,132 @@ func (self *TRouter) RegisterMiddleware(aMd ...IMiddleware) {
 
 }
 
-// TODO:过滤 _ 的中间件
-func (self *TRouter) routeBefore(route *TRoute, hd IHandler, ctrl reflect.Value) {
+// TODO 优化 route the midware request,response,panic
+func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHandler, c *TController, ctrl reflect.Value) {
 	// Action结构外的其他中间件
 	var (
-		IsFound         bool
-		lField, lMethod reflect.Value
-		lType           reflect.Type
-		lNew            interface{}
-		//		ml              IMiddleware
+		isFound bool
+		//fn reflect.Value
+		mid_val, mid_ptr_val reflect.Value
+		mid_typ              reflect.Type
+		mid_name             string // name of middleware
+		mid_itf              interface{}
 	)
 
-	for _, key := range self.middleware.Names {
-		// @:直接返回 放弃剩下的Handler
-		if hd.Done() {
-			break
-		}
-
-		ml := self.middleware.Get(key)
-		IsFound = false
-		//TODO 优化遍历
-		for i := 0; i < ctrl.NumField(); i++ { // Action结构下的中间件
-			lField = ctrl.Field(i) // 获得成员
-			lType = lField.Type()
-
-			if lType.Kind() == reflect.Ptr {
-				lType = lType.Elem()
-			}
-
-			if lType.String() == key && ml != nil {
-				if lField.IsNil() {
-					lNew = cloneInterfacePtrFeild(ml) // 克隆
-					lMVal := reflect.ValueOf(lNew)    // or reflect.ValueOf(lMiddleware).Convert(lField.Type())
-					if lField.Kind() == lMVal.Kind() {
-						lField.Set(lMVal) // 通过
-					}
-				}
-
-				// TODO 优化去除Call
-				lMethod = lField.MethodByName("Request")
-				//Warn("routeBefore", key, lMethod.IsValid())
-				if lMethod.IsValid() {
-					lMethod.Call([]reflect.Value{ctrl, reflect.ValueOf(route)}) //执行方法
-				}
-			}
-			// STEP:结束循环
-			IsFound = true
-			break
-		}
-
-		// 更新非控制器中的中间件
-		if !IsFound {
-			//Warn(" routeBefore not IsFound", key, ctrl.Interface(), hd)
-			ml.Request(ctrl.Interface(), route)
-		}
-	}
-}
-
-func (self *TRouter) routeAfter(route *TRoute, hd IHandler, ctrl reflect.Value) {
-	var (
-		lField, lMethod reflect.Value
-		lType           reflect.Type
-		lNew            interface{}
-	)
+	name_lst := make(map[string]bool) // TODO　不用MAP list of midware found it ctrl
 	for key, ml := range self.middleware.middlewares {
-		for i := 0; i < ctrl.NumField(); i++ { // Action结构下的中间件
-			lField = ctrl.Field(i) // 获得成员
-			lType = lField.Type()
-
-			if lType.Kind() == reflect.Ptr {
-				lType = lType.Elem()
-			}
-
-			//self.Server.Logger.DbgLn("Name %s %s", key, lType.Name(), lField.Interface(), lField.Kind(), lField.String())
-
-			if lType.String() == key {
-				//Warn("lField.IsValid(),lField.IsNil()", lField.IsValid(), lField.IsNil())
-				//if lField.IsValid() { // 存在该Filed
-				//	过滤继承的结构体
-				//	type TAction struct {
-				//		TEvent
-				//	}
-				if lField.Kind() != reflect.Struct && lField.IsNil() {
-					//Warn("!ctrl.IsValid()", lrActionVal)
-					lNew = cloneInterfacePtrFeild(ml)                    // 克隆
-					lNew.(IMiddleware).Response(ctrl.Interface(), route) // 首先获得基本数据
-					lMVal := reflect.ValueOf(lNew)                       // or reflect.ValueOf(lMiddleware).Convert(lField.Type())
-
-					if lField.Kind() == lMVal.Kind() {
-						lField.Set(lMVal) // 通过
-					}
-				} else {
-					// 尝试获取方法
-					lMethod = lField.MethodByName("Response")
-					if lMethod.IsValid() {
-						lMethod.Call([]reflect.Value{ctrl, reflect.ValueOf(route)}) //执行方法
-					}
-				}
-				//}
-
-				// STEP:结束循环
-				break
-			} else {
-				//Warn(" routeBefore", key, ctrl.Interface(), hd)
-				ml.Response(ctrl.Interface(), route)
-			}
+		// @:直接返回 放弃剩下的Handler
+		if handler.IsDone() {
+			name_lst = nil // not report
+			break
 		}
-	}
-}
 
-func (self *TRouter) routePanic(route *TRoute, hd IHandler, ctrl reflect.Value) {
-	if ctrl.IsValid() {
-		lNameLst := make(map[string]bool)
-		// @@@@@@@@@@有待优化 可以缓存For结果
+		// 继续
+		isFound = false
+		//TODO 优化遍历
+		// TODO 有待优化 可以缓存For结果
 		for i := 0; i < ctrl.NumField(); i++ { // Action结构下的中间件
-			lField := ctrl.Field(i) // 获得成员
-			lType := lField.Type()
+			mid_val = ctrl.Field(i) // 获得成员
+			mid_typ = mid_val.Type()
 
 			// 过滤继承结构的中间件
-			if lField.Kind() == reflect.Struct {
-				continue
+			//if lField.Kind() == reflect.Struct {
+			//	continue
+			//}
+
+			// get the name of middleware from the Type
+			if mid_typ.Kind() == reflect.Ptr {
+				mid_typ = mid_typ.Elem()
 			}
 
-			if lType.Kind() == reflect.Ptr {
-				lType = lType.Elem()
-			}
-			lFieldName := lType.Name() + lType.String()
-			if self.middleware.Contain(lFieldName) {
-				lNameLst[lFieldName] = true
-				m := lField.MethodByName("Panic")
-				if m.IsValid() {
-					lHdValue := reflect.ValueOf(hd)
-					//self.Logger.Info("", m, lHdValue, ctrl)
-					m.Call([]reflect.Value{ctrl, lHdValue}) //执行方法
+			mid_name = mid_typ.String()
+			log.Dbg("afsdf", mid_name, key, mid_name == key)
+			if mid_name == key {
+				name_lst[mid_name] = true // mark it as found
+
+				if mid_val.Kind() == reflect.Struct {
+					//	过滤继承的结构体
+					//	type TAction struct {
+					//		TEvent
+					//	}
+					// TODO 优化去除Call 但是中间件必须是ctrl 上的而非中间件管理器的
+					if method == "request" {
+						//fn = mid_val.MethodByName("Request")
+						if m, ok := ml.(IMiddlewareRequest); ok {
+							m.Request(ctrl.Interface(), c)
+						}
+					} else if method == "response" {
+						//fn = mid_val.MethodByName("Response")
+						if m, ok := ml.(IMiddlewareResponse); ok {
+							m.Response(ctrl.Interface(), c)
+						}
+					} else if method == "panic" {
+						//fn = mid_val.MethodByName("Panic")
+						if m, ok := ml.(IMiddlewarePanic); ok {
+							m.Panic(ctrl.Interface(), c)
+						}
+					}
+
+					//if fn.IsValid() {
+					//	fn.Call([]reflect.Value{ctrl, reflect.ValueOf(c)}) //执行方法
+					//}
+				} else if mid_val.Kind() != reflect.Struct && mid_val.IsNil() {
+					mid_itf, mid_ptr_val = cloneInterfacePtrFeild(ml) // 克隆
+					if method == "request" {
+						if m, ok := mid_itf.(IMiddlewareRequest); ok {
+							m.Request(ctrl.Interface(), c)
+						}
+
+					} else if method == "response" {
+						if m, ok := ml.(IMiddlewareResponse); ok {
+							m.Response(ctrl.Interface(), c)
+						}
+
+					} else if method == "panic" {
+						if m, ok := mid_itf.(IMiddlewarePanic); ok {
+							m.Panic(ctrl.Interface(), c)
+						}
+					}
+					//mid_ptr_val := reflect.ValueOf(mid_itf) // or reflect.ValueOf(lMiddleware).Convert(mid_val.Type())
+
+					// set back the middleware pointer to the controller
+					if mid_val.Kind() == mid_ptr_val.Kind() {
+						mid_val.Set(mid_ptr_val) // 通过
+					}
+
 				}
+				// STEP:结束循环
+				isFound = true
+				break
+			} else {
+				name_lst[mid_name] = false
 			}
 		}
 
-		// 重复斌执行上面 遗漏的
-		for key, ml := range self.middleware.middlewares { // Action结构下的中间件
-			if !lNameLst[key] && ml != nil {
-				ml.Panic(ctrl.Interface(), route)
+		// invoke the minddleware which not use in the controller
+		// 更新非控制器中的中间件
+		if !isFound {
+			//Warn(" routeBefore not isFound", key, ctrl.Interface(), handler)
+			if method == "request" {
+				if m, ok := ml.(IMiddlewareRequest); ok {
+					m.Request(ctrl.Interface(), c)
+				}
+			} else if method == "response" {
+				if m, ok := ml.(IMiddlewareResponse); ok {
+					m.Response(ctrl.Interface(), c)
+				}
+			} else if method == "panic" {
+				if m, ok := ml.(IMiddlewarePanic); ok {
+					m.Panic(ctrl.Interface(), c)
+				}
 			}
+		}
+	}
+
+	// report the name of midware which on controller but not register in the server
+	for name, found := range name_lst {
+		if !found {
+			self.server.logger.Errf("%v isn't be register in controller %v", name, ctrl.String())
 		}
 	}
 }
@@ -375,7 +367,7 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 	if req.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(nethttp.Hijacker).Hijack()
 		if err != nil {
-			log.Info("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+			self.server.logger.Infof("rpc hijacking %v:%v", req.RemoteAddr, ": ", err.Error())
 			return
 		}
 		io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
@@ -387,7 +379,7 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 
 		msg, err := protocol.Read(conn)
 		if err != nil {
-			log.Info("rpc Read ", err.Error())
+			self.server.logger.Info("rpc Read ", err.Error())
 			return
 		}
 
@@ -407,26 +399,30 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 }
 
 //
-func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
+func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) {
 	var (
 		args          []reflect.Value //handler参数
 		lActionVal    reflect.Value
 		lActionTyp    reflect.Type
-		lParm         reflect.Type
+		parm          reflect.Type
 		CtrlValidable bool
 	)
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	//logger.Dbg("lParm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, lRoute.MainCtrl, len(lRoute.Ctrls), lRoute.Ctrls)
+	//logger.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, lRoute.MainCtrl, len(lRoute.Ctrls), lRoute.Ctrls)
 	for _, ctrl := range route.Ctrls {
-		//handler.CtrlIndex = index //index
+		// stop runing ctrl
+		if handler.IsDone() {
+			break
+		}
+
+		//handler.ControllerIndex = index //index
 		// STEP#: 获取<Ctrl.Func()>方法的参数
 		for i := 0; i < ctrl.FuncType.NumIn(); i++ {
-			lParm = ctrl.FuncType.In(i) // 获得参数
+			parm = ctrl.FuncType.In(i) // 获得参数
 
-			//self.Logger.DbgLn("lParm%d:", i, lParm, lParm.Name())
-
-			switch lParm { //arg0.Elem() { //获得Handler的第一个参数类型.
+			//log.Dbg("aaa", parm.String(), handler.TypeModel().String())
+			switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
 			case handler.TypeModel(): // TODO 优化调用 // if is a pointer of TWebHandler
 				{
 					args = append(args, handler.ValueModel()) // 这里将传递本函数先前创建的handle 给请求函数
@@ -434,31 +430,47 @@ func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
 			default:
 				{
 					//
-					//Trace("lParm->default")
-					if i == 0 && lParm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
-						lActionTyp = lParm
-						lActionVal = self.objectPool.Get(lParm)
+					log.Dbg("aaa", parm.Kind())
+					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
+						lActionTyp = parm
+						lActionVal = self.objectPool.Get(parm)
+						if lActionVal.Kind() == reflect.Ptr {
+							lActionVal = lActionVal.Elem()
+						}
 						// lActionVal 由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
-						args = append(args, lActionVal.Elem()) //插入该类型空值
+						args = append(args, lActionVal) //插入该类型空值
 						break
 					}
 
+					// TODO优化判断  插入RPC 参数和返回
+					if rpc_handler := ct.GetRpcHandler(); rpc_handler != nil {
+
+						if i == 2 {
+							args = append(args, rpc_handler.argv) //插入该类型空值
+						}
+						if i == 3 {
+							args = append(args, rpc_handler.replyv) //插入该类型空值
+						}
+						break
+					}
+
+					/* TODO 由于接口冲突故考虑放弃支持 handler.Request，handler.Response
 					// STEP:如果是参数是 http.ResponseWriter 值
-					if strings.EqualFold(lParm.String(), "http.ResponseWriter") { // Response 类
+					if strings.EqualFold(parm.String(), "http.ResponseWriter") { // Response 类
 						//args = append(args, reflect.ValueOf(w.ResponseWriter))
 						args = append(args, reflect.ValueOf(handler.Response()))
 						break
 					}
 
 					// STEP:如果是参数是 http.Request 值
-					if lParm == reflect.TypeOf(handler.Request()) { // request 指针
+					if parm == reflect.TypeOf(handler.Request()) { // request 指针
 						args = append(args, reflect.ValueOf(handler.Request())) //TODO (同上简化reflect.ValueOf）
 						break
 					}
+					*/
 
-					// STEP#:
-					args = append(args, reflect.Zero(lParm)) //插入该类型空值
-
+					// by default append a zero value
+					args = append(args, reflect.Zero(parm)) //插入该类型空值
 				}
 			}
 		}
@@ -466,18 +478,18 @@ func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
 		CtrlValidable = lActionVal.IsValid()
 		if CtrlValidable {
 			//self.Logger.Info("routeBefore")
-			self.routeBefore(route, handler, lActionVal)
+			self.routeMiddleware("request", route, handler, ct, lActionVal)
 		}
 		//logger.Infof("safelyCall %v ,%v", handler.Response.Written(), args)
-		if !handler.Done() {
+		if !handler.IsDone() {
 			//self.Logger.Info("safelyCall")
 			// -- execute Handler or Panic Event
-			self.safelyCall(ctrl.Func, args, route, handler, lActionVal) //传递参数给函数.<<<
+			self.safelyCall(ctrl.Func, args, route, handler, ct, lActionVal) //传递参数给函数.<<<
 		}
 
-		if !handler.Done() && CtrlValidable {
+		if !handler.IsDone() && CtrlValidable {
 			// # after route
-			self.routeAfter(route, handler, lActionVal)
+			self.routeMiddleware("response", route, handler, ct, lActionVal)
 		}
 
 		if CtrlValidable {
@@ -486,51 +498,45 @@ func (self *TRouter) callCtrl(route *TRoute, handler IHandler) {
 	}
 }
 
-func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, hd IHandler, ctrl reflect.Value) {
-	// 错误处理
+func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, handler IHandler, ct *TController, ctrl reflect.Value) {
 	defer func() {
 		if err := recover(); err != nil {
 			if self.server.Config.RecoverPanic { //是否绕过错误处理直接关闭程序
-				self.routePanic(route, hd, ctrl)
+				self.routeMiddleware("panic", route, handler, ct, ctrl)
 
 				for i := 1; ; i++ {
 					_, file, line, ok := runtime.Caller(i)
 					if !ok {
 						break
 					}
-					logger.Err(file, line)
+					log.Err(file, line)
 				}
 			} else {
-				logger.Panic("", err)
+				panic(err)
 			}
 		}
 	}()
 
 	// TODO 优化速度GO2
 	// Invoke the method, providing a new value for the reply.
-	return_values := function.Call(args)
-	//logger.Dbg(hd, return_values)
-	hd.setData(return_values)
+	function.Call(args)
 }
 
-func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMessage, error) {
+// the API for RPC
+func (self *TRouter) ConnectBroke(w rpc.Response, req *rpc.Request) {
+	//self.routeMiddleware("disconnected", route, handler, ct, lActionVal)
+}
+
+func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) {
 	// 心跳包 直接返回
 	if req.Message.IsHeartbeat() {
 		//data := req.Message.Encode()
 		//w.Write(data)
 		//TODO 补全状态吗
-		return nil, nil
+		return
 	}
 
 	var (
-		coder codec.ICodec
-		//		args       []reflect.Value //handler参数
-		replyv reflect.Value
-		//	lActionVal reflect.Value
-		//  lActionTyp reflect.Type
-		//	parm reflect.Type
-		//		lIn           interface{}
-		//CtrlValidable bool
 		err error
 	)
 
@@ -539,70 +545,60 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMess
 	//	share.ResMetaDataKey, resMetadata)
 
 	//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-	msg := req.Message
+	msg := req.Message // return the packet struct
 	serviceName := msg.ServicePath
 	//methodName := msg.ServiceMethod
-	//log.Dbg("3333", msg.SerializeType())
 
-	// 克隆
+	// TODO 无需克隆
 	resraw := protocol.GetMessageFromPool()
-	res := msg.Clone(resraw)
+	res := msg.CloneTo(resraw)
+
 	//protocol.PutMessageToPool(resraw)
-	//log.Dbg("handleRequest", msg.SerializeType(), res.SerializeType())
 	res.SetMessageType(protocol.Response)
 	// 匹配路由树
-	log.Dbg("handleRequest", msg.Path, msg.ServicePath+"."+msg.ServiceMethod)
 	//route, _ := self.tree.Match("HEAD", msg.ServicePath+"."+msg.ServiceMethod)
+	var coder codec.ICodec
+	var handler *TRpcHandler
 	route, _ := self.tree.Match("CONNECT", msg.Path)
 	if route == nil {
 		err = errors.New("rpc: can't match route " + serviceName)
-		return handleError(res, err)
-	}
+		handleError(res, err)
+	} else {
+		// 获取支持的序列模式
+		coder = codec.Codecs[msg.SerializeType()]
+		if coder == nil {
+			err = fmt.Errorf("can not find codec for %d", msg.SerializeType())
+			handleError(res, err)
 
-	// 获取支持的序列模式
-	coder = codec.Codecs[msg.SerializeType()]
-	if coder == nil {
-		err = fmt.Errorf("can not find codec for %d", msg.SerializeType())
-		return handleError(res, err)
-	}
+		} else {
+			// 获取RPC参数
+			// 获取控制器参数类型
+			var argv = self.objectPool.Get(route.MainCtrl.ArgType)
+			err = coder.Decode(msg.Payload, argv.Interface()) //反序列化获得参数值
 
-	// 获取RPC参数
-	log.Dbg("handleRequest", msg.SerializeType())
-	// 序列化
-	var argv = self.objectPool.Get(route.MainCtrl.ArgType)
-	err = coder.Decode(msg.Payload, argv.Interface())
-	if err != nil {
-		return handleError(res, err)
-	}
-	log.Dbg("handleRequest", argv)
-	replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
-	log.Dbg("ctrl", argv, replyv)
-	//args = append(args, reflect.Zero(typeOfContext))
-	//args = append(args, argv)
-	//args = append(args, replnjb.xv..gpotvyyv)
-	handler := self.rpcHandlerPool.Get().(*TRpcHandler)
-	handler.connect(w, req, self, route)
+			if err != nil {
+				handleError(res, err)
+			} else {
+				handler = self.rpcHandlerPool.Get().(*TRpcHandler)
+				handler.reset(w, req, self, route)
+				handler.argv = argv
+				handler.replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
 
-	// 执行控制器
-	self.callCtrl(route, handler)
-	/*
-		res, err := self.handleRequest(req.Message)
-		if err != nil {
-			log.Warnf("rpc: failed to handle request: %v", err)
+				// 执行控制器
+				self.callCtrl(route, &TController{rpcHandler: handler}, handler)
+			}
 		}
-	*/
+	}
 
 	// 返回数据
-	log.Dbg("handleRequest", msg.IsOneway())
 	if !msg.IsOneway() {
-		log.Dbg("!IsOneway")
 		// 序列化数据
 		data, err := coder.Encode(handler.replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
 		if err != nil {
-			return handleError(res, err)
+			handleError(res, err)
+			return
 		}
-		log.Dbg("data", replyv.Interface(), string(data))
 		res.Payload = data
 
 		if len(resMetadata) > 0 { //copy meta in context to request
@@ -617,7 +613,6 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMess
 		}
 
 		var cnt int
-		log.Dbg("aa", string(res.Payload))
 		cnt, err = w.Write(res.Payload)
 		if err != nil {
 			log.Dbg(err.Error())
@@ -625,7 +620,7 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) (*protocol.TMess
 		log.Dbg("aa", cnt, string(res.Payload))
 	}
 
-	return nil, nil
+	return
 }
 
 /*
@@ -640,7 +635,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	// # match route from tree
 	lRoute, lParam := self.tree.Match(req.Method, lPath)
 	if self.show_route {
-		logger.Info("[Path]%v [Route]%v", lPath, lRoute.FilePath)
+		self.server.logger.Info("[Path]%v [Route]%v", lPath, lRoute.FilePath)
 	}
 
 	if lRoute == nil {
@@ -657,7 +652,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 
 	// # init Handler
 	handler := self.webHandlerPool.Get().(*TWebHandler)
-	handler.connect(w, req, self, lRoute)
+	handler.reset(w, req, self, lRoute)
 
 	// init dy url parm to handler
 	for _, param := range lParam {
@@ -665,14 +660,15 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 		//self.Logger.DbgLn("lParam", param.Name, param.Value)
 	}
 
-	self.callCtrl(lRoute, handler)
+	self.callCtrl(lRoute, &TController{webHandler: handler}, handler)
 
-	if handler.finalCall.IsValid() {
-		if f, ok := handler.finalCall.Interface().(func(*TWebHandler)); ok {
-			//f([]reflect.Value{reflect.ValueOf(lHandler)})
-			f(handler)
-			//			Trace("Handler Final Call")
-		}
+	if handler.finalCall != nil {
+		//if handler.finalCall.IsValid() {
+		//if f, ok := handler.finalCall.Interface().(func(*TWebHandler)); ok {
+		//f([]reflect.Value{reflect.ValueOf(lHandler)})
+		handler.finalCall(handler)
+		//			Trace("Handler Final Call")
+		//}
 	}
 
 	//##################
@@ -685,15 +681,15 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	//handler.SetHeader(true, "Content-Type", "text/html; charset=utf-8")
 	if handler.TemplateSrc != "" {
 		//添加[static]静态文件路径
-		logger.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR))
-		//	self.AddVar(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)) //添加[static]静态文件路径
-		handler.RenderArgs[STATIC_DIR] = path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)
+		log.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR))
+		handler.templateVar[STATIC_DIR] = path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)
 	}
 
 	// 结束Route并返回内容
 	handler.Apply()
 
 	self.webHandlerPool.Put(handler) // Pool 回收Handler
+
 	return
 }
 
@@ -707,7 +703,7 @@ func handleError(res *protocol.TMessage, err error) (*protocol.TMessage, error) 
 }
 
 // 克隆interface 并复制里面的指针
-func cloneInterfacePtrFeild(s interface{}) interface{} {
+func cloneInterfacePtrFeild(s interface{}) (interface{}, reflect.Value) {
 	lVal := reflect.Indirect(reflect.ValueOf(s)) //Indirect 等同 Elem()
 	lType := reflect.TypeOf(s).Elem()            // 返回类型
 	lrVal := reflect.New(lType)                  //创建某类型
@@ -726,5 +722,5 @@ func cloneInterfacePtrFeild(s interface{}) interface{} {
 	*/
 	//fmt.Println(lrVal)
 	//return reflect.Indirect(lrVal).Interface()
-	return lrVal.Interface()
+	return lrVal.Interface(), lrVal
 }
