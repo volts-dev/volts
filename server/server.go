@@ -104,7 +104,9 @@ func NewServer(config ...FConfig) *TServer {
 	srv.Router.server = srv // 传递服务器指针
 
 	for _, fn := range config {
-		fn(srv)
+		if fn != nil {
+			fn(srv)
+		}
 	}
 
 	return srv
