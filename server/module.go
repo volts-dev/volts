@@ -82,6 +82,67 @@ func cur_dir_name() string {
 	return filepath.Base(path)
 }
 
+/*    """Return the path of the given module.
+
+Search the addons paths and return the first path where the given
+module is found. If downloaded is True, return the default addons
+path if nothing else is found.
+
+"""*/
+func GetModulePath(module string, downloaded bool, display_warning bool) (res string) {
+
+	// initialize_sys_path()
+	// for adp in ad_paths:
+	//      if os.path.exists(opj(adp, module)) or os.path.exists(opj(adp, '%s.zip' % module)):
+	//         return opj(adp, module)
+	res = filepath.Join(AppPath, MODULE_DIR)
+	//if _, err := os.Stat(res); err == nil {
+	//	return res
+	//}
+	return
+
+	// if downloaded:
+	//    return opj(tools.config.addons_data_dir, module)
+	if display_warning {
+		logger.Warn(`module %s: module not found`, module)
+	}
+
+	return ""
+}
+
+/*
+   """Return the full path of a resource of the given module.
+
+   :param module: module name
+   :param list(str) args: resource path components within module
+
+   :rtype: str
+   :return: absolute path to the resource
+
+   TODO make it available inside on osv object (self.get_resource_path)
+   """*/
+
+func GetResourcePath(module_src_path string) (res string) {
+	//filepath.SplitList(module_src_path)
+	mod_path := GetModulePath("", false, true)
+
+	res = filepath.Join(mod_path, module_src_path)
+
+	if _, err := os.Stat(res); err == nil {
+		return
+	}
+
+	/*
+	   if  res!=="" return False
+	   resource_path = opj(mod_path, *args)
+	   if os.path.isdir(mod_path):
+	       # the module is a directory - ignore zip behavior
+	       if os.path.exists(resource_path):
+	           return resource_path
+	*/
+	return ""
+}
+
 // new a module
 // default url path :/{mod_name}
 // default file path :/{mod_name}/{static}/
