@@ -263,11 +263,11 @@ func (self *TWebHandler) getPathParams() {
 }
 */
 
-func (self *TWebHandler) Request() IRequest {
+func (self *TWebHandler) Request() *http.Request {
 	return self.request
 }
 
-func (self *TWebHandler) Response() IResponse {
+func (self *TWebHandler) Response() httpx.IResponseWriter {
 	return self.response
 }
 
