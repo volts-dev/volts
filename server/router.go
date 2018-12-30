@@ -29,6 +29,7 @@ var connected = "200 Connected to RPC"
 type (
 	TRouter struct {
 		sync.RWMutex
+		*TemplateVar
 		handlerMapMu sync.RWMutex
 		handlerMap   map[string]*TModule
 
@@ -44,11 +45,11 @@ type (
 		rpcHandlerPool sync.Pool
 		respPool       sync.Pool
 
-		server      *TServer
-		tree        *TTree
-		middleware  *TMiddlewareManager // 中间件
-		template    *template.TTemplateSet
-		templateVar map[string]interface{} // TODO 全局变量. 需改进
+		server     *TServer
+		tree       *TTree
+		middleware *TMiddlewareManager // 中间件
+		template   *template.TTemplateSet
+		//templateVar map[string]interface{} // TODO 全局变量. 需改进
 	}
 )
 
@@ -62,9 +63,10 @@ func NewRouter() *TRouter {
 		handlerMap: make(map[string]*TModule),
 		objectPool: NewPool(),
 		//handlerPool: NewPool(),
-		middleware:  NewMiddlewareManager(),
-		template:    template.NewTemplateSet(),
-		templateVar: make(map[string]interface{}),
+		middleware: NewMiddlewareManager(),
+		template:   template.NewTemplateSet(),
+		//templateVar: make(map[string]interface{}),
+		TemplateVar: NewTemplateVar(),
 	}
 
 	//router.GVar["Version"] = ROUTER_VER
@@ -233,7 +235,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 
 					// set back the middleware pointer to the controller
 					if mid_val.Kind() == mid_ptr_val.Kind() {
-						mid_val.Set(mid_ptr_val) // 通过
+						mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
 					}
 
 				}
@@ -657,7 +659,6 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	// init dy url parm to handler
 	for _, param := range lParam {
 		handler.setPathParams(param.Name, param.Value)
-		//self.Logger.DbgLn("lParam", param.Name, param.Value)
 	}
 
 	self.callCtrl(lRoute, &TController{webHandler: handler}, handler)
@@ -681,7 +682,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	//handler.SetHeader(true, "Content-Type", "text/html; charset=utf-8")
 	if handler.TemplateSrc != "" {
 		//添加[static]静态文件路径
-		log.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR))
+		// log.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR))
 		handler.templateVar[STATIC_DIR] = path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)
 	}
 

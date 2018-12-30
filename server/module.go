@@ -41,18 +41,44 @@ type (
 
 	// 服务模块 每个服务代表一个对象
 	TModule struct {
+		*TemplateVar
 		tree *TTree
 		name string        // name of module
 		rcvr reflect.Value // receiver of methods for the module
 		typ  reflect.Type  // type of the receiver
 		//method   map[string]*web.TRoute   // registered methods
 		//function map[string]*functionType // registered functions
-		templateVar map[string]interface{} // TODO 全局变量. 需改进
+		//templateVar map[string]interface{} // TODO 全局变量. 需改进
 
 		path     string // URL 路径
 		filePath string // 短文件系统路径-当前文件夹名称
 	}
+
+	TemplateVar struct {
+		templateVar map[string]interface{} // TODO 全局变量. 需改进
+
+	}
 )
+
+func NewTemplateVar() *TemplateVar {
+	return &TemplateVar{
+		templateVar: make(map[string]interface{}),
+	}
+}
+
+// set the var of the template
+func (self *TemplateVar) SetTemplateVar(key string, value interface{}) {
+	self.templateVar[key] = value
+}
+
+// remove the var from the template
+func (self *TemplateVar) DelTemplateVar(key string) {
+	delete(self.templateVar, key)
+}
+
+func (self *TemplateVar) GetTemplateVar() map[string]interface{} {
+	return self.templateVar
+}
 
 func isExported(name string) bool {
 	rune, _ := utf8.DecodeRuneInString(name)
@@ -150,7 +176,8 @@ func GetResourcePath(module_src_path string) (res string) {
 // default tmpl path :/{mod_name{/{tmpl}/
 func NewModule(paths ...interface{}) *TModule {
 	mod := &TModule{
-		templateVar: make(map[string]interface{}),
+		//templateVar: make(map[string]interface{}),
+		TemplateVar: NewTemplateVar(),
 	}
 
 	// 获取路径文件夹名称
