@@ -12,12 +12,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	log "vectors/logger"
 	"vectors/volts/codec"
 	"vectors/volts/protocol"
 	"vectors/volts/server/listener/http"
 	"vectors/volts/server/listener/rpc"
-
-	log "vectors/logger"
 
 	"github.com/VectorsOrigin/template"
 	"github.com/VectorsOrigin/utils"
@@ -278,86 +277,65 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 // TODO 有待优化
 // 执行静态文件路由
 func (self *TRouter) routeHttpStatic(req *nethttp.Request, w *http.TResponseWriter) {
-	var lFilePath string
-	lPath, lFileName := filepath.Split(req.URL.Path) //products/js/base.js
-	//urlPath := strings.Split(strings.Trim(req.URL.Path, `/`), `/`) // Split不能去除/products
+	if req.Method == "GET" || req.Method == "HEAD" {
+		lPath, lFileName := filepath.Split(req.URL.Path) //products/js/base.js
+		//urlPath := strings.Split(strings.Trim(req.URL.Path, `/`), `/`) // Split不能去除/products
 
-	//根目录静态文件映射过滤
-	if lPath == "/" {
-		switch filepath.Ext(lFileName) {
-		case ".txt", ".html", ".htm": // 目前只开放这种格式
-			lFilePath = filepath.Join(lFileName)
+		//根目录静态文件映射过滤
+		file_path := ""
+		if lPath == "/" {
+			switch filepath.Ext(lFileName) {
+			case ".txt", ".html", ".htm": // 目前只开放这种格式
+				file_path = filepath.Join(lFileName)
+			}
+
+		} else {
+			for _, dir := range self.server.Config.StaticDir {
+				//如果第一个是静态文件夹名则选用主静态文件夹,反之使用模块
+				// /static/js/base.js
+				// /ModuleName/static/js/base.js
+				lDirs := strings.Split(lPath, "/")
+				if strings.EqualFold(lDirs[1], dir) {
+					file_path = filepath.Join(req.URL.Path)
+					break
+
+				} else if strings.EqualFold(lDirs[2], dir) { // 如果请求是 products/Static/js/base.js
+					//Debug("lDirsD", lDirs, STATIC_DIR, string(os.PathSeparator))
+					// 再次检查 Module Name 后必须是 /static 目录
+					file_path = filepath.Join(
+						MODULE_DIR, // c:\project\Modules
+						req.URL.Path)
+					break
+				}
+			}
 		}
 
-	} else {
-		//urlPath := strings.Trim(req.URL.Path, `/`)
+		// the path is not allow to visit
+		if file_path != "" {
+			// 当模块路径无该文件时，改为程序static文件夹
+			if !utils.FileExists(file_path) {
+				lIndex := strings.Index(file_path, STATIC_DIR)
+				if lIndex != -1 {
+					file_path = file_path[lIndex-1:]
 
-		//如果第一个是静态文件夹名则选用主静态文件夹,反之使用模块
-		// /static/js/base.js
-		// /ModuleName/static/js/base.js
-		lDirs := strings.Split(lPath, "/")
-		if strings.EqualFold(lDirs[1], STATIC_DIR) {
-			//if strings.HasPrefix(lPath, "/"+STATIC_DIR) { // 如果请求是 /Static/js/base.js
-			/* static_file = filepath.Join(
-			self.Server.Config.RootPath,                           // c:\project\
-			STATIC_DIR,                          // c:\project\static\
-			strings.Join(urlPath[1:], string(filepath.Separator)), // c:\project\static\js\base.js
-			fileName)
-			*/
+				}
+			}
 
-			lFilePath = filepath.Join(req.URL.Path)
+			// 当程序文件夹无该文件时
+			if utils.FileExists(file_path) { //TODO 缓存结果避免IO
+				// need full path for ServeFile()
+				file_path = filepath.Join(
+					AppPath,
+					file_path)
 
-		} else { // 如果请求是 products/Static/js/base.js
-			/* static_file = filepath.Join(
-			self.Server.Config.RootPath,                           // c:\project\
-			MODULE_DIR,                         // c:\project\Modules
-			urlPath[0],                                            // c:\project\Modules\products\
-			STATIC_DIR,                          // c:\project\Modules\products\static\
-			strings.Join(urlPath[1:], string(filepath.Separator)), // c:\project\Modules\products\static\js\base.js
-			fileName)
-			*/
-
-			//Debug("lDirsD", lDirs, STATIC_DIR, string(os.PathSeparator))
-			// 再次检查 Module Name 后必须是 /static 目录
-			if strings.EqualFold(lDirs[2], STATIC_DIR) {
-				lFilePath = filepath.Join(
-					MODULE_DIR, // c:\project\Modules
-					req.URL.Path)
-			} else {
-				nethttp.NotFound(w, req)
+				// serve the file with full path
+				nethttp.ServeFile(w, req, file_path)
 				return
-
 			}
 		}
 	}
 
-	// 当模块路径无该文件时，改为程序static文件夹
-	if !utils.FileExists(lFilePath) {
-		lIndex := strings.Index(lFilePath, STATIC_DIR)
-		if lIndex != -1 {
-			lFilePath = lFilePath[lIndex-1:]
-
-		}
-	}
-
-	//Info("static_file", static_file)
-	if req.Method == "GET" || req.Method == "HEAD" {
-		lFilePath = filepath.Join(
-			//self.Server.Config.RootPath,
-			AppPath,
-			lFilePath)
-		// 当程序文件夹无该文件时
-		if !utils.FileExists(lFilePath) {
-			//self.Logger.DbgLn("Not Found", lFilePath)
-			nethttp.NotFound(w, req)
-			return
-		}
-		//Noted: ServeFile() can not accept "/AA.exe" string, only accepy "AA.exe" string.
-		nethttp.ServeFile(w, req, lFilePath) // func ServeFile(w ResponseWriter, r *Request, name string)
-		//self.Server.Logger.Println("RouteFile:" + static_file)
-		return
-	}
-	//Debug("RouteStatic", path, fileName)
+	nethttp.NotFound(w, req)
 	return
 }
 

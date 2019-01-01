@@ -35,6 +35,8 @@ type (
 		DefaultDateFormat     string `ini:default_date_format`
 		DefaultDateTimeFormat string `ini:default_date_time_format`
 
+		StaticDir []string // the static dir allow to visit
+		StaticExt []string // the static file format allow to visit
 		/*
 			ModuleDir             string `ini:"module_dir"` //模块,程序块目录
 			TemplateDir           string `ini:"template_dir"`
@@ -128,6 +130,8 @@ func NewConfig(file_name ...string) *TConfig {
 		TLSKeyFile:            "",
 		DefaultDateFormat:     "2006-01-02",
 		DefaultDateTimeFormat: "2006-01-02 15:04:05",
+		StaticDir:             []string{STATIC_DIR},
+		StaticExt:             []string{"html"},
 	}
 
 	if len(file_name) != 0 {

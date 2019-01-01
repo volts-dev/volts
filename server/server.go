@@ -167,7 +167,9 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 		return err
 	}
 	self.ln = ln
-	logger.Infof("%s listening on address: %s", network, new_addr)
+
+	self.logger.Infof("server %s type: %s ", self.name, network)
+	self.logger.Infof("server %s address: %s", self.name, new_addr)
 	return self.serve(ln)
 }
 
