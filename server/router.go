@@ -659,9 +659,12 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	//handler.SetHeader(true, "Date", WebTime(tm)) //
 	//handler.SetHeader(true, "Content-Type", "text/html; charset=utf-8")
 	if handler.TemplateSrc != "" {
+
 		//添加[static]静态文件路径
 		// log.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR))
-		handler.templateVar[STATIC_DIR] = path.Join(utils.FilePathToPath(lRoute.FilePath), STATIC_DIR)
+		for _, dir := range self.server.Config.StaticDir {
+			handler.templateVar[dir] = path.Join(utils.FilePathToPath(lRoute.FilePath), dir)
+		}
 	}
 
 	// 结束Route并返回内容
