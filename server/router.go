@@ -633,11 +633,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	// # init Handler
 	handler := self.webHandlerPool.Get().(*TWebHandler)
 	handler.reset(w, req, self, lRoute)
-
-	// init dy url parm to handler
-	for _, param := range lParam {
-		handler.setPathParams(param.Name, param.Value)
-	}
+	handler.setPathParams(lParam)
 
 	self.callCtrl(lRoute, &TController{webHandler: handler}, handler)
 

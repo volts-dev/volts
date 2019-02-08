@@ -334,8 +334,17 @@ func (self *TWebHandler) Body() *TContentBody {
 }
 
 // 值由Router 赋予
-func (self *TWebHandler) setPathParams(name, val string) {
-	self.pathParams.params[name] = val
+//func (self *TWebHandler) setPathParams(name, val string) {
+func (self *TWebHandler) setPathParams(p Params) {
+	// init dy url parm to handler
+	if len(p) > 0 {
+		self.pathParams = NewParamsSet()
+	}
+
+	for _, param := range p {
+		self.pathParams.params[param.name] = param.Value
+	}
+
 }
 
 /*
