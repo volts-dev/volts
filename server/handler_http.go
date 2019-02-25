@@ -338,11 +338,11 @@ func (self *TWebHandler) Body() *TContentBody {
 func (self *TWebHandler) setPathParams(p Params) {
 	// init dy url parm to handler
 	if len(p) > 0 {
-		self.pathParams = NewParamsSet()
+		self.pathParams = NewParamsSet(self)
 	}
 
 	for _, param := range p {
-		self.pathParams.params[param.name] = param.Value
+		self.pathParams.params[param.Name] = param.Value
 	}
 
 }

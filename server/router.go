@@ -410,7 +410,7 @@ func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) 
 			default:
 				{
 					//
-					log.Dbg("aaa", parm.Kind())
+					//log.Dbg("aaa", parm.Kind())
 					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
 						lActionTyp = parm
 						lActionVal = self.objectPool.Get(parm)

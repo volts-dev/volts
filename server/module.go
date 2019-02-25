@@ -246,7 +246,25 @@ func (self *TModule) GetTemplateVar() map[string]interface{} {
 	return self.templateVar
 }
 
-// 重组添加模块[URL]
+/*  Add route with method
+HTTP: "GET/POST/DELETE/PUT/HEAD/OPTIONS/REST"
+RPC: "CONNECT"
+
+Match rules
+Base: (type:name) if difine type than the route only match the string same to the type
+Example: string:id only match "abc"
+         int:id only match number "123"
+         :id could match all kind of type with name id
+'/web/content/(string:xmlid)',
+'/web/content/(string:xmlid)/(string:filename)',
+'/web/content/(int:id)',
+'/web/content/(int:id)/(string:filename)',
+'/web/content/(int:id)-<string:unique)',
+'/web/content/(int:id)-<string:unique)/(string:filename)',
+'/web/content/(string:model)/(int:id)/(string:field)',
+'/web/content/(string:model)/(int:id)/(string:field)/(string:filename)'
+
+for details please read tree.go */
 func (self *TModule) Url(method string, path string, controller interface{}) *TRoute {
 	switch strings.ToUpper(method) {
 	case "GET":
