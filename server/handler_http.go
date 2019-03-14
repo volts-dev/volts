@@ -17,14 +17,15 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"vectors/volts"
 
-	httpx "vectors/volts/server/listener/http"
+	"github.com/volts-dev/volts"
 
-	"vectors/logger"
+	httpx "github.com/volts-dev/volts/server/listener/http"
 
-	"github.com/VectorsOrigin/template"
-	"github.com/VectorsOrigin/utils"
+	"github.com/volts-dev/logger"
+
+	"github.com/volts-dev/template"
+	"github.com/volts-dev/utils"
 )
 
 /*

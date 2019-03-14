@@ -1,7 +1,7 @@
 package client
 
 import (
-	log "github.com/VectorsOrigin/logger"
+	log "github.com/volts-dev/logger"
 )
 
 type (

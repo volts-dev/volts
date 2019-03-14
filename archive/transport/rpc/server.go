@@ -3,7 +3,8 @@ package rpc
 import (
 	"net"
 	"net/rpc"
-	"vectors/micro/server"
+
+	"github.com/volts-dev/micro/server"
 )
 
 type (

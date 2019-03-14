@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	log "github.com/VectorsOrigin/logger"
+	log "github.com/volts-dev/logger"
 )
 
 func newDirectConn(c *TClient, network, address string) (net.Conn, error) {

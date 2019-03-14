@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	//	"time"
-	"vectors/volts/test"
+	"github.com/volts-dev/volts/test"
 )
 
 func TestClient_IT(t *testing.T) {

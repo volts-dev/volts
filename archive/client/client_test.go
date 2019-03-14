@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"vectors/volts/server"
+	"github.com/volts-dev/volts/server"
 )
 
 type (

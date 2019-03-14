@@ -2,7 +2,8 @@ package main
 
 import (
 	"fmt"
-	"vectors/volts/server"
+
+	"github.com/volts-dev/volts/server"
 )
 
 type (

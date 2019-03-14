@@ -6,11 +6,12 @@ import (
 	"reflect"
 	"unicode"
 	"unicode/utf8"
-	//	"sync"
-	"vectors/web"
 
-	log "github.com/VectorsOrigin/logger"
-	"github.com/VectorsOrigin/utils"
+	//	"sync"
+	"github.com/volts-dev/web"
+
+	log "github.com/volts-dev/logger"
+	"github.com/volts-dev/utils"
 )
 
 type (

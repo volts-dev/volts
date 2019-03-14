@@ -3,8 +3,9 @@ package server
 import (
 	"context"
 	"reflect"
-	"vectors/volts"
-	"vectors/volts/server/listener/rpc"
+
+	"github.com/volts-dev/volts"
+	"github.com/volts-dev/volts/server/listener/rpc"
 )
 
 var (

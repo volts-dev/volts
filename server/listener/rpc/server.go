@@ -11,10 +11,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"vectors/volts/protocol"
-	listener "vectors/volts/server/listener"
 
-	log "vectors/logger"
+	"github.com/volts-dev/volts/protocol"
+	listener "github.com/volts-dev/volts/server/listener"
+
+	log "github.com/volts-dev/logger"
 )
 
 // 替代原来错误提示

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"vectors/logger"
-	"vectors/volts/client"
-	"vectors/volts/test"
+	"github.com/volts-dev/logger"
+	"github.com/volts-dev/volts/client"
+	"github.com/volts-dev/volts/test"
 )
 
 func main() {

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"vectors/logger"
+	"github.com/volts-dev/logger"
 
-	"github.com/VectorsOrigin/utils"
 	"github.com/go-ini/ini"
+	"github.com/volts-dev/utils"
 )
 
 type (

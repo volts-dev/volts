@@ -6,8 +6,9 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"vectors/micro/client/rpc"
-	"vectors/micro/server/rpc"
+
+	"github.com/volts-dev/micro/client/rpc"
+	"github.com/volts-dev/micro/server/rpc"
 )
 
 var (

@@ -3,8 +3,9 @@ package client
 import (
 	"crypto/tls"
 	"time"
-	"vectors/volts/codec"
-	"vectors/volts/protocol"
+
+	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/protocol"
 )
 
 // Option contains all options for creating clients.

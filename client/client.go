@@ -11,11 +11,12 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	rpc "vectors/volts"
-	"vectors/volts/codec"
-	"vectors/volts/protocol"
 
-	log "github.com/VectorsOrigin/logger"
+	rpc "github.com/volts-dev/volts"
+	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/protocol"
+
+	log "github.com/volts-dev/logger"
 )
 
 const (

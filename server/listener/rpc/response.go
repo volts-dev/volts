@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"net"
 	"reflect"
-	"vectors/volts/protocol"
+
+	"github.com/volts-dev/volts/protocol"
 )
 
 type (

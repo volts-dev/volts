@@ -11,8 +11,8 @@ import (
 	"reflect"
 	//	"runtime"
 
-	rpcsrv "vectors/volts/server/net"
-	//log "github.com/VectorsOrigin/logger"
+	rpcsrv "github.com/volts-dev/volts/server/net"
+	//log "github.com/volts-dev/logger"
 )
 
 const (

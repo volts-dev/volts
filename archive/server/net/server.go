@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/VectorsOrigin/logger"
+	log "github.com/volts-dev/logger"
 )
 
 // 替代原来错误提示

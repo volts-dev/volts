@@ -3,7 +3,8 @@ package server
 import (
 	"fmt"
 	"sync"
-	"vectors/logger"
+
+	"github.com/volts-dev/logger"
 )
 
 /**

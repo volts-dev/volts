@@ -6,9 +6,10 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"vectors/volts/codec"
 
-	"github.com/VectorsOrigin/utils"
+	"github.com/volts-dev/volts/codec"
+
+	"github.com/volts-dev/utils"
 )
 
 var (

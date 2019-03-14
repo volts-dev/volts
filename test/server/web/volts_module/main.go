@@ -1,8 +1,8 @@
 package main
 
 import (
-	"vectors/volts/server"
-	"vectors/volts/test/server/web/volts_module/module/base"
+	"github.com/volts-dev/volts/server"
+	"github.com/volts-dev/volts/test/server/web/volts_module/module/base"
 )
 
 func main() {

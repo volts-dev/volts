@@ -9,13 +9,12 @@ import (
 	"reflect"
 	"strings"
 	"time"
-	"vectors/volts"
-	listener "vectors/volts/server/listener"
-	rpc "vectors/volts/server/listener/rpc"
 
-	"vectors/logger"
-
-	"github.com/VectorsOrigin/utils"
+	"github.com/volts-dev/logger"
+	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts"
+	listener "github.com/volts-dev/volts/server/listener"
+	rpc "github.com/volts-dev/volts/server/listener/rpc"
 )
 
 const (

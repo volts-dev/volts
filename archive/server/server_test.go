@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"vectors/volts/codec"
-	"vectors/volts/message"
 
-	"github.com/VectorsOrigin/logger"
+	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/message"
+
+	"github.com/volts-dev/logger"
 )
 
 type (

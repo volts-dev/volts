@@ -7,9 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"vectors/logger"
-
-	"github.com/VectorsOrigin/utils"
+	"github.com/volts-dev/logger"
+	"github.com/volts-dev/utils"
 )
 
 /*

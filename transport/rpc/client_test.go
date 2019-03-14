@@ -4,7 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"vectors/volts/client"
+
+	"github.com/volts-dev/volts/client"
 )
 
 func TestDirectSelector_Call(t *testing.T) {

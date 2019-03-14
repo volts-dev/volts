@@ -13,12 +13,13 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"vectors/volts/codec"
-	"vectors/volts/message"
 
-	log "github.com/VectorsOrigin/logger"
-	//	"vectors/utils"
-	"vectors/web"
+	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/message"
+
+	log "github.com/volts-dev/logger"
+	//	"github.com/volts-dev/utils"
+	"github.com/volts-dev/web"
 )
 
 // Can connect to RPC service using HTTP CONNECT to rpcPath.

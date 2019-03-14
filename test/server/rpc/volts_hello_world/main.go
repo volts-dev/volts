@@ -1,8 +1,8 @@
 package main
 
 import (
-	"vectors/volts/server"
-	"vectors/volts/test"
+	"github.com/volts-dev/volts/server"
+	"github.com/volts-dev/volts/test"
 )
 
 type (
