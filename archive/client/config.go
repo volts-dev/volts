@@ -30,7 +30,7 @@ type Option struct {
 	// WriteTimeout sets writedeadline for underlying net.Conns
 	WriteTimeout time.Duration
 
-	// BackupLatency is used for Failbackup mode. rpcx will sends another request if the first response doesn't return in BackupLatency time.
+	// BackupLatency is used for Failbackup mode. RPC will sends another request if the first response doesn't return in BackupLatency time.
 	BackupLatency time.Duration
 
 	// Breaker is used to config CircuitBreaker

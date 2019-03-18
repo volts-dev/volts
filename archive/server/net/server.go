@@ -245,7 +245,7 @@ func (s *TServer) serveConn(conn net.Conn) {
 			conn.SetWriteDeadline(time.Now().Add(d))
 		}
 		if err := tlsConn.Handshake(); err != nil {
-			log.Err("rpcx: TLS handshake error from %s: %v", conn.RemoteAddr(), err)
+			log.Err("rpc: TLS handshake error from %s: %v", conn.RemoteAddr(), err)
 			return
 		}
 	}
@@ -267,9 +267,9 @@ func (s *TServer) serveConn(conn net.Conn) {
 			if err == io.EOF {
 				log.Infof("client has closed this connection: %s", conn.RemoteAddr().String())
 			} else if strings.Contains(err.Error(), "use of closed network connection") {
-				log.Infof("rpcx: connection %s is closed", conn.RemoteAddr().String())
+				log.Infof("rpc: connection %s is closed", conn.RemoteAddr().String())
 			} else {
-				log.Warnf("rpcx: failed to read request: %v", err)
+				log.Warnf("rpc: failed to read request: %v", err)
 			}
 			return
 		}
@@ -314,7 +314,7 @@ func (s *TServer) serveConn(conn net.Conn) {
 				res, err := s.handleRequest(newCtx, req)
 
 				if err != nil {
-					log.Warnf("rpcx: failed to handle request: %v", err)
+					log.Warnf("rpc: failed to handle request: %v", err)
 				}
 
 				//s.Plugins.DoPreWriteResponse(newCtx, req)

@@ -35,7 +35,7 @@ const (
 )
 
 var (
-	// Codecs are codecs supported by rpcx.
+	// Codecs are codecs supported by rpc.
 	Codecs = map[SerializeType]ICodec{
 		SerializeNone: &ByteCodec{},
 		JSON:          &JSONCodec{},

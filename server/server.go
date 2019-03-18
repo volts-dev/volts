@@ -43,7 +43,7 @@ type contextKey struct {
 	name string
 }
 
-func (k *contextKey) String() string { return "rpcx context value " + k.name }
+func (k *contextKey) String() string { return "rpc context value " + k.name }
 
 // ContextKey defines key type in context.
 type ContextKey string
@@ -60,8 +60,6 @@ var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 
 // Precompute the reflect type for context.
 var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
-
-//var typeOfRpcHandler = reflect.TypeOf((*TRpcHandler)(nil)).Elem()
 
 type (
 	// Server is rpc server that use TCP or UDP.
@@ -84,8 +82,6 @@ type (
 		address         string
 		network         string
 		config_filename string
-		//dispatcher IDispatcher // dispatcher to invoke, http.DefaultServeMux if nil
-		//ln net.Listener
 	}
 )
 

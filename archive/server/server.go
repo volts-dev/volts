@@ -39,7 +39,7 @@ type contextKey struct {
 	name string
 }
 
-func (k *contextKey) String() string { return "rpcx context value " + k.name }
+func (k *contextKey) String() string { return "rpc context value " + k.name }
 
 // ContextKey defines key type in context.
 type ContextKey string

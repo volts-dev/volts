@@ -27,7 +27,7 @@ type contextKey struct {
 	name string
 }
 
-func (k *contextKey) String() string { return "rpcx context value " + k.name }
+func (k *contextKey) String() string { return "rpc context value " + k.name }
 
 var (
 	// RemoteConnContextKey is a context key. It can be used in

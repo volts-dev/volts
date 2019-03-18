@@ -140,9 +140,9 @@ func (self *TModule) __suitableMethods(typ reflect.Type, reportErr bool) {
 				// To help the user, see if a pointer receiver would work.
 				method := suitableMethods(reflect.PtrTo(service.typ), false)
 				if len(method) != 0 {
-					errorStr = "rpcx.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
+					errorStr = "rpc.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
 				} else {
-					errorStr = "rpcx.Register: type " + sname + " has no exported methods of suitable type"
+					errorStr = "rpc.Register: type " + sname + " has no exported methods of suitable type"
 				}
 				log.Error(errorStr)
 				return errors.New(errorStr)
@@ -222,11 +222,11 @@ func (self *TModule) addFunc(aType web.RouteType, path, name string, function in
 		log.Info("method", name, "has wrong number of ins:", method.NumIn())
 	}
 	if method.NumIn() != 3 {
-		log.Infof("rpcx.registerFunction: has wrong number of ins: %s", method.String())
+		log.Infof("rpc.registerFunction: has wrong number of ins: %s", method.String())
 		return
 	}
 	if method.NumOut() != 1 {
-		log.Infof("rpcx.registerFunction: has wrong number of outs: %s", method.String())
+		log.Infof("rpc.registerFunction: has wrong number of outs: %s", method.String())
 		return
 	}
 

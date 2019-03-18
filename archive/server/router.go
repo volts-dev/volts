@@ -295,7 +295,7 @@ func (self *TRouter) routeHandler(conn net.Conn) {
 
 		res, err := self.handleRequest(req)
 		if err != nil {
-			log.Warnf("rpcx: failed to handle request: %v", err)
+			log.Warnf("rpc: failed to handle request: %v", err)
 		}
 
 		// 组织完成非单程 必须返回的
@@ -328,6 +328,6 @@ func handleError(res *message.TMessage, err error) (*message.TMessage, error) {
 	if res.Metadata == nil {
 		res.Metadata = make(map[string]string)
 	}
-	res.Metadata["__rpcx_error__"] = err.Error()
+	res.Metadata["__rpc_error__"] = err.Error()
 	return res, err
 }

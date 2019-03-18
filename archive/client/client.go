@@ -20,17 +20,17 @@ import (
 )
 
 const (
-	XVersion           = "X-RPCX-Version"
-	XMessageType       = "X-RPCX-MesssageType"
-	XHeartbeat         = "X-RPCX-Heartbeat"
-	XOneway            = "X-RPCX-Oneway"
-	XMessageStatusType = "X-RPCX-MessageStatusType"
-	XSerializeType     = "X-RPCX-SerializeType"
-	XMessageID         = "X-RPCX-MessageID"
-	XServicePath       = "X-RPCX-ServicePath"
-	XServiceMethod     = "X-RPCX-ServiceMethod"
-	XMeta              = "X-RPCX-Meta"
-	XErrorMessage      = "X-RPCX-ErrorMessage"
+	XVersion           = "X-RPC-Version"
+	XMessageType       = "X-RPC-MesssageType"
+	XHeartbeat         = "X-RPC-Heartbeat"
+	XOneway            = "X-RPC-Oneway"
+	XMessageStatusType = "X-RPC-MessageStatusType"
+	XSerializeType     = "X-RPC-SerializeType"
+	XMessageID         = "X-RPC-MessageID"
+	XServicePath       = "X-RPC-ServicePath"
+	XServiceMethod     = "X-RPC-ServiceMethod"
+	XMeta              = "X-RPC-Meta"
+	XErrorMessage      = "X-RPC-ErrorMessage"
 )
 
 // ErrShutdown connection is closed.

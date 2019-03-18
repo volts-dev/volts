@@ -676,7 +676,7 @@ func handleError(res *protocol.TMessage, err error) (*protocol.TMessage, error) 
 	if res.Metadata == nil {
 		res.Metadata = make(map[string]string)
 	}
-	res.Metadata["__rpcx_error__"] = err.Error()
+	res.Metadata["__rpc_error__"] = err.Error()
 	return res, err
 }
 

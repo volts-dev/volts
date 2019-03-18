@@ -28,7 +28,7 @@ var (
 const (
 	MagicNumber byte = 0x08
 	// ServiceError contains error info of service invocation
-	ServiceError = "__rpcx_error__"
+	ServiceError = "__rpc_error__"
 
 	// Request is message type of request
 	Request MessageType = iota
@@ -80,12 +80,12 @@ func NewMessage() *TMessage {
 	}
 }
 
-// CheckMagicNumber checks whether header starts rpcx magic number.
+// CheckMagicNumber checks whether header starts rpc magic number.
 func (h Header) CheckMagicNumber() bool {
 	return h[0] == MagicNumber
 }
 
-// Version returns version of rpcx protocol.
+// Version returns version of rpc protocol.
 func (h Header) Version() byte {
 	return h[1]
 }
