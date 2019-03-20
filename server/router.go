@@ -605,13 +605,13 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) {
 #Pool Route/ResponseWriter
 */
 func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
-	path := req.URL.Path //获得的地址
+	p := req.URL.Path //获得的地址
 	//ar lRoute *TRoute
 	//ar lParam Params
 	// # match route from tree
-	lRoute, lParam := self.tree.Match(req.Method, path)
+	lRoute, lParam := self.tree.Match(req.Method, p)
 	if self.show_route {
-		self.server.logger.Info("[Path]%v [Route]%v", path, lRoute.FilePath)
+		self.server.logger.Info("[Path]%v [Route]%v", p, lRoute.FilePath)
 	}
 
 	if lRoute == nil {
