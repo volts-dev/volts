@@ -140,23 +140,16 @@ func (self TSubNodes) Less(i, j int) bool {
 }
 
 func NewRouteTree(config_fn ...ConfigOption) *TTree {
-	lTree := &TTree{
+	tree := &TTree{
 		Root:        make(map[string]*TNode),
 		DelimitChar: '/',
 		PrefixChar:  '/',
 	}
 
-	/*
-		for _, m := range HttpMethods {
-			lTree.Root[m] = &TNode{
-				Children: TSubNodes{},
-			}
-		}*/
-
 	for _, cfg := range config_fn {
-		cfg(lTree)
+		cfg(tree)
 	}
-	return lTree
+	return tree
 }
 
 // 解析Path为Node
@@ -341,65 +334,64 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 		Text: path[j:i],
 	})
 
-	//fmt.Println("lNodes", len(lNodes))
 	return //nodes, isDyn
 }
 
-func (r *TTree) matchNode(aNode *TNode, aUrl string, aParams *Params) *TNode {
+func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 	var retnil bool
-	if aNode.Type == StaticNode { // 静态节点
+	if node.Type == StaticNode { // 静态节点
 		// match static node
-		if strings.HasPrefix(aUrl, aNode.Text) {
-			//fmt.Println("J态", aUrl, " | ", aNode.Text[1:])
-			if len(aUrl) == len(aNode.Text) {
-				return aNode
+		if strings.HasPrefix(path, node.Text) {
+			//fmt.Println("J态", path, " | ", node.Text[1:])
+			if len(path) == len(node.Text) {
+				return node
 			}
 
-			for _, c := range aNode.Children {
-				e := r.matchNode(c, aUrl[len(aNode.Text):], aParams)
+			for _, c := range node.Children {
+				e := r.matchNode(c, path[len(node.Text):], aParams)
 				if e != nil {
 					return e
 				}
 			}
 		}
 
-	} else if aNode.Type == AnyNode { // 全匹配节点
-		//if len(aNode.Children) == 0 {
-		//	*aParams = append(*aParams, param{aNode.Text[1:], aUrl})
-		//	return aNode
+	} else if node.Type == AnyNode { // 全匹配节点
+		//if len(node.Children) == 0 {
+		//	*aParams = append(*aParams, param{node.Text[1:], path})
+		//	return node
 		//}
-		//fmt.Println("Any态", aUrl, " | ", aNode.Text[1:])
-		for _, c := range aNode.Children {
-			idx := strings.LastIndex(aUrl, c.Text)
-			//fmt.Println("LastIndex", aUrl, c.Text)
+		//fmt.Println("Any态", path, " | ", node.Text[1:])
+		for _, c := range node.Children {
+			idx := strings.LastIndex(path, c.Text)
+			//fmt.Println("LastIndex", path, c.Text)
 			if idx > -1 {
-				h := r.matchNode(c, aUrl[idx:], aParams)
+				h := r.matchNode(c, path[idx:], aParams)
 				if h != nil {
-					*aParams = append(*aParams, param{aNode.Text[1:], aUrl[:idx]})
+					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
 				}
 
 			}
 		}
 
-		*aParams = append(*aParams, param{aNode.Text[1:], aUrl})
-		return aNode
+		*aParams = append(*aParams, param{node.Text[1:], path})
+		return node
 
-	} else if aNode.Type == VariantNode { // 变量节点
+	} else if node.Type == VariantNode { // 变量节点
 		// # 消除path like /abc 的'/'
-		idx := strings.IndexByte(aUrl, r.DelimitChar)
-		//fmt.Println("D态", aUrl, " | ", aNode.Text[1:], idx)
+		idx := strings.IndexByte(path, r.DelimitChar)
+		//fmt.Println("D态", path, " | ", node.Text[1:], idx)
 		if idx == 0 { // #fix错误if idx > -1 {
-			for _, c := range aNode.Children {
-				h := r.matchNode(c, aUrl[idx:], aParams)
+			for _, c := range node.Children {
+				h := r.matchNode(c, path[idx:], aParams)
 				if h != nil {
-					/*fmt.Println("类型1", aUrl[:idx], aNode.ContentType)
-					if !validType(aUrl[:idx], aNode.ContentType) {
-						fmt.Println("错误类型", aUrl[:idx], aNode.ContentType)
+					/*fmt.Println("类型1", path[:idx], node.ContentType)
+					if !validType(path[:idx], node.ContentType) {
+						fmt.Println("错误类型", path[:idx], node.ContentType)
 						return nil
 					}
 					*/
-					*aParams = append(*aParams, param{aNode.Text[1:], aUrl[:idx]})
+					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
 				}
 			}
@@ -407,29 +399,29 @@ func (r *TTree) matchNode(aNode *TNode, aUrl string, aParams *Params) *TNode {
 		}
 
 		// 最底层Node
-		//if len(aNode.Children) == 0 {
-		//	*aParams = append(*aParams, param{aNode.Text[1:], aUrl})
-		//	return aNode
+		//if len(node.Children) == 0 {
+		//	*aParams = append(*aParams, param{node.Text[1:], path})
+		//	return node
 		//}
 		//fmt.Println("Index", idx)
-		for _, c := range aNode.Children {
-			idx := strings.Index(aUrl, c.Text) // #匹配前面检索到的/之前的字符串
-			//fmt.Println("Index", idx, aUrl, c.Text, aUrl[:idx])
+		for _, c := range node.Children {
+			idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
+			//fmt.Println("Index", idx, path, c.Text, path[:idx])
 			if idx > -1 {
-				if len(aUrl[:idx]) > 1 && strings.IndexByte(aUrl[:idx], r.DelimitChar) > -1 {
+				if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], r.DelimitChar) > -1 {
 					retnil = true
 					continue
 				}
 
-				//fmt.Println("类型2", aUrl[:idx], aNode.ContentType)
-				if !validType(aUrl[:idx], aNode.ContentType) {
-					//fmt.Println("错误类型", aUrl[:idx], aNode.ContentType)
+				//fmt.Println("类型2", path[:idx], node.ContentType)
+				if !validType(path[:idx], node.ContentType) {
+					//fmt.Println("错误类型", path[:idx], node.ContentType)
 					return nil
 					//continue
 				}
-				h := r.matchNode(c, aUrl[idx:], aParams)
+				h := r.matchNode(c, path[idx:], aParams)
 				if h != nil {
-					*aParams = append(*aParams, param{aNode.Text[1:], aUrl[:idx]})
+					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
 				}
 
@@ -441,43 +433,43 @@ func (r *TTree) matchNode(aNode *TNode, aUrl string, aParams *Params) *TNode {
 			return nil
 		}
 
-		//fmt.Printf("动态", aUrl, aNode.Text[1:])
-		*aParams = append(*aParams, param{aNode.Text[1:], aUrl})
-		return aNode
+		//fmt.Printf("动态", path, node.Text[1:])
+		*aParams = append(*aParams, param{node.Text[1:], path})
+		return node
 
-	} else if aNode.Type == RegexpNode { // 正则节点
-		//if len(aNode.Children) == 0 && aNode.regexp.MatchString(aUrl) {
-		//	*aParams = append(*aParams, param{aNode.Text[1:], aUrl})
-		//	return aNode
+	} else if node.Type == RegexpNode { // 正则节点
+		//if len(node.Children) == 0 && node.regexp.MatchString(path) {
+		//	*aParams = append(*aParams, param{node.Text[1:], path})
+		//	return node
 		//}
-		idx := strings.IndexByte(aUrl, r.DelimitChar)
+		idx := strings.IndexByte(path, r.DelimitChar)
 		if idx > -1 {
-			if aNode.regexp.MatchString(aUrl[:idx]) {
-				for _, c := range aNode.Children {
-					h := r.matchNode(c, aUrl[idx:], aParams)
+			if node.regexp.MatchString(path[:idx]) {
+				for _, c := range node.Children {
+					h := r.matchNode(c, path[idx:], aParams)
 					if h != nil {
-						*aParams = append(*aParams, param{aNode.Text[1:], aUrl[:idx]})
+						*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 						return h
 					}
 				}
 			}
 			return nil
 		}
-		for _, c := range aNode.Children {
-			idx := strings.Index(aUrl, c.Text)
-			if idx > -1 && aNode.regexp.MatchString(aUrl[:idx]) {
-				h := r.matchNode(c, aUrl[idx:], aParams)
+		for _, c := range node.Children {
+			idx := strings.Index(path, c.Text)
+			if idx > -1 && node.regexp.MatchString(path[:idx]) {
+				h := r.matchNode(c, path[idx:], aParams)
 				if h != nil {
-					*aParams = append(*aParams, param{aNode.Text[1:], aUrl[:idx]})
+					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
 				}
 
 			}
 		}
 
-		if aNode.regexp.MatchString(aUrl) {
-			*aParams = append(*aParams, param{aNode.Text[1:], aUrl})
-			return aNode
+		if node.regexp.MatchString(path) {
+			*aParams = append(*aParams, param{node.Text[1:], path})
+			return node
 		}
 
 	}
@@ -486,20 +478,20 @@ func (r *TTree) matchNode(aNode *TNode, aUrl string, aParams *Params) *TNode {
 }
 
 func (r *TTree) Match(method string, path string) (*TRoute, Params) {
-	lRoot := r.Root[method]
+	root := r.Root[method]
 
-	if lRoot != nil {
+	if root != nil {
 		prefix_char := string(r.PrefixChar)
 		// trim the Url to including "/" on begin of path
 		if !strings.HasPrefix(path, prefix_char) && path != prefix_char {
 			path = prefix_char + path
 		}
 
-		var lParams = make(Params, 0, strings.Count(path, string(r.DelimitChar)))
-		for _, n := range lRoot.Children {
-			e := r.matchNode(n, path, &lParams)
+		var params = make(Params, 0, strings.Count(path, string(r.DelimitChar)))
+		for _, n := range root.Children {
+			e := r.matchNode(n, path, &params)
 			if e != nil {
-				return e.Route, lParams
+				return e.Route, params
 			}
 		}
 	}
@@ -545,69 +537,70 @@ func validNodes(nodes []*TNode) bool {
 }
 
 // 添加路由到Tree
-func (self *TTree) AddRoute(aMethod, path string, aRoute *TRoute) {
+func (self *TTree) AddRoute(method, path string, route *TRoute) {
 	// to parse path as a List node
-	lNodes, lIsDyn := self.parsePath(path)
+	nodes, is_dyn := self.parsePath(path)
 
 	// marked as a dynamic route
-	aRoute.isDynRoute = lIsDyn // 即将Hook的新Route是动态地址
+	route.isDynRoute = is_dyn // 即将Hook的新Route是动态地址
 
 	// 绑定Route到最后一个Node
-	lNode := lNodes[len(lNodes)-1]
-	aRoute.Action = lNode.Text // 赋值Action
-	lNode.Route = aRoute
-	lNode.Path = path
+	node := nodes[len(nodes)-1]
+	route.Action = node.Text // 赋值Action
+	node.Route = route
+	node.Path = path
+
 	// 验证合法性
-	if !validNodes(lNodes) {
+	if !validNodes(nodes) {
 		logger.Panicf("express %s is not supported", path)
 	}
 
-	// 插入该节点到Tree
-	self.addnodes(aMethod, lNodes, false)
+	// insert the node to tree
+	self.addnodes(method, nodes, false)
 }
 
 // conbine 2 node together
-func (self *TTree) conbine(aDes, aSrc *TNode) {
-	var lNode *TNode
+func (self *TTree) conbine(target, node *TNode) {
+	var exist_node *TNode
 
 	// 是否目标Node有该Node
-	for _, node := range aDes.Children {
-		if node.Equal(aSrc) {
-			lNode = node
+	for _, n := range target.Children {
+		if n.Equal(node) {
+			exist_node = n
 		}
 	}
 	// 如果:无该Node直接添加完成所有工作
 	// 或者:遍历添加所有没有的新Node
-	if lNode == nil {
-		aDes.Children = append(aDes.Children, aSrc)
+	if exist_node == nil {
+		target.Children = append(target.Children, node)
 		return
 	} else {
-		if lNode.Type == RegexpNode {
+		if exist_node.Type == RegexpNode {
 
 		}
 
-		if aSrc.Route != nil {
-			if lNode.Route == nil {
-				lNode.Route = aSrc.Route
+		if node.Route != nil {
+			if exist_node.Route == nil {
+				exist_node.Route = node.Route
 			} else {
 				// 叠加合并Controller
-				lNode.Route.CombineController(aSrc.Route)
+				exist_node.Route.CombineController(node.Route)
 			}
 		}
 
-		// 合并子节点
-		for _, _node := range aSrc.Children {
-			self.conbine(lNode, _node)
+		// conbine sub-node
+		for _, n := range node.Children {
+			self.conbine(exist_node, n)
 		}
 	}
 }
 
 // conbine 2 tree together
-func (self *TTree) Conbine(aTree *TTree) *TTree {
+func (self *TTree) Conbine(from *TTree) *TTree {
 	self.Lock()
 	defer self.Unlock()
 
-	for method, snode := range aTree.Root {
+	for method, snode := range from.Root {
 		// 如果主树没有该方法叉则直接移植
 		if _, has := self.Root[method]; !has {
 			self.Root[method] = snode
@@ -623,52 +616,52 @@ func (self *TTree) Conbine(aTree *TTree) *TTree {
 }
 
 // add node nodes[i] to parent node p
-func (self *TNode) addnode(aParent *TNode, aNodes []*TNode, i int, aIsHook bool) *TNode {
-	if len(aParent.Children) == 0 {
-		aParent.Children = make([]*TNode, 0)
+func (self *TNode) addnode(parent *TNode, nodes []*TNode, i int, isHook bool) *TNode {
+	if len(parent.Children) == 0 {
+		parent.Children = make([]*TNode, 0)
 	}
 
 	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
-	for _, n := range aParent.Children {
-		if n.Equal(aNodes[i]) {
+	for _, n := range parent.Children {
+		if n.Equal(nodes[i]) {
 			// 如果:插入的节点层级已经到末尾,则为该节点注册路由
-			if i == len(aNodes)-1 {
+			if i == len(nodes)-1 {
 				// 原始路由会被替换
-				if aIsHook {
-					n.Route.CombineController(aNodes[i].Route)
+				if isHook {
+					n.Route.CombineController(nodes[i].Route)
 				} else {
-					n.Route = aNodes[i].Route
+					n.Route = nodes[i].Route
 				}
 			}
 			return n
 		}
 	}
 
-	// 如果:该节点没有对应分支则插入同级的aNodes为新的分支
-	aParent.Children = append(aParent.Children, aNodes[i])
-	sort.Sort(aParent.Children)
-	return aNodes[i]
+	// 如果:该节点没有对应分支则插入同级的nodes为新的分支
+	parent.Children = append(parent.Children, nodes[i])
+	sort.Sort(parent.Children)
+	return nodes[i]
 }
 
 // add nodes to trees
-func (self *TTree) addnodes(aMethod string, aNodes []*TNode, aIsHook bool) {
+func (self *TTree) addnodes(method string, nodes []*TNode, isHook bool) {
 	//fmt.Println("self.Root", self.Root)
 	// 获得对应方法[POST,GET...]
-	cn := self.Root[aMethod]
+	cn := self.Root[method]
 	if cn == nil {
 
 		// 初始化Root node
 		cn = &TNode{
 			Children: TSubNodes{},
 		}
-		self.Root[aMethod] = cn
+		self.Root[method] = cn
 	}
 
 	var p *TNode = cn // 复制方法对应的Root
 
 	// 层级插入Nodes的Node到Root
-	for idx, _ := range aNodes {
-		p = cn.addnode(p, aNodes, idx, aIsHook)
+	for idx, _ := range nodes {
+		p = cn.addnode(p, nodes, idx, isHook)
 	}
 }
 
@@ -705,8 +698,8 @@ func (self *TTree) PrintTrees() {
 	}
 }
 
-func (self *TNode) Equal(o *TNode) bool {
-	if self.Type != o.Type || self.Text != o.Text {
+func (self *TNode) Equal(node *TNode) bool {
+	if self.Type != node.Type || self.Text != node.Text {
 		return false
 	}
 	return true

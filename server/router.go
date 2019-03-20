@@ -120,6 +120,7 @@ func (self *TRouter) Server() *TServer {
 	return self.server
 }
 
+// register module
 func (self *TRouter) RegisterModule(mod IModule, build_path ...bool) {
 	if mod == nil {
 		self.server.logger.Warn("RegisterModule is nil")
@@ -127,21 +128,19 @@ func (self *TRouter) RegisterModule(mod IModule, build_path ...bool) {
 	}
 
 	self.tree.Conbine(mod.GetRoutes())
-
 	utils.MergeMaps(mod.GetTemplateVar(), self.templateVar)
 }
 
 // 注册中间件
 func (self *TRouter) RegisterMiddleware(mod ...IMiddleware) {
 	for _, m := range mod {
-		lType := reflect.TypeOf(m)
-		if lType.Kind() == reflect.Ptr {
-			lType = lType.Elem()
+		typ := reflect.TypeOf(m)
+		if typ.Kind() == reflect.Ptr {
+			typ = typ.Elem()
 		}
-		lName := lType.String()
-		self.middleware.Add(lName, m)
+		name := typ.String()
+		self.middleware.Add(name, m)
 	}
-
 }
 
 // TODO 优化 route the midware request,response,panic
@@ -278,15 +277,15 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 // 执行静态文件路由
 func (self *TRouter) routeHttpStatic(req *nethttp.Request, w *http.TResponseWriter) {
 	if req.Method == "GET" || req.Method == "HEAD" {
-		lPath, lFileName := filepath.Split(req.URL.Path) //products/js/base.js
+		path, file_Name := filepath.Split(req.URL.Path) //products/js/base.js
 		//urlPath := strings.Split(strings.Trim(req.URL.Path, `/`), `/`) // Split不能去除/products
 
 		//根目录静态文件映射过滤
 		file_path := ""
-		if lPath == "/" {
-			switch filepath.Ext(lFileName) {
+		if path == "/" {
+			switch filepath.Ext(file_Name) {
 			case ".txt", ".html", ".htm": // 目前只开放这种格式
-				file_path = filepath.Join(lFileName)
+				file_path = filepath.Join(file_Name)
 			}
 
 		} else {
@@ -294,12 +293,12 @@ func (self *TRouter) routeHttpStatic(req *nethttp.Request, w *http.TResponseWrit
 				//如果第一个是静态文件夹名则选用主静态文件夹,反之使用模块
 				// /static/js/base.js
 				// /ModuleName/static/js/base.js
-				lDirs := strings.Split(lPath, "/")
-				if strings.EqualFold(lDirs[1], dir) {
+				dirs := strings.Split(path, "/")
+				if strings.EqualFold(dirs[1], dir) {
 					file_path = filepath.Join(req.URL.Path)
 					break
 
-				} else if strings.EqualFold(lDirs[2], dir) { // 如果请求是 products/Static/js/base.js
+				} else if strings.EqualFold(dirs[2], dir) { // 如果请求是 products/Static/js/base.js
 					//Debug("lDirsD", lDirs, STATIC_DIR, string(os.PathSeparator))
 					// 再次检查 Module Name 后必须是 /static 目录
 					file_path = filepath.Join(
@@ -314,9 +313,9 @@ func (self *TRouter) routeHttpStatic(req *nethttp.Request, w *http.TResponseWrit
 		if file_path != "" {
 			// 当模块路径无该文件时，改为程序static文件夹
 			if !utils.FileExists(file_path) {
-				lIndex := strings.Index(file_path, STATIC_DIR)
-				if lIndex != -1 {
-					file_path = file_path[lIndex-1:]
+				idx := strings.Index(file_path, STATIC_DIR)
+				if idx != -1 {
+					file_path = file_path[idx-1:]
 
 				}
 			}
@@ -457,18 +456,15 @@ func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) 
 
 		CtrlValidable = lActionVal.IsValid()
 		if CtrlValidable {
-			//self.Logger.Info("routeBefore")
 			self.routeMiddleware("request", route, handler, ct, lActionVal)
 		}
-		//logger.Infof("safelyCall %v ,%v", handler.Response.Written(), args)
+
 		if !handler.IsDone() {
-			//self.Logger.Info("safelyCall")
-			// -- execute Handler or Panic Event
+			// execute Handler or Panic Event
 			self.safelyCall(ctrl.Func, args, route, handler, ct, lActionVal) //传递参数给函数.<<<
 		}
 
 		if !handler.IsDone() && CtrlValidable {
-			// # after route
 			self.routeMiddleware("response", route, handler, ct, lActionVal)
 		}
 
@@ -609,13 +605,13 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) {
 #Pool Route/ResponseWriter
 */
 func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
-	lPath := req.URL.Path //获得的地址
+	path := req.URL.Path //获得的地址
 	//ar lRoute *TRoute
 	//ar lParam Params
 	// # match route from tree
-	lRoute, lParam := self.tree.Match(req.Method, lPath)
+	lRoute, lParam := self.tree.Match(req.Method, path)
 	if self.show_route {
-		self.server.logger.Info("[Path]%v [Route]%v", lPath, lRoute.FilePath)
+		self.server.logger.Info("[Path]%v [Route]%v", path, lRoute.FilePath)
 	}
 
 	if lRoute == nil {

@@ -115,7 +115,6 @@ func (self *TServer) RegisterModule(obj IModule) {
 // 中间件可以使用在Conntroller，全局Object 上
 func (self *TServer) RegisterMiddleware(obj ...IMiddleware) {
 	self.Router.RegisterMiddleware(obj...)
-
 }
 
 // Serve starts and listens network requests.
@@ -172,7 +171,6 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 func (s *TServer) serve(ln net.Listener) error {
 	switch s.network {
 	case "http": // serve as a http server
-
 		// register dispatcher
 		http_srv := &http.Server{
 			ReadTimeout:  5 * time.Second,
@@ -183,6 +181,7 @@ func (s *TServer) serve(ln net.Listener) error {
 		}
 		s.listener = http_srv
 		return http_srv.Serve(ln)
+
 	default: // serve as a RPC server
 		// register dispatcher
 		rpc_srv := &rpc.TServer{Dispatcher: s.Router}

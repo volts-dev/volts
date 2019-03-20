@@ -291,14 +291,14 @@ func (self *TWebHandler) MethodParams() *TParamsSet {
 	if self.methodParams == nil {
 		self.methodParams = NewParamsSet(self)
 
-		// 获得GET
+		// pares the date of GET
 		q := self.request.URL.Query()
 		for key, _ := range q {
 			//Debug("key:", key)
 			self.methodParams.params[key] = q.Get(key)
 		}
 
-		// 获得POST
+		// pares the date of POST
 		ct := self.request.Header.Get("Content-Type")
 		ct, _, _ = mime.ParseMediaType(ct)
 		if ct == "multipart/form-data" {
@@ -312,8 +312,6 @@ func (self *TWebHandler) MethodParams() *TParamsSet {
 			self.methodParams.params[key] = self.request.FormValue(key)
 		}
 
-		//self.PostBody, _ = ioutil.ReadAll(self.Request.Body) // 返回Body 但POST 的时候
-		//fmt.Println("PostBody", string(self.PostBody))
 	}
 
 	return self.methodParams
@@ -376,13 +374,6 @@ func (self *TWebHandler) reset(rw IResponse, req IRequest, router *TRouter, rout
 	self.ControllerIndex = 0 // -- 提示目前控制器Index
 	//self.CtrlCount = 0     // --
 	self.isDone = false // -- 已经提交过
-
-	//CookieSessions.ConnectSession(rw, req)
-	//MemorySessions.ConnectSession(rw, req)
-	//self.getPathParams()     // 获得Path[请求参数]
-	//self.getMethodParams(32) //废弃 #获得Form[请求参数]
-	//self.GetCookie()
-	//self.finalCall = reflect.Zero(self.finalCall.Type()) // -- handler 结束执行的动作处理器
 }
 
 // TODO 修改API名称  设置response数据
@@ -390,10 +381,9 @@ func (self *TWebHandler) setData(v interface{}) {
 	// self.Result = v.([]byte)
 }
 
-// 执行所以变动
+// apply all changed to data
 func (self *TWebHandler) Apply() {
 	if !self.isDone {
-		// 如果有模板文件输入
 		if self.TemplateSrc != "" {
 			self.SetHeader(true, "Content-Type", self.ContentType)
 			//self.Template.Render(self.TemplateSrc, self.response, self.RenderArgs)
@@ -413,6 +403,20 @@ func (self *TWebHandler) Apply() {
 
 func (self *TWebHandler) _CtrlCount() int {
 	return len(self.Route.Ctrls)
+}
+
+func (self *TWebHandler) GetCookie(name, key string) (val string) {
+	ck, err := self.request.Cookie(name)
+	if err != nil {
+		return
+	}
+
+	val, _ = url.QueryUnescape(ck.Value)
+	return
+}
+
+func (self *TWebHandler) GetModulePath() string {
+	return self.Route.FileName
 }
 
 func (self *TWebHandler) IP() (res []string) {
@@ -435,20 +439,6 @@ func (self *TWebHandler) IP() (res []string) {
 		res = append(res, "127.0.0.1")
 	}
 	return
-}
-
-func (self *TWebHandler) GetCookie(name, key string) (val string) {
-	ck, err := self.request.Cookie(name)
-	if err != nil {
-		return
-	}
-
-	val, _ = url.QueryUnescape(ck.Value)
-	return
-}
-
-func (self *TWebHandler) GetModulePath() string {
-	return self.Route.FileName
 }
 
 // RemoteAddr returns more real IP address of visitor.
@@ -573,7 +563,7 @@ func (self *TWebHandler) SetCookie(name string, value string, others ...interfac
 	*/
 }
 
-// 添加Http头信息
+// set the header of response
 func (self *TWebHandler) SetHeader(unique bool, hdr string, val string) {
 	if unique {
 		self.response.Header().Set(hdr, val)
@@ -585,12 +575,7 @@ func (self *TWebHandler) SetHeader(unique bool, hdr string, val string) {
 func (self *TWebHandler) Abort(status int, body string) {
 	self.response.WriteHeader(status)
 	self.response.Write([]byte(body))
-	//self.Result = body
 	self.isDone = true
-}
-
-func (self *TWebHandler) RespondString(content string) {
-	self.Result = []byte(content)
 }
 
 func (self *TWebHandler) Respond(content []byte) {
