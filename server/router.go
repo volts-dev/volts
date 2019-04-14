@@ -143,112 +143,98 @@ func (self *TRouter) RegisterMiddleware(mod ...IMiddleware) {
 	}
 }
 
+// the order is according by controller for modular register middleware.
+// TODO 优化遍历
+// TODO 有待优化 可以缓存For结果
 // TODO 优化 route the midware request,response,panic
 func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHandler, c *TController, ctrl reflect.Value) {
-	// Action结构外的其他中间件
 	var (
-		isFound bool
-		//fn reflect.Value
 		mid_val, mid_ptr_val reflect.Value
 		mid_typ              reflect.Type
 		mid_name             string // name of middleware
 		mid_itf              interface{}
 	)
 
-	name_lst := make(map[string]bool) // TODO　不用MAP list of midware found it ctrl
-	for key, ml := range self.middleware.middlewares {
+	name_lst := make(map[string]bool)      // TODO　不用MAP list of midware found it ctrl
+	for i := 0; i < ctrl.NumField(); i++ { // Action结构下的中间件
 		// @:直接返回 放弃剩下的Handler
 		if handler.IsDone() {
 			name_lst = nil // not report
 			break
 		}
 
-		// 继续
-		isFound = false
-		//TODO 优化遍历
-		// TODO 有待优化 可以缓存For结果
-		for i := 0; i < ctrl.NumField(); i++ { // Action结构下的中间件
-			mid_val = ctrl.Field(i) // 获得成员
-			mid_typ = mid_val.Type()
-
-			// 过滤继承结构的中间件
-			//if lField.Kind() == reflect.Struct {
-			//	continue
-			//}
-
-			// get the name of middleware from the Type
-			if mid_typ.Kind() == reflect.Ptr {
-				mid_typ = mid_typ.Elem()
-			}
-
-			mid_name = mid_typ.String()
-			//log.Dbg("afsdf", mid_name, key, mid_name == key)
-			if mid_name == key {
-				name_lst[mid_name] = true // mark it as found
-
-				if mid_val.Kind() == reflect.Struct {
-					//	过滤继承的结构体
-					//	type TAction struct {
-					//		TEvent
-					//	}
-					// TODO 优化去除Call 但是中间件必须是ctrl 上的而非中间件管理器的
-					if method == "request" {
-						//fn = mid_val.MethodByName("Request")
-						if m, ok := ml.(IMiddlewareRequest); ok {
-							m.Request(ctrl.Interface(), c)
-						}
-					} else if method == "response" {
-						//fn = mid_val.MethodByName("Response")
-						if m, ok := ml.(IMiddlewareResponse); ok {
-							m.Response(ctrl.Interface(), c)
-						}
-					} else if method == "panic" {
-						//fn = mid_val.MethodByName("Panic")
-						if m, ok := ml.(IMiddlewarePanic); ok {
-							m.Panic(ctrl.Interface(), c)
-						}
-					}
-
-					//if fn.IsValid() {
-					//	fn.Call([]reflect.Value{ctrl, reflect.ValueOf(c)}) //执行方法
-					//}
-				} else if mid_val.Kind() != reflect.Struct && mid_val.IsNil() {
-					mid_itf, mid_ptr_val = cloneInterfacePtrFeild(ml) // 克隆
-					if method == "request" {
-						if m, ok := mid_itf.(IMiddlewareRequest); ok {
-							m.Request(ctrl.Interface(), c)
-						}
-
-					} else if method == "response" {
-						if m, ok := ml.(IMiddlewareResponse); ok {
-							m.Response(ctrl.Interface(), c)
-						}
-
-					} else if method == "panic" {
-						if m, ok := mid_itf.(IMiddlewarePanic); ok {
-							m.Panic(ctrl.Interface(), c)
-						}
-					}
-					//mid_ptr_val := reflect.ValueOf(mid_itf) // or reflect.ValueOf(lMiddleware).Convert(mid_val.Type())
-
-					// set back the middleware pointer to the controller
-					if mid_val.Kind() == mid_ptr_val.Kind() {
-						mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
-					}
-
-				}
-				// STEP:结束循环
-				isFound = true
-				break
-			} else {
-				name_lst[mid_name] = false
-			}
+		mid_val = ctrl.Field(i) // 获得成员
+		mid_typ = mid_val.Type()
+		// get the name of middleware from the Type
+		if mid_typ.Kind() == reflect.Ptr {
+			mid_typ = mid_typ.Elem()
 		}
 
-		// invoke the minddleware which not use in the controller
-		// 更新非控制器中的中间件
-		if !isFound {
-			//Warn(" routeBefore not isFound", key, ctrl.Interface(), handler)
+		mid_name = mid_typ.String()
+
+		ml := self.middleware.Get(mid_name)
+		if ml == nil {
+			name_lst[mid_name] = false
+
+		} else {
+			name_lst[mid_name] = true
+
+			if mid_val.Kind() == reflect.Struct {
+				//	过滤继承的结构体
+				//	type TAction struct {
+				//		TEvent
+				//	}
+				// TODO 优化去除Call 但是中间件必须是ctrl 上的而非中间件管理器的
+				if method == "request" {
+					if m, ok := ml.(IMiddlewareRequest); ok {
+						m.Request(ctrl.Interface(), c)
+					}
+				} else if method == "response" {
+					if m, ok := ml.(IMiddlewareResponse); ok {
+						m.Response(ctrl.Interface(), c)
+					}
+				} else if method == "panic" {
+					if m, ok := ml.(IMiddlewarePanic); ok {
+						m.Panic(ctrl.Interface(), c)
+					}
+				}
+			} else if mid_val.Kind() != reflect.Struct && mid_val.IsNil() {
+				mid_itf, mid_ptr_val = cloneInterfacePtrFeild(ml) // TODO 优化克隆
+				if method == "request" {
+					if m, ok := mid_itf.(IMiddlewareRequest); ok {
+						m.Request(ctrl.Interface(), c)
+					}
+
+				} else if method == "response" {
+					if m, ok := ml.(IMiddlewareResponse); ok {
+						m.Response(ctrl.Interface(), c)
+					}
+
+				} else if method == "panic" {
+					if m, ok := mid_itf.(IMiddlewarePanic); ok {
+						m.Panic(ctrl.Interface(), c)
+					}
+				}
+				//mid_ptr_val := reflect.ValueOf(mid_itf) // or reflect.ValueOf(lMiddleware).Convert(mid_val.Type())
+
+				// set back the middleware pointer to the controller
+				if mid_val.Kind() == mid_ptr_val.Kind() {
+					mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
+				}
+
+			}
+		}
+	}
+
+	// invoke the minddleware which not use in the controller
+	// 更新非控制器中的中间件
+	for key, ml := range self.middleware.middlewares {
+		if _, has := name_lst[key]; !has {
+			// @:直接返回 放弃剩下的Handler
+			if handler.IsDone() {
+				break
+			}
+
 			if method == "request" {
 				if m, ok := ml.(IMiddlewareRequest); ok {
 					m.Request(ctrl.Interface(), c)
