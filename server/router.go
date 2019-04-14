@@ -182,7 +182,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 			}
 
 			mid_name = mid_typ.String()
-			log.Dbg("afsdf", mid_name, key, mid_name == key)
+			//log.Dbg("afsdf", mid_name, key, mid_name == key)
 			if mid_name == key {
 				name_lst[mid_name] = true // mark it as found
 

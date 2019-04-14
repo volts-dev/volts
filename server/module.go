@@ -53,6 +53,7 @@ type (
 
 		path     string // URL 路径
 		filePath string // 短文件系统路径-当前文件夹名称
+		domain   string // 子域名用于区分不同域名不同路由
 	}
 
 	TemplateVar struct {

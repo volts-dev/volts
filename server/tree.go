@@ -160,7 +160,7 @@ func NewRouteTree(config_fn ...ConfigOption) *TTree {
 */
 func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 	if path == "" {
-		panic("echo: path cannot be empty")
+		panic("path cannot be empty")
 	}
 
 	if r.DelimitChar == '/' && path[0] != '/' {
@@ -557,6 +557,11 @@ func (self *TTree) AddRoute(method, path string, route *TRoute) {
 
 	// insert the node to tree
 	self.addnodes(method, nodes, false)
+}
+
+// delete the route
+func (self *TTree) DeleteRoute(method, path string) {
+
 }
 
 // conbine 2 node together
