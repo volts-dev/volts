@@ -12,17 +12,17 @@ type (
 
 func (action ctrls) Get(hd *server.TWebHandler) {
 	hd.Info("Middleware")
-	hd.RespondString("Middleware")
+	hd.Respond([]byte("Middleware"))
 }
 
 func (action ctrls) Post(hd *server.TWebHandler) {
 	hd.Info("Before")
-	hd.RespondString("Before")
+	hd.Respond([]byte("Before"))
 }
 
 func (action ctrls) delete(hd *server.TWebHandler) {
 	hd.Info("After")
-	hd.RespondString("After")
+	hd.Respond([]byte("After"))
 }
 
 func main() {

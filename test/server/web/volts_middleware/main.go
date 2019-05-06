@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/volts-dev/middleware/event"
+	"github.com/volts-dev/volts-middleware/event"
 	"github.com/volts-dev/volts/server"
 )
 
@@ -12,28 +12,28 @@ type (
 	}
 )
 
-func (action ctrls) index(hd *server.TWebHandler) {
-	hd.Info("Middleware")
-	hd.RespondString("Middleware")
-}
-
 func (action ctrls) Init(router *server.TRouter) {
 	router.Server().Logger().Info("Init")
 }
 
+func (action ctrls) index(hd *server.TWebHandler) {
+	hd.Info("Middleware")
+	hd.Respond([]byte("Middleware"))
+}
+
 func (action ctrls) Before(hd *server.TWebHandler) {
 	hd.Info("Before")
-	hd.RespondString("Before")
+	hd.Respond([]byte("Before"))
 }
 
 func (action ctrls) After(hd *server.TWebHandler) {
 	hd.Info("After")
-	hd.RespondString("After")
+	hd.Respond([]byte("After"))
 }
 
 func (action ctrls) Panic(hd *server.TWebHandler) {
 	hd.Info("Panic")
-	hd.RespondString("Panic")
+	hd.Respond([]byte("Panic"))
 }
 
 func main() {
