@@ -464,17 +464,18 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, ro
 	defer func() {
 		if err := recover(); err != nil {
 			if self.server.Config.RecoverPanic { //是否绕过错误处理直接关闭程序
+				// handle middleware
 				self.routeMiddleware("panic", route, handler, ct, ctrl)
 
+				// report error information
+				log.Errf("r:%s err:%v", route.Path, err)
 				for i := 1; ; i++ {
 					_, file, line, ok := runtime.Caller(i)
 					if !ok {
 						break
 					}
-
-					log.Errf("file:%s line:%s", file, line)
+					log.Errf("line:%d file:%s", line, file)
 				}
-				log.Err(err)
 			} else {
 				panic(err)
 			}
