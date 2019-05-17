@@ -204,12 +204,10 @@ func NewWebHandler(router *TRouter) *TWebHandler {
 
 func NewProxyHandler() *TProxyHandler {
 	hd := &TProxyHandler{}
-
 	return hd
 }
 
 func (self *TContentBody) AsBytes() []byte {
-
 	return self.data
 }
 
