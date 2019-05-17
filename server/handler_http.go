@@ -212,14 +212,15 @@ func (self *TContentBody) AsBytes() []byte {
 }
 
 // Body 必须是Json结构才能你转
-func (self *TContentBody) AsMap() (result map[string]interface{}) {
-	result = make(map[string]interface{})
+func (self *TContentBody) AsMap() (map[string]interface{}, error) {
+	result := make(map[string]interface{})
 	err := json.Unmarshal(self.data, &result)
 	if err != nil {
 		logger.Err(err.Error())
-		return nil
+		return nil, err
 	}
-	return
+
+	return result, err
 }
 
 func (self *TParamsSet) AsString(name string) string {
