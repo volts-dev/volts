@@ -145,7 +145,6 @@ func (self *TRouter) RegisterMiddleware(mod ...IMiddleware) {
 
 // the order is according by controller for modular register middleware.
 // TODO 优化遍历
-// TODO 有待优化 可以缓存For结果
 // TODO 优化 route the midware request,response,panic
 func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHandler, c *TController, ctrl reflect.Value) {
 	var (
@@ -176,18 +175,60 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 
 		ml := self.middleware.Get(mid_name)
 		if ml == nil {
-			name_lst[mid_name] = false
-
+			// normall only struct and pointer could be a middleware
+			if mid_val.Kind() == reflect.Struct || mid_val.Kind() == reflect.Ptr {
+				name_lst[mid_name] = false
+			}
 		} else {
 			name_lst[mid_name] = true
 
-			if mid_val.Kind() == reflect.Struct {
-				//	过滤继承的结构体
+			if mid_val.Kind() == reflect.Ptr {
+				//	过滤指针中间件
 				//	type Controller struct {
-				//		TEvent
+				//		Session *TSession
 				//	}
 
-				// TODO 优化去除Call 但是中间件必须是ctrl 上的而非中间件管理器的
+				// all middleware are nil at first time on the controller
+				if mid_val.IsNil() {
+					mid_ptr_val = cloneInterfacePtrFeild(ml) // TODO 优化克隆
+
+					// set back the middleware pointer to the controller
+					if mid_val.Kind() == mid_ptr_val.Kind() {
+						mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
+					}
+				}
+			}
+
+			// call api
+			if method == "request" {
+				if m, ok := mid_val.Interface().(IMiddlewareRequest); ok {
+					m.Request(ctrl.Interface(), c)
+				}
+
+			} else if method == "response" {
+				if m, ok := mid_val.Interface().(IMiddlewareResponse); ok {
+					m.Response(ctrl.Interface(), c)
+				}
+
+			} else if method == "panic" {
+				if m, ok := mid_val.Interface().(IMiddlewarePanic); ok {
+					m.Panic(ctrl.Interface(), c)
+				}
+			}
+		}
+	}
+
+	// invoke the minddleware which not use in the controller
+	// 更新非控制器中的中间件
+	// TODO 暂停 由于部分中间件在某些控制器不应该給执行而被执行
+	/*
+		for key, ml := range self.middleware.middlewares {
+			if _, has := name_lst[key]; !has {
+				// @:直接返回 放弃剩下的Handler
+				if handler.IsDone() {
+					break
+				}
+
 				if method == "request" {
 					if m, ok := ml.(IMiddlewareRequest); ok {
 						m.Request(ctrl.Interface(), c)
@@ -201,65 +242,8 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 						m.Panic(ctrl.Interface(), c)
 					}
 				}
-
-			} else if mid_val.Kind() != reflect.Struct && mid_val.IsNil() {
-				//	过滤继承的结构体
-				//	type Controller struct {
-				//		Session *TSession
-				//	}
-
-				mid_itf, mid_ptr_val = cloneInterfacePtrFeild(ml) // TODO 优化克隆
-				if method == "request" {
-					if m, ok := mid_itf.(IMiddlewareRequest); ok {
-						m.Request(ctrl.Interface(), c)
-					}
-
-				} else if method == "response" {
-					if m, ok := ml.(IMiddlewareResponse); ok {
-						m.Response(ctrl.Interface(), c)
-					}
-
-				} else if method == "panic" {
-					if m, ok := mid_itf.(IMiddlewarePanic); ok {
-						m.Panic(ctrl.Interface(), c)
-					}
-				}
-				//mid_ptr_val := reflect.ValueOf(mid_itf) // or reflect.ValueOf(lMiddleware).Convert(mid_val.Type())
-
-				// set back the middleware pointer to the controller
-				if mid_val.Kind() == mid_ptr_val.Kind() {
-					mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
-				}
-
 			}
 		}
-	}
-
-	// invoke the minddleware which not use in the controller
-	// 更新非控制器中的中间件
-	// TODO 暂停 由于部分中间件在某些控制器不应该給执行而被执行
-	for key, ml := range self.middleware.middlewares {
-		if _, has := name_lst[key]; !has {
-			// @:直接返回 放弃剩下的Handler
-			if handler.IsDone() {
-				break
-			}
-
-			if method == "request" {
-				if m, ok := ml.(IMiddlewareRequest); ok {
-					m.Request(ctrl.Interface(), c)
-				}
-			} else if method == "response" {
-				if m, ok := ml.(IMiddlewareResponse); ok {
-					m.Response(ctrl.Interface(), c)
-				}
-			} else if method == "panic" {
-				if m, ok := ml.(IMiddlewarePanic); ok {
-					m.Panic(ctrl.Interface(), c)
-				}
-			}
-		}
-	}
 	*/
 	// report the name of midware which on controller but not register in the server
 	for name, found := range name_lst {
@@ -376,10 +360,10 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 //
 func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) {
 	var (
-		args       []reflect.Value //handler参数
-		lActionVal reflect.Value
-		lActionTyp reflect.Type
-		parm       reflect.Type
+		args     []reflect.Value //handler参数
+		ctrl_val reflect.Value
+		ctrl_typ reflect.Type
+		parm     reflect.Type
 	)
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
@@ -406,17 +390,17 @@ func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) 
 					//
 					//log.Dbg("aaa", parm.Kind())
 					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
-						lActionTyp = parm
-						lActionVal = self.objectPool.Get(parm)
-						if lActionVal.Kind() == reflect.Ptr {
-							lActionVal = lActionVal.Elem()
+						ctrl_typ = parm
+						ctrl_val = self.objectPool.Get(parm)
+						if ctrl_val.Kind() == reflect.Ptr {
+							ctrl_val = ctrl_val.Elem()
 						}
-						// lActionVal 由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
-						args = append(args, lActionVal) //插入该类型空值
+						// ctrl_val 由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
+						args = append(args, ctrl_val) //插入该类型空值
 						break
 					}
 
-					// TODO优化判断  插入RPC 参数和返回
+					// TODO 优化判断  插入RPC 参数和返回
 					if rpc_handler := ct.GetRpcHandler(); rpc_handler != nil {
 
 						if i == 2 {
@@ -449,22 +433,22 @@ func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) 
 			}
 		}
 
-		CtrlValidable := lActionVal.IsValid()
+		CtrlValidable := ctrl_val.IsValid()
 		if CtrlValidable {
-			self.routeMiddleware("request", route, handler, ct, lActionVal)
+			self.routeMiddleware("request", route, handler, ct, ctrl_val)
 		}
 
 		if !handler.IsDone() {
 			// execute Handler or Panic Event
-			self.safelyCall(ctrl.Func, args, route, handler, ct, lActionVal) //传递参数给函数.<<<
+			self.safelyCall(ctrl.Func, args, route, handler, ct, ctrl_val) //传递参数给函数.<<<
 		}
 
 		if !handler.IsDone() && CtrlValidable {
-			self.routeMiddleware("response", route, handler, ct, lActionVal)
+			self.routeMiddleware("response", route, handler, ct, ctrl_val)
 		}
 
 		if CtrlValidable {
-			self.objectPool.Put(lActionTyp, lActionVal)
+			self.objectPool.Put(ctrl_typ, ctrl_val)
 		}
 	}
 }
@@ -498,7 +482,7 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, ro
 
 // the API for RPC
 func (self *TRouter) ConnectBroke(w rpc.Response, req *rpc.Request) {
-	//self.routeMiddleware("disconnected", route, handler, ct, lActionVal)
+	//self.routeMiddleware("disconnected", route, handler, ct, ctrl_val)
 }
 
 func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) {
@@ -606,7 +590,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	p := req.URL.Path //获得的地址
 
 	// # match route from tree
-	route, lParam := self.tree.Match(req.Method, p)
+	route, params := self.tree.Match(req.Method, p)
 	if route == nil {
 		self.routeHttpStatic(req, w) // # serve as a static file link
 		return
@@ -618,7 +602,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 
 	/*
 		if route.isReverseProxy {
-			self.routeProxy(route, lParam, req, w)
+			self.routeProxy(route, params, req, w)
 
 			return
 		}
@@ -627,7 +611,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	// # init Handler
 	handler := self.webHandlerPool.Get().(*TWebHandler)
 	handler.reset(w, req, self, route)
-	handler.setPathParams(lParam)
+	handler.setPathParams(params)
 
 	self.callCtrl(route, &TController{webHandler: handler}, handler)
 
@@ -677,7 +661,7 @@ func handleError(res *protocol.TMessage, err error) (*protocol.TMessage, error) 
 
 // clone the middleware object
 // 克隆interface 并复制里面的指针
-func cloneInterfacePtrFeild(model interface{}) (interface{}, reflect.Value) {
+func cloneInterfacePtrFeild(model interface{}) reflect.Value {
 	model_value := reflect.Indirect(reflect.ValueOf(model)) //Indirect 等同 Elem()
 	model_type := reflect.TypeOf(model).Elem()              // 返回类型
 	new_model_value := reflect.New(model_type)              //创建某类型
@@ -696,5 +680,5 @@ func cloneInterfacePtrFeild(model interface{}) (interface{}, reflect.Value) {
 	*/
 	//fmt.Println(new_model_value)
 	//return reflect.Indirect(new_model_value).Interface()
-	return new_model_value.Interface(), new_model_value
+	return new_model_value
 }
