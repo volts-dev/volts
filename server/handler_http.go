@@ -596,16 +596,15 @@ func (self *TWebHandler) NotModified() {
 }
 
 // Respond content by Json mode
-func (self *TWebHandler) RespondByJson(aBody interface{}) {
-
-	lJson, err := json.Marshal(aBody)
+func (self *TWebHandler) RespondByJson(data interface{}) {
+	js, err := json.Marshal(data)
 	if err != nil {
 		self.response.Write([]byte(err.Error()))
 		return
 	}
 
 	self.response.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	self.Result = lJson
+	self.Result = js
 }
 
 // Ck
