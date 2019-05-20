@@ -151,7 +151,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 		mid_val, mid_ptr_val reflect.Value
 		mid_typ              reflect.Type
 		mid_name             string // name of middleware
-		mid_itf              interface{}
+		//mid_itf              interface{}
 	)
 
 	// the minddleware list from the controller
