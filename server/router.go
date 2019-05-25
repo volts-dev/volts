@@ -152,19 +152,25 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 		mid_typ              reflect.Type
 		mid_name             string // name of middleware
 		//mid_itf              interface{}
+		controller reflect.Value
 	)
 
+	// [指针值]转为[结构值]
+	if ctrl.Kind() == reflect.Ptr {
+		controller = ctrl.Elem()
+	}
+
 	// the minddleware list from the controller
-	name_lst := make(map[string]bool)      // TODO　不用MAP list of midware found it ctrl
-	for i := 0; i < ctrl.NumField(); i++ { // middlewares under controller
+	name_lst := make(map[string]bool)            // TODO　不用MAP list of midware found it ctrl
+	for i := 0; i < controller.NumField(); i++ { // middlewares under controller
 		// @:直接返回 放弃剩下的Handler
 		if handler.IsDone() {
 			name_lst = nil // not report
 			break          // igonre the following any controls
 		}
 
-		mid_val = ctrl.Field(i)  // get the middleware value
-		mid_typ = mid_val.Type() // get the middleware type
+		mid_val = controller.Field(i) // get the middleware value
+		mid_typ = mid_val.Type()      // get the middleware type
 
 		if mid_typ.Kind() == reflect.Ptr {
 			mid_typ = mid_typ.Elem()
@@ -197,6 +203,8 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 						mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
 					}
 				}
+			} else if mid_val.Kind() == reflect.Struct {
+				mid_val = ctrl
 			}
 
 			// call api
@@ -392,11 +400,11 @@ func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) 
 					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
 						ctrl_typ = parm
 						ctrl_val = self.objectPool.Get(parm)
-						if ctrl_val.Kind() == reflect.Ptr {
-							ctrl_val = ctrl_val.Elem()
-						}
+
 						// ctrl_val 由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
-						args = append(args, ctrl_val) //插入该类型空值
+						if ctrl_val.Kind() == reflect.Ptr {
+							args = append(args, ctrl_val.Elem()) //插入该类型空值
+						}
 						break
 					}
 
