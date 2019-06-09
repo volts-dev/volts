@@ -475,7 +475,7 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, ro
 					if !ok {
 						break
 					}
-					log.Errf("line: %d file: %s", line, file)
+					log.Errf("file: %s %d", file, line)
 				}
 			} else {
 				panic(err)

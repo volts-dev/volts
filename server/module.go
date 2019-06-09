@@ -268,7 +268,8 @@ Example: string:id only match "abc"
 
 for details please read tree.go */
 func (self *TModule) Url(method string, path string, controller interface{}) *TRoute {
-	switch strings.ToUpper(method) {
+	method = strings.ToUpper(method)
+	switch method {
 	case "GET":
 		return self.url(CommomRoute, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
 
@@ -288,9 +289,9 @@ func (self *TModule) Url(method string, path string, controller interface{}) *TR
 /*
 pos: true 为插入Before 反之After
 */
-func (self *TModule) url(route_type RouteType, methods []string, url *TUrl, controller interface{}) *TRoute {
+func (self *TModule) url(routeType RouteType, methods []string, url *TUrl, controller interface{}) *TRoute {
 	// check vaild
-	if route_type != ProxyRoute && controller == nil {
+	if routeType != ProxyRoute && controller == nil {
 		panic("the route must binding a controller!")
 	}
 
@@ -328,7 +329,7 @@ func (self *TModule) url(route_type RouteType, methods []string, url *TUrl, cont
 				// 添加注册方法
 				if isREST {
 					// 方法为对象方法名称 url 只注册对象名称
-					self.url(route_type, []string{name}, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
+					self.url(routeType, []string{name}, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
 				} else {
 					// the rpc method needs one output.
 					if typ.NumOut() != 1 {
@@ -336,7 +337,7 @@ func (self *TModule) url(route_type RouteType, methods []string, url *TUrl, cont
 						continue
 					}
 
-					self.url(route_type, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: object_name, Action: name}, method)
+					self.url(routeType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: object_name, Action: name}, method)
 				}
 			}
 		}
@@ -360,7 +361,7 @@ func (self *TModule) url(route_type RouteType, methods []string, url *TUrl, cont
 		FilePath: self.filePath,
 		Model:    self.name,
 		Action:   url.Action, //
-		Type:     route_type,
+		Type:     routeType,
 		Ctrls:    make([]TMethodType, 0),
 		//HookCtrl: make([]TMethodType, 0),
 		//Host:     host,

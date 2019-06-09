@@ -39,7 +39,7 @@ func init() {
 	listeners["tcp6"] = tcp4MakeListener
 	listeners["rpc"] = tcp4MakeListener
 	listeners["http"] = tcp6MakeListener
-	listeners["http3"] = http3Listener // the 3rd generation of http QUIC
+	//listeners["http3"] = http3Listener // the 3rd generation of http QUIC
 }
 
 // RegisterMakeListener registers a MakeListener for network.
@@ -90,5 +90,6 @@ func http3Listener(config *tls.Config, address string) (ln net.Listener, err err
 	if config == nil {
 		return nil, errors.New("TLSConfig must be configured in server.Options")
 	}
-	return quicconn.Listen("udp", address, config)
+	//return quicconn.Listen("udp", address, config)
+	return nil, nil
 }
