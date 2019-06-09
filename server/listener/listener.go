@@ -7,8 +7,7 @@ import (
 	"fmt"
 	"net"
 	"time"
-
-	quicconn "github.com/marten-seemann/quic-conn"
+	//quicconn "github.com/marten-seemann/quic-conn"
 )
 
 type (
