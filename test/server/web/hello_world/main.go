@@ -25,13 +25,12 @@ func (self ctrls) macth_all(hd *server.TWebHandler) {
 
 func main() {
 	srv := server.NewServer()
-	/*srv.Url("GET", "/", func(hd *server.TWebHandler) {
+	srv.Url("GET", "/", func(hd *server.TWebHandler) {
 		hd.Respond([]byte("Hello World"))
 	})
-	*/
-	//srv.Url("GET", "/1", ctrls.hello_world)
-	//srv.Url("GET", "/(:all)", ctrls.macth_all)
-	//srv.Url("GET", "/(:all)/1", ctrls.macth_all)
+	srv.Url("GET", "/1", ctrls.hello_world)
+	srv.Url("GET", "/(:all)", ctrls.macth_all)
+	srv.Url("GET", "/(:all)/1", ctrls.macth_all)
 
 	// serve as a http server
 	srv.Listen("http")

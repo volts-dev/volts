@@ -43,10 +43,11 @@ type (
 	// 服务模块 每个服务代表一个对象
 	TModule struct {
 		*TemplateVar
-		tree *TTree
-		name string        // name of module
-		rcvr reflect.Value // receiver of methods for the module
-		typ  reflect.Type  // type of the receiver
+		tree      *TTree
+		staticDir []string
+		name      string        // name of module
+		rcvr      reflect.Value // receiver of methods for the module
+		typ       reflect.Type  // type of the receiver
 		//method   map[string]*web.TRoute   // registered methods
 		//function map[string]*functionType // registered functions
 		//templateVar map[string]interface{} // TODO 全局变量. 需改进
@@ -232,6 +233,16 @@ func (self *TModule) SetPath(path string) {
 
 func (self *TModule) SetFilePath(filePath string) {
 	self.filePath = filePath
+}
+
+// Static serves files from the given file system root.
+// Internally a http.FileServer is used, therefore http.NotFound is used instead
+// of the Router's NotFound handler.
+// To use the operating system's file system implementation,
+// use :
+//     router.Static("/static", "/var/www")
+func (self *TModule) SetStatic(path, root string) {
+
 }
 
 // set the var of the template
