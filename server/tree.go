@@ -82,7 +82,7 @@ type (
 	TTree struct {
 		sync.RWMutex // lock for conbine action
 		Text         string
-		Root         map[string]*TNode
+		root         map[string]*TNode
 		IgnoreCase   bool
 		DelimitChar  byte // Delimit Char xxx<.>xxx
 		PrefixChar   byte // the Prefix Char </>xxx.xxx
@@ -141,7 +141,7 @@ func (self TSubNodes) Less(i, j int) bool {
 
 func NewRouteTree(config_fn ...ConfigOption) *TTree {
 	tree := &TTree{
-		Root:        make(map[string]*TNode),
+		root:        make(map[string]*TNode),
 		DelimitChar: '/',
 		PrefixChar:  '/',
 	}
@@ -478,7 +478,7 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 }
 
 func (r *TTree) Match(method string, path string) (*TRoute, Params) {
-	root := r.Root[method]
+	root := r.root[method]
 
 	if root != nil {
 		prefix_char := string(r.PrefixChar)
@@ -565,36 +565,36 @@ func (self *TTree) DeleteRoute(method, path string) {
 }
 
 // conbine 2 node together
-func (self *TTree) conbine(target, node *TNode) {
+func (self *TTree) conbine(target, from *TNode) {
 	var exist_node *TNode
 
 	// 是否目标Node有该Node
 	for _, n := range target.Children {
-		if n.Equal(node) {
+		if n.Equal(from) {
 			exist_node = n
 		}
 	}
 	// 如果:无该Node直接添加完成所有工作
 	// 或者:遍历添加所有没有的新Node
 	if exist_node == nil {
-		target.Children = append(target.Children, node)
+		target.Children = append(target.Children, from)
 		return
 	} else {
 		if exist_node.Type == RegexpNode {
 
 		}
 
-		if node.Route != nil {
+		if from.Route != nil {
 			if exist_node.Route == nil {
-				exist_node.Route = node.Route
+				exist_node.Route = from.Route
 			} else {
 				// 叠加合并Controller
-				exist_node.Route.CombineController(node.Route)
+				exist_node.Route.CombineController(from.Route)
 			}
 		}
 
 		// conbine sub-node
-		for _, n := range node.Children {
+		for _, n := range from.Children {
 			self.conbine(exist_node, n)
 		}
 	}
@@ -605,14 +605,12 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 	self.Lock()
 	defer self.Unlock()
 
-	for method, snode := range from.Root {
-		// 如果主树没有该方法叉则直接移植
-		if _, has := self.Root[method]; !has {
-			self.Root[method] = snode
+	for method, new_node := range from.root {
+		if main_nodes, has := self.root[method]; !has {
+			self.root[method] = new_node
 		} else {
-			// 采用逐个添加
-			for _, node := range self.Root[method].Children {
-				self.conbine(node, snode)
+			for _, node := range new_node.Children {
+				self.conbine(main_nodes, node)
 			}
 		}
 	}
@@ -652,14 +650,14 @@ func (self *TNode) addnode(parent *TNode, nodes []*TNode, i int, isHook bool) *T
 func (self *TTree) addnodes(method string, nodes []*TNode, isHook bool) {
 	//fmt.Println("self.Root", self.Root)
 	// 获得对应方法[POST,GET...]
-	cn := self.Root[method]
+	cn := self.root[method]
 	if cn == nil {
 
 		// 初始化Root node
 		cn = &TNode{
 			Children: TSubNodes{},
 		}
-		self.Root[method] = cn
+		self.root[method] = cn
 	}
 
 	var p *TNode = cn // 复制方法对应的Root
@@ -694,7 +692,7 @@ func printNode(i int, node *TNode) {
 }
 
 func (self *TTree) PrintTrees() {
-	for method, node := range self.Root {
+	for method, node := range self.root {
 		if len(node.Children) > 0 {
 			fmt.Println(method)
 			printNode(1, node)

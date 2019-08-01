@@ -166,7 +166,7 @@ func NewContentBody(hd *TWebHandler) (res *TContentBody) {
 	}
 	body, err := ioutil.ReadAll(hd.request.Body)
 	if err != nil {
-		logger.Err("Read request body faild with an error : %s!", err.Error())
+		logger.Errf("Read request body faild with an error : %s!", err.Error())
 	}
 
 	res.data = body
@@ -771,7 +771,7 @@ func (p *TProxyHandler) copyBuffer(dst io.Writer, src io.Reader, buf []byte) (in
 	for {
 		nr, rerr := src.Read(buf)
 		if rerr != nil && rerr != io.EOF {
-			logger.Err("httputil: ReverseProxy read error during body copy: %v", rerr)
+			logger.Errf("httputil: ReverseProxy read error during body copy: %v", rerr)
 		}
 		if nr > 0 {
 			nw, werr := dst.Write(buf[:nr])

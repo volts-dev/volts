@@ -134,7 +134,7 @@ func GetModulePath(module string, downloaded bool, display_warning bool) (res st
 	// if downloaded:
 	//    return opj(tools.config.addons_data_dir, module)
 	if display_warning {
-		logger.Warn(`module %s: module not found`, module)
+		logger.Warnf(`module %s: module not found`, module)
 	}
 
 	return ""
@@ -403,14 +403,14 @@ func (self *TModule) url(routeType RouteType, methods []string, url *TUrl, contr
 		logger.Dbg("NumIn", ctrl_type.NumIn(), ctrl_type.String())
 		// Method needs four ins: receiver, context.Context, *args, *reply.
 		if ctrl_type.NumIn() != 4 {
-			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v`, url.Action, ctrl_type.In(0), ctrl_type.NumIn()))
+			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v %v`, url.Action, ctrl_type.In(0), ctrl_type.NumIn()))
 		}
 		/*if ctrl_type.NumIn() != 3 {
 			panic(fmt.Sprintf(`registerFunction: has wrong number of ins: %s`, ctrl_type.NumIn()))
 			return route
 		}*/
 		if ctrl_type.NumOut() != 1 {
-			panic(fmt.Sprintf(`registerFunction: has wrong number of outs: %s`, ctrl_type.NumOut()))
+			panic(fmt.Sprintf(`registerFunction: has wrong number of outs: %v`, ctrl_type.NumOut()))
 		}
 
 		// First arg must be context.Context

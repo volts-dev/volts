@@ -197,7 +197,7 @@ func (self *TServer) parse_addr(addr []string) (host string, port int) {
 	if len(addr) != 0 {
 		lAddrSplitter := strings.Split(addr[0], ":")
 		if len(lAddrSplitter) != 2 {
-			logger.Err("Address %s of server %s is unavailable!", addr[0], self.name)
+			logger.Errf("Address %s of server %s is unavailable!", addr[0], self.name)
 		} else {
 			host = lAddrSplitter[0]
 			port = utils.StrToInt(lAddrSplitter[1])
