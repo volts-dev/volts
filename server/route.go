@@ -33,7 +33,7 @@ type (
 	// 提供基础数据参数供Handler处理
 	TRoute struct {
 		Id             int64  // 在Tree里的Id号
-		Path           string // 网络路径
+		Path           string // !NOTE! Path存储路由绑定的URL 网络路径
 		FilePath       string // 短存储路径
 		Model          string // 模型/对象/模块名称 Tmodule/Tmodel, "Model.Action", "404"
 		Action         string // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"

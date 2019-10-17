@@ -19,7 +19,7 @@ func (self ctrls) hello_world(hd *server.TWebHandler) {
 
 func (self ctrls) macth_all(hd *server.TWebHandler) {
 	p := hd.PathParams()
-	c := fmt.Sprintf(`Hello World (Controler/Router Matching "%v":"%v")!`, hd.Route.Url.Path, p.AsString("all"))
+	c := fmt.Sprintf(`Hello World (Controler/Router Matching "%v":"%v" %v)!`, hd.Route.Url.Path, p.AsString("all"), p.AsString("all2"))
 	hd.Respond([]byte(c))
 }
 
@@ -30,7 +30,7 @@ func main() {
 	})
 	srv.Url("GET", "/1", ctrls.hello_world)
 	srv.Url("GET", "/(:all)", ctrls.macth_all)
-	srv.Url("GET", "/(:all)/1", ctrls.macth_all)
+	srv.Url("GET", "/(:all)/(:all2)/1", ctrls.macth_all)
 
 	// serve as a http server
 	srv.Listen("http")

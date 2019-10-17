@@ -88,6 +88,7 @@ type (
 // NewServer returns a server.
 func NewServer(config ...FConfig) *TServer {
 	srv := &TServer{
+		name:    "VOLTS",
 		TModule: *NewModule(),
 		Router:  NewRouter(),
 		Config:  NewConfig(),

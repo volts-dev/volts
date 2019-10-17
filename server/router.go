@@ -66,6 +66,7 @@ func NewRouter() *TRouter {
 		template:   template.NewTemplateSet(),
 		//templateVar: make(map[string]interface{}),
 		TemplateVar: NewTemplateVar(),
+		show_route:  true,
 	}
 
 	//router.GVar["Version"] = ROUTER_VER
@@ -151,8 +152,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 		mid_val, mid_ptr_val reflect.Value
 		mid_typ              reflect.Type
 		mid_name             string // name of middleware
-		//mid_itf              interface{}
-		controller reflect.Value
+		controller           reflect.Value
 	)
 
 	// [指针值]转为[结构值]
@@ -178,7 +178,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 
 		// get the name of middleware from the Type
 		mid_name = mid_typ.String()
-
+		self.server.logger.Dbg("hhhhh", mid_name)
 		ml := self.middleware.Get(mid_name)
 		if ml == nil {
 			// normall only struct and pointer could be a middleware
