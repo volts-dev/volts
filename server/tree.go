@@ -194,7 +194,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 		switch path[i] {
 		case delimitChar:
 			{ // 创建Text:'/' Node
-				logger.Dbg("kkk", string(delimitChar))
 				if bracket == 0 && i > startOffset {
 					//if path[j] == '/' {
 					//	nodes = append(nodes, &TNode{Type: StaticNode, Text: string(path[j])})
@@ -349,7 +348,7 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 	if node.Type == StaticNode { // 静态节点
 		// match static node
 		if strings.HasPrefix(path, node.Text) {
-			fmt.Println("J态", path, " | ", node.Text)
+			//fmt.Println("J态", path, " | ", node.Text)
 			if len(path) == len(node.Text) {
 				return node
 			}
@@ -367,7 +366,7 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 		//	*aParams = append(*aParams, param{node.Text[1:], path})
 		//	return node
 		//}
-		fmt.Println("Any态", path, " | ", node.Text)
+		//fmt.Println("Any态", path, " | ", node.Text)
 		for _, c := range node.Children {
 			idx := strings.LastIndex(path, c.Text)
 			//fmt.Println("LastIndex", path, c.Text)
@@ -379,20 +378,21 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 				}
 
 			}
-			fmt.Println("Any态2", path, idx, c.Text[1:])
+			//fmt.Println("Any态2", path, idx, c.Text[1:])
 
 		}
 
 		*aParams = append(*aParams, param{node.Text[1:], path})
 		return node
-
 	} else if node.Type == VariantNode { // 变量节点
 		// # 消除path like /abc 的'/'
-		idx := strings.IndexByte(path, delimitChar)
-		fmt.Println("D态", path, string(delimitChar), " | ", node.Text[1:], path[idx:], idx)
-		if idx == 0 { // #fix错误if idx > -1 {
+		// 根据首字符判断接下来的处理条件
+		first_Char := path[0]
+		//idx := strings.IndexByte(path, delimitChar)
+		//fmt.Println("D态", path, string(delimitChar), " | ", first_Char)
+		if first_Char == delimitChar { // #fix错误if idx > -1 {
 			for _, c := range node.Children {
-				h := r.matchNode(c, path[idx:], delimitChar, aParams)
+				h := r.matchNode(c, path[0:], delimitChar, aParams)
 				if h != nil {
 					/*fmt.Println("类型1", path[:idx], node.ContentType)
 					if !validType(path[:idx], node.ContentType) {
@@ -400,52 +400,55 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 						return nil
 					}
 					*/
-					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
+					*aParams = append(*aParams, param{node.Text[1:], path[:0]})
 					return h
 				}
 			}
 			return nil
 		}
 
-		// 最底层Node
-		//if len(node.Children) == 0 {
-		//	*aParams = append(*aParams, param{node.Text[1:], path})
-		//	return node
-		//}
-		//fmt.Println("Index", idx)
-		for _, c := range node.Children {
-			idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
-			//fmt.Println("Index", idx, path, c.Text, path[:idx])
+		if len(node.Children) == 0 { // !NOTE! 匹配到最后一个条件
+			// !NOTE! 防止过度匹配带分隔符的字符
+			idx := strings.IndexByte(path, delimitChar)
 			if idx > -1 {
-				if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], delimitChar) > -1 {
+				return nil
+			}
+
+			//fmt.Println("动态", path, node.Text[1:])
+			*aParams = append(*aParams, param{node.Text[1:], path})
+			return node
+		} else { // !NOTE! 匹配回溯 当匹配进入错误子节点返回nil到父节点重新匹配父节点
+			//fmt.Println("Children", len(node.Children))
+			for _, c := range node.Children {
+				idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
+				if idx > -1 {
+					//fmt.Println("Index", idx, path, c.Text, path[:idx])
+
+					if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], delimitChar) > -1 {
+						retnil = true
+						continue
+					}
+
+					//fmt.Println("类型2", path[:idx], contentType[node.ContentType], contentType[c.ContentType])
+					if !validType(path[:idx], node.ContentType) {
+						continue
+					}
+
+					//fmt.Println("类型3", path[idx:], node.Text[1:], path[:idx])
+					h := r.matchNode(c, path[idx:], delimitChar, aParams)
+					if h != nil {
+						*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
+						return h
+					}
 					retnil = true
-					continue
 				}
+			}
 
-				//fmt.Println("类型2", path[:idx], node.ContentType)
-				if !validType(path[:idx], node.ContentType) {
-					//fmt.Println("错误类型", path[:idx], node.ContentType)
-					return nil
-					//continue
-				}
-				h := r.matchNode(c, path[idx:], delimitChar, aParams)
-				if h != nil {
-					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
-					return h
-				}
-
-				retnil = true
+			//fmt.Println("动态a", retnil, len(node.Children))
+			if retnil || len(node.Children) > 0 {
+				return nil
 			}
 		}
-
-		if retnil {
-			return nil
-		}
-
-		//fmt.Printf("动态", path, node.Text[1:])
-		*aParams = append(*aParams, param{node.Text[1:], path})
-		return node
-
 	} else if node.Type == RegexpNode { // 正则节点
 		//if len(node.Children) == 0 && node.regexp.MatchString(path) {
 		//	*aParams = append(*aParams, param{node.Text[1:], path})
@@ -526,9 +529,9 @@ func validType(content string, typ ContentType) bool {
 				return false
 			}
 		}
-
 	default:
-
+		// 所有字符串
+		return true
 	}
 
 	return true
