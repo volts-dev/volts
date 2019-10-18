@@ -177,7 +177,6 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 
 		// get the name of middleware from the Type
 		mid_name = mid_typ.String()
-		self.server.logger.Dbg("hhhhh", mid_name)
 		ml := self.middleware.Get(mid_name)
 		if ml == nil {
 			// normall only struct and pointer could be a middleware
