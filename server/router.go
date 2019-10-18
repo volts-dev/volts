@@ -55,7 +55,6 @@ type (
 func NewRouter() *TRouter {
 	tree := NewRouteTree()
 	tree.IgnoreCase = true
-	tree.DelimitChar = '.' // 修改为xxx.xxx
 
 	router := &TRouter{
 		tree:       tree,

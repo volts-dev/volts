@@ -5,9 +5,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/volts-dev/logger"
-
 	"github.com/go-ini/ini"
+	"github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
 )
 
@@ -177,19 +176,20 @@ func (self *TConfig) LoadFromFile(file_name string) {
 	self.filePath = filepath.Join(AppPath, file_name)
 	err := self.File.Append(self.filePath)
 	if err != nil {
-		logger.Err("Load ")
+		logger.Errf("load config file fail %v", err)
 	}
-	//self.File, err = ini.Load(self.filePath)
 
+	self.File, err = ini.Load(self.filePath)
 }
 
+// TODO Reload
 func (self *TConfig) Reload() bool {
-	/*	fileinfo, _ := os.Stat(self.FilePath) //获取文件信息
-		if fileinfo.ModTime().Unix() > self.LastModTime {
-			self.LoadFromFile(self.FilePath)
-			return true
-		}
-	*/
+	//fileinfo, _ := os.Stat(self.filePath) //获取文件信息
+	//if fileinfo.ModTime().Unix() > self.LastModTime {
+	self.LoadFromFile(self.filePath)
+	//	return true
+	//}
+
 	return false
 }
 

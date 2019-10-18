@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/volts-dev/volts/server"
+	"volts-dev/volts/server"
 )
 
 type (

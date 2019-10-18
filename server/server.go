@@ -125,8 +125,9 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 	// 解析地址
 	host, port := self.parse_addr(address)
 
-	// 加载配置文件
-	self.Config.LoadFromFile(self.config_filename)
+	// TODO 加载配置文件
+	//self.Config.LoadFromFile(self.config_filename)
+
 	// 确认配置已经被加载加载
 	// 配置最终处理
 	sec, err := self.Config.GetSection(self.name)
@@ -140,7 +141,10 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 		if host != "" {
 			self.Config.Host = host
 		}
-		self.Config.Port = port
+
+		if port != 0 {
+			self.Config.Port = port
+		}
 		sec.ReflectFrom(self.Config)
 	}
 	// 映射到服务器配置结构里

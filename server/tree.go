@@ -95,8 +95,8 @@ type (
 		DelimitChar byte // Delimit Char xxx<.>xxx
 		PrefixChar  byte // the Prefix Char </>xxx.xxx
 
-		sync.RWMutex // lock for conbine action
 		root         map[string]*TNode
+		sync.RWMutex // lock for conbine action
 	}
 )
 
@@ -152,7 +152,7 @@ func (self TSubNodes) Less(i, j int) bool {
 func NewRouteTree(config_fn ...ConfigOption) *TTree {
 	tree := &TTree{
 		root:        make(map[string]*TNode),
-		DelimitChar: '/',
+		DelimitChar: 0, // !NOTE! 默认为未定义 以便区分RPC
 		PrefixChar:  '/',
 	}
 
@@ -168,12 +168,12 @@ func NewRouteTree(config_fn ...ConfigOption) *TTree {
 	Result: @ Nodes List
 	        @ is it dyn route
 */
-func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
+func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn bool) {
 	if path == "" {
 		panic("path cannot be empty")
 	}
 
-	if r.DelimitChar == '/' && path[0] != '/' {
+	if delimitChar == '/' && path[0] != '/' {
 		path = "/" + path
 	}
 
@@ -192,8 +192,9 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 	//j = i - 1 // 当i==0时J必须小于它
 	for ; i < l; i++ {
 		switch path[i] {
-		case r.DelimitChar:
+		case delimitChar:
 			{ // 创建Text:'/' Node
+				logger.Dbg("kkk", string(delimitChar))
 				if bracket == 0 && i > startOffset {
 					//if path[j] == '/' {
 					//	nodes = append(nodes, &TNode{Type: StaticNode, Text: string(path[j])})
@@ -280,7 +281,7 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 				startOffset = i
 
 				// 当计数器遇到/或者Url末尾时将记录保存于Node中
-				if target != nil && ((i == l) || (i != l && path[startOffset+1] == r.DelimitChar)) {
+				if target != nil && ((i == l) || (i != l && path[startOffset+1] == delimitChar)) {
 					level++
 					target.Level = level
 					//fmt.Println("ok:", node.Text, target.Text, level)
@@ -298,7 +299,7 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 				// 放置在 i == l 后 确保表达式2比1多一个层级
 				// @/(int:id1)-(:unique2)
 				// @/(:id3)-(:unique3)/(:filename)
-				if (i != l && path[startOffset] != r.DelimitChar) || level != 0 {
+				if (i != l && path[startOffset] != delimitChar) || level != 0 {
 					if level == 0 {
 						target = node
 					}
@@ -343,7 +344,7 @@ func (r *TTree) parsePath(path string) (nodes []*TNode, isDyn bool) {
 	return //nodes, isDyn
 }
 
-func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
+func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *Params) *TNode {
 	var retnil bool
 	if node.Type == StaticNode { // 静态节点
 		// match static node
@@ -354,7 +355,7 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 			}
 
 			for _, c := range node.Children {
-				e := r.matchNode(c, path[len(node.Text):], aParams)
+				e := r.matchNode(c, path[len(node.Text):], delimitChar, aParams)
 				if e != nil {
 					return e
 				}
@@ -371,7 +372,7 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 			idx := strings.LastIndex(path, c.Text)
 			//fmt.Println("LastIndex", path, c.Text)
 			if idx > -1 {
-				h := r.matchNode(c, path[idx:], aParams)
+				h := r.matchNode(c, path[idx:], delimitChar, aParams)
 				if h != nil {
 					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
@@ -387,11 +388,11 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 
 	} else if node.Type == VariantNode { // 变量节点
 		// # 消除path like /abc 的'/'
-		idx := strings.IndexByte(path, r.DelimitChar)
-		fmt.Println("D态", path, " | ", node.Text[1:], idx)
+		idx := strings.IndexByte(path, delimitChar)
+		fmt.Println("D态", path, string(delimitChar), " | ", node.Text[1:], path[idx:], idx)
 		if idx == 0 { // #fix错误if idx > -1 {
 			for _, c := range node.Children {
-				h := r.matchNode(c, path[idx:], aParams)
+				h := r.matchNode(c, path[idx:], delimitChar, aParams)
 				if h != nil {
 					/*fmt.Println("类型1", path[:idx], node.ContentType)
 					if !validType(path[:idx], node.ContentType) {
@@ -416,7 +417,7 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 			idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
 			//fmt.Println("Index", idx, path, c.Text, path[:idx])
 			if idx > -1 {
-				if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], r.DelimitChar) > -1 {
+				if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], delimitChar) > -1 {
 					retnil = true
 					continue
 				}
@@ -427,7 +428,7 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 					return nil
 					//continue
 				}
-				h := r.matchNode(c, path[idx:], aParams)
+				h := r.matchNode(c, path[idx:], delimitChar, aParams)
 				if h != nil {
 					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
@@ -450,11 +451,11 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 		//	*aParams = append(*aParams, param{node.Text[1:], path})
 		//	return node
 		//}
-		idx := strings.IndexByte(path, r.DelimitChar)
+		idx := strings.IndexByte(path, delimitChar)
 		if idx > -1 {
 			if node.regexp.MatchString(path[:idx]) {
 				for _, c := range node.Children {
-					h := r.matchNode(c, path[idx:], aParams)
+					h := r.matchNode(c, path[idx:], delimitChar, aParams)
 					if h != nil {
 						*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 						return h
@@ -466,7 +467,7 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 		for _, c := range node.Children {
 			idx := strings.Index(path, c.Text)
 			if idx > -1 && node.regexp.MatchString(path[:idx]) {
-				h := r.matchNode(c, path[idx:], aParams)
+				h := r.matchNode(c, path[idx:], delimitChar, aParams)
 				if h != nil {
 					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
 					return h
@@ -486,8 +487,12 @@ func (r *TTree) matchNode(node *TNode, path string, aParams *Params) *TNode {
 }
 
 func (r *TTree) Match(method string, path string) (*TRoute, Params) {
-	root := r.root[method]
+	delimitChar := r.DelimitChar
+	if delimitChar == 0 {
+		delimitChar = '/'
+	}
 
+	root := r.root[method]
 	if root != nil {
 		prefix_char := string(r.PrefixChar)
 		// trim the Url to including "/" on begin of path
@@ -495,9 +500,9 @@ func (r *TTree) Match(method string, path string) (*TRoute, Params) {
 			path = prefix_char + path
 		}
 
-		var params = make(Params, 0, strings.Count(path, string(r.DelimitChar)))
+		var params = make(Params, 0, strings.Count(path, string(delimitChar)))
 		for _, n := range root.Children {
-			e := r.matchNode(n, path, &params)
+			e := r.matchNode(n, path, delimitChar, &params)
 			if e != nil {
 				return e.Route, params
 			}
@@ -546,8 +551,13 @@ func validNodes(nodes []*TNode) bool {
 
 // 添加路由到Tree
 func (self *TTree) AddRoute(method, path string, route *TRoute) {
+	delimitChar := self.DelimitChar
+	if delimitChar == 0 {
+		delimitChar = '/'
+	}
+
 	// to parse path as a List node
-	nodes, is_dyn := self.parsePath(path)
+	nodes, is_dyn := self.parsePath(path, delimitChar)
 
 	// marked as a dynamic route
 	route.isDynRoute = is_dyn // 即将Hook的新Route是动态地址
@@ -611,9 +621,16 @@ func (self *TTree) conbine(target, from *TNode) {
 
 // conbine 2 tree together
 func (self *TTree) Conbine(from *TTree) *TTree {
+	// !NOTE! 避免合并不同分隔符的路由树
+	if len(self.root) > 0 && len(from.root) > 0 { // 非空的Tree
+		if self.DelimitChar != from.DelimitChar { // 分隔符对比
+			logger.Panicf("could not conbine 2 different kinds (RPC/HTTP) of routes tree!")
+			return self
+		}
+	}
+
 	self.Lock()
 	defer self.Unlock()
-
 	for method, new_node := range from.root {
 		if main_nodes, has := self.root[method]; !has {
 			self.root[method] = new_node

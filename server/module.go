@@ -206,8 +206,6 @@ func NewModule(paths ...interface{}) *TModule {
 	// init router tree
 	mod.tree = NewRouteTree()
 	mod.tree.IgnoreCase = true
-	//mod.tree.DelimitChar = '.' // 修改为xxx.xxx
-
 	return mod
 }
 
@@ -259,6 +257,7 @@ func (self *TModule) GetTemplateVar() map[string]interface{} {
 	return self.templateVar
 }
 
+// !NOTE! RPC 或者 HTTP 不适用同一Module注册路由
 /*  Add route with method
 HTTP: "GET/POST/DELETE/PUT/HEAD/OPTIONS/REST"
 RPC: "CONNECT"
@@ -276,7 +275,6 @@ Example: string:id only match "abc"
 '/web/content/(int:id)-<string:unique)/(string:filename)',
 '/web/content/(string:model)/(int:id)/(string:field)',
 '/web/content/(string:model)/(int:id)/(string:field)/(string:filename)'
-
 for details please read tree.go */
 func (self *TModule) Url(method string, path string, controller interface{}) *TRoute {
 	method = strings.ToUpper(method)
@@ -377,7 +375,6 @@ func (self *TModule) url(routeType RouteType, methods []string, url *TUrl, contr
 		//HookCtrl: make([]TMethodType, 0),
 		//Host:     host,
 		//Scheme:   scheme,
-
 	}
 
 	/*// # is it proxy route
@@ -395,6 +392,11 @@ func (self *TModule) url(routeType RouteType, methods []string, url *TUrl, contr
 
 	// RPC route validate
 	if utils.InStrings("CONNECT", methods...) > -1 {
+		// !NOTE! 修改分隔符
+		if self.tree.DelimitChar == 0 {
+			self.tree.DelimitChar = '.'
+		}
+
 		// Method must be exported.
 		if ctrl_type.PkgPath() != "" {
 			return route
