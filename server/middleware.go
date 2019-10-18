@@ -30,6 +30,11 @@ var (
 type (
 	IMiddleware interface{}
 
+	// 中间件名称接口
+	IMiddlewareName interface {
+		Name() string
+	}
+
 	IMiddlewareInit interface {
 		Init(*TRouter)
 	}

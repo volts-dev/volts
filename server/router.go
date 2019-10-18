@@ -131,15 +131,24 @@ func (self *TRouter) RegisterModule(mod IModule, build_path ...bool) {
 	utils.MergeMaps(mod.GetTemplateVar(), self.templateVar)
 }
 
+// 返回中间件
+func (self *TRouter) Middlewares() *TMiddlewareManager {
+	return self.middleware
+}
+
 // 注册中间件
-func (self *TRouter) RegisterMiddleware(mod ...IMiddleware) {
-	for _, m := range mod {
-		typ := reflect.TypeOf(m)
-		if typ.Kind() == reflect.Ptr {
-			typ = typ.Elem()
+func (self *TRouter) RegisterMiddleware(middlewares ...IMiddleware) {
+	for _, m := range middlewares {
+		if mm, ok := m.(IMiddlewareName); ok {
+			self.middleware.Add(mm.Name(), m)
+		} else {
+			typ := reflect.TypeOf(m)
+			if typ.Kind() == reflect.Ptr {
+				typ = typ.Elem()
+			}
+			name := typ.String()
+			self.middleware.Add(name, m)
 		}
-		name := typ.String()
-		self.middleware.Add(name, m)
 	}
 }
 
@@ -175,8 +184,11 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 			mid_typ = mid_typ.Elem()
 		}
 
-		// get the name of middleware from the Type
+		// get the name of middleware from the Type or Name()
 		mid_name = mid_typ.String()
+		if m, ok := mid_val.Interface().(IMiddlewareName); ok {
+			mid_name = m.Name()
+		}
 		ml := self.middleware.Get(mid_name)
 		if ml == nil {
 			// normall only struct and pointer could be a middleware
@@ -603,7 +615,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	}
 
 	if self.show_route {
-		self.server.logger.Info("[Path]%v [Route]%v", p, route.FilePath)
+		self.server.logger.Infof("[Path]%v [Route]%v", p, route.FilePath)
 	}
 
 	/*
