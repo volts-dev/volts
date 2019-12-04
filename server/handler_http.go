@@ -18,14 +18,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/volts"
-
-	httpx "github.com/volts-dev/volts/server/listener/http"
-
+	"github.com/volts-dev/dataset"
 	"github.com/volts-dev/logger"
-
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts"
+	httpx "github.com/volts-dev/volts/server/listener/http"
 )
 
 /*
@@ -81,13 +79,14 @@ type (
 	// 用来提供API格式化Body
 	TContentBody struct {
 		handler *TWebHandler
-		data    []byte //#**** 由于读完Body被清空所以必须再次保存样本
+		data    []byte // !NOTE! 由于读完Body被清空所以必须再次保存样本
 	}
 
 	TParamsSet struct {
+		dataset.TRecordSet
 		handler *TWebHandler
-		params  map[string]string
-		name    string
+		//params  map[string]string
+		//name   string
 	}
 
 	// TWebHandler 负责所有请求任务,每个Handle表示有一个请求
@@ -96,12 +95,13 @@ type (
 		httpx.IResponseWriter
 		response httpx.IResponseWriter //http.ResponseWriter
 		request  *http.Request         //
+		Router   *TRouter
+		Route    *TRoute                //执行本次Handle的Route
+		Template *template.TTemplateSet // 概念改进  为Hd添加 hd.Template.Params.Set("模板数据",Val)/Get()/Del()
 
-		Router       *TRouter
-		Route        *TRoute                //执行本次Handle的Route
-		Template     *template.TTemplateSet // 概念改进  为Hd添加 hd.Template.Params.Set("模板数据",Val)/Get()/Del()
-		methodParams *TParamsSet            //map[string]string // Post Get 传递回来的参数
-		pathParams   *TParamsSet            //map[string]string // Url 传递回来的参数
+		data         *TParamsSet // 数据缓存在各个Controler间调用
+		methodParams *TParamsSet //map[string]string // Post Get 传递回来的参数
+		pathParams   *TParamsSet //map[string]string // Url 传递回来的参数
 		body         *TContentBody
 
 		// 模板
@@ -110,8 +110,7 @@ type (
 
 		// 返回
 		ContentType string
-		_Data       map[string]interface{} // 数据缓存在各个Controler间调用
-		Result      []byte                 // 最终返回数据由Apply提交
+		Result      []byte // 最终返回数据由Apply提交
 
 		ControllerIndex int // -- 提示目前控制器Index
 		//CtrlCount int           // --
@@ -175,8 +174,9 @@ func NewContentBody(hd *TWebHandler) (res *TContentBody) {
 
 func NewParamsSet(hd *TWebHandler) *TParamsSet {
 	return &TParamsSet{
-		handler: hd,
-		params:  make(map[string]string),
+		TRecordSet: *dataset.NewRecordSet(),
+		handler:    hd,
+		//params:  make(map[string]string),
 	}
 }
 
@@ -197,6 +197,7 @@ func NewWebHandler(router *TRouter) *TWebHandler {
 	// 必须不为nil
 	//	hd.MethodParams=NewParamsSet(hd)
 	hd.pathParams = NewParamsSet(hd)
+	hd.data = NewParamsSet(hd)
 	hd.val = reflect.ValueOf(hd)
 	hd.typ = hd.val.Type()
 	return hd
@@ -223,6 +224,7 @@ func (self *TContentBody) AsMap() (map[string]interface{}, error) {
 	return result, err
 }
 
+/*
 func (self *TParamsSet) AsString(name string) string {
 	return self.params[name]
 }
@@ -243,6 +245,7 @@ func (self *TParamsSet) AsDateTime(name string) (t time.Time) {
 func (self *TParamsSet) AsFloat(name string) float64 {
 	return utils.StrToFloat(self.params[name])
 }
+*/
 
 // Call in the end of all controller
 func (self *TWebHandler) FinalCall(handler func(*TWebHandler)) {
@@ -286,31 +289,42 @@ func (self *TWebHandler) TypeModel() reflect.Type {
 }
 
 //TODO 添加验证Request 防止多次解析
-func (self *TWebHandler) MethodParams() *TParamsSet {
+func (self *TWebHandler) MethodParams(blank ...bool) *TParamsSet {
+	var useBlank bool
+	if len(blank) > 0 {
+		useBlank = blank[0]
+	}
+
 	if self.methodParams == nil {
 		self.methodParams = NewParamsSet(self)
 
-		// pares the date of GET
-		q := self.request.URL.Query()
-		for key, _ := range q {
-			//Debug("key:", key)
-			self.methodParams.params[key] = q.Get(key)
-		}
+		if !useBlank && self.methodParams.Length() == 0 {
+			// # parse the data from GET method #
+			q := self.request.URL.Query()
+			for key, _ := range q {
+				self.methodParams.FieldByName(key).AsInterface(q.Get(key))
+			}
 
-		// pares the date of POST
-		ct := self.request.Header.Get("Content-Type")
-		ct, _, _ = mime.ParseMediaType(ct)
-		if ct == "multipart/form-data" {
-			self.request.ParseMultipartForm(256)
-		} else {
-			self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
-		}
+			// # parse the data from POST method #
+			var err error
+			ct := self.request.Header.Get("Content-Type")
+			ct, _, err = mime.ParseMediaType(ct)
+			if err != nil {
+				logger.Err(err)
+				return self.methodParams
+			} else {
+				if ct == "multipart/form-data" {
+					self.request.ParseMultipartForm(256)
+				} else {
+					self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
+				}
 
-		for key, _ := range self.request.Form {
-			//Debug("key2:", key)
-			self.methodParams.params[key] = self.request.FormValue(key)
+				for key, _ := range self.request.Form {
+					//Debug("key2:", key)
+					self.methodParams.FieldByName(key).AsInterface(self.request.FormValue(key))
+				}
+			}
 		}
-
 	}
 
 	return self.methodParams
@@ -340,9 +354,8 @@ func (self *TWebHandler) setPathParams(p Params) {
 	}
 
 	for _, param := range p {
-		self.pathParams.params[param.Name] = param.Value
+		self.pathParams.FieldByName(param.Name).AsInterface(param.Value)
 	}
-
 }
 
 /*
@@ -357,6 +370,7 @@ func (self *TWebHandler) UpdateSession() {
 */
 // Inite and Connect a new ResponseWriter when a new request is coming
 func (self *TWebHandler) reset(rw IResponse, req IRequest, router *TRouter, route *TRoute) {
+	self.data = nil // 清空
 	self.pathParams = nil
 	self.methodParams = nil
 	self.request = req.(*http.Request)
@@ -367,7 +381,6 @@ func (self *TWebHandler) reset(rw IResponse, req IRequest, router *TRouter, rout
 	self.TemplateSrc = ""
 	self.ContentType = ""
 	self.templateVar = make(map[string]interface{}) // 清空
-	//self.Data = make(map[string]interface{})       // 清空
 	self.body = nil
 	self.Result = nil
 	self.ControllerIndex = 0 // -- 提示目前控制器Index
@@ -404,14 +417,22 @@ func (self *TWebHandler) _CtrlCount() int {
 	return len(self.Route.Ctrls)
 }
 
-func (self *TWebHandler) GetCookie(name, key string) (val string) {
-	ck, err := self.request.Cookie(name)
-	if err != nil {
-		return
+// 数据缓存供传递用
+func (self *TWebHandler) Data() *TParamsSet {
+	if self.data == nil {
+		self.data = NewParamsSet(self)
 	}
 
-	val, _ = url.QueryUnescape(ck.Value)
-	return
+	return self.data
+}
+
+func (self *TWebHandler) GetCookie(name, key string) (value string, err error) {
+	ck, err := self.request.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+
+	return url.QueryUnescape(ck.Value)
 }
 
 func (self *TWebHandler) GetModulePath() string {

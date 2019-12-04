@@ -65,7 +65,7 @@ func NewRouter() *TRouter {
 		template:   template.NewTemplateSet(),
 		//templateVar: make(map[string]interface{}),
 		TemplateVar: NewTemplateVar(),
-		show_route:  true,
+		//show_route:  true,
 	}
 
 	//router.GVar["Version"] = ROUTER_VER
@@ -106,7 +106,7 @@ func (self *TRouter) init() {
 	}
 
 	// init middleware
-	for _, name := range self.middleware.Names {
+	for _, name := range self.middleware.Names() {
 		ml := self.middleware.Get(name)
 		if m, ok := ml.(IMiddlewareInit); ok {
 			m.Init(self)
@@ -153,7 +153,7 @@ func (self *TRouter) RegisterMiddleware(middlewares ...IMiddleware) {
 }
 
 // the order is according by controller for modular register middleware.
-// TODO 优化遍历
+// TODO 优化遍历 缓存中间件列表
 // TODO 优化 route the midware request,response,panic
 func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHandler, c *TController, ctrl reflect.Value) {
 	var (
@@ -199,10 +199,12 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 			name_lst[mid_name] = true
 
 			if mid_val.Kind() == reflect.Ptr {
-				//	过滤指针中间件
-				//	type Controller struct {
-				//		Session *TSession
-				//	}
+
+				/***	!过滤指针中间件!
+					type Controller struct {
+						Session *TSession
+					}
+				***/
 
 				// all middleware are nil at first time on the controller
 				if mid_val.IsNil() {

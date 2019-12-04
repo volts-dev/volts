@@ -63,7 +63,7 @@ type (
 
 	TMiddlewareManager struct {
 		middlewares map[string]IMiddleware
-		Names       []string     //
+		names       []string     //
 		lock        sync.RWMutex // 同步性不重要暂时不加锁
 	}
 )
@@ -73,6 +73,11 @@ func NewMiddlewareManager() *TMiddlewareManager {
 		middlewares: make(map[string]IMiddleware),
 	}
 
+}
+
+// 有序返回所有中间件名称 顺序依据注册顺序
+func (self *TMiddlewareManager) Names() []string {
+	return self.names
 }
 
 func (self *TMiddlewareManager) Contain(key string) bool {
@@ -88,7 +93,7 @@ func (self *TMiddlewareManager) Add(key string, value IMiddleware) {
 
 	if _, exsit := self.middlewares[key]; !exsit {
 		self.middlewares[key] = value
-		self.Names = append(self.Names, key) // # 保存添加顺序
+		self.names = append(self.names, key) // # 保存添加顺序
 	} else {
 		logger.Err("key:" + key + " already exists")
 	}
@@ -116,9 +121,9 @@ func (self *TMiddlewareManager) Del(key string) {
 	defer self.lock.Unlock()
 
 	delete(self.middlewares, key)
-	for i, n := range self.Names {
+	for i, n := range self.names {
 		if n == key {
-			self.Names = append(self.Names[:i], self.Names[i+1:]...)
+			self.names = append(self.names[:i], self.names[i+1:]...)
 			break
 		}
 

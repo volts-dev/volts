@@ -18,11 +18,12 @@ func TestTree(t *testing.T) {
 	tree2.AddRoute("GET", "/aaa/bbb", new(TRoute))
 
 	// #动态路由#
-	tree1.AddRoute("GET", "/*", new(TRoute))              // 泛解析
-	tree1.AddRoute("GET", "/(:xx)", new(TRoute))          // 泛解析
-	tree1.AddRoute("GET", "/(:xx)/(:yy)", new(TRoute))    // 泛解析
-	tree1.AddRoute("GET", "/(:xx)/(:yy)/bb", new(TRoute)) // 泛解析
-	tree1.AddRoute("GET", "/(:xx)-(:yy)", new(TRoute))    // 泛解析
+	tree1.AddRoute("GET", "/*", new(TRoute))                // 泛解析
+	tree1.AddRoute("GET", "/(:xx)", new(TRoute))            // 泛解析
+	tree1.AddRoute("GET", "/(:xx)/(:yy)", new(TRoute))      // 泛解析
+	tree1.AddRoute("GET", "/(:xx)/(:yy)/bb", new(TRoute))   // 泛解析
+	tree1.AddRoute("GET", "/(:xx)-(:yy)", new(TRoute))      // 泛解析
+	tree1.AddRoute("GET", "/(*).(string:ext)", new(TRoute)) // 泛解析
 
 	tree1.AddRoute("GET", "/aa/(:xx)/bb", new(TRoute))             // 中间测试
 	tree1.AddRoute("GET", "/aa/(:xx)/(:yy)/bb", new(TRoute))       // 高级中间测试
@@ -66,5 +67,16 @@ func TestTree(t *testing.T) {
 		}
 	} else {
 		t.Logf("/aaa/Aa.bbbbBbb not matched!")
+	}
+
+	r, p = tree1.Match("GET", "/app/template/dir/file.js")
+	if r != nil {
+		if r.Path != "/(*).(string:ext)" {
+			t.Logf("/app/template/dir/file.js not matched! %v %v", r.Path, p)
+			return
+		}
+		t.Logf("/app/template/dir/file.js not matched! %v %v", r.Path, p)
+	} else {
+		t.Logf("/app/template/dir/file.js not matched!")
 	}
 }
