@@ -186,9 +186,16 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 
 		// get the name of middleware from the Type or Name()
 		mid_name = mid_typ.String()
-		if m, ok := mid_val.Interface().(IMiddlewareName); ok {
-			mid_name = m.Name()
+		if mid_val.Kind() == reflect.Ptr {
+			if m, ok := mid_val.Interface().(IMiddlewareName); ok {
+				mid_name = m.Name()
+			}
+		} else if mid_val.Kind() == reflect.Struct {
+			if m, ok := ctrl.Interface().(IMiddlewareName); ok {
+				mid_name = m.Name()
+			}
 		}
+
 		ml := self.middleware.Get(mid_name)
 		if ml == nil {
 			// normall only struct and pointer could be a middleware
@@ -199,13 +206,11 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 			name_lst[mid_name] = true
 
 			if mid_val.Kind() == reflect.Ptr {
-
 				/***	!过滤指针中间件!
 					type Controller struct {
 						Session *TSession
 					}
 				***/
-
 				// all middleware are nil at first time on the controller
 				if mid_val.IsNil() {
 					mid_ptr_val = cloneInterfacePtrFeild(ml) // TODO 优化克隆

@@ -1,13 +1,9 @@
 package codec
 
 import (
-	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"reflect"
-
-	proto "github.com/gogo/protobuf/proto"
-	pb "github.com/golang/protobuf/proto"
-	"github.com/vmihailenco/msgpack"
 )
 
 type (
@@ -17,40 +13,54 @@ type (
 		Decode(data []byte, i interface{}) error
 	}
 
-	// ByteCodec uses raw slice pf bytes and don't encode/decode.
-	ByteCodec struct{}
 	// SerializeType defines serialization type of payload.
 	SerializeType byte
+
+	// byteCodec uses raw slice pf bytes and don't encode/decode.
+	byteCodec struct{}
 )
 
 const (
+
 	// SerializeNone uses raw []byte and don't serialize/deserialize
 	SerializeNone SerializeType = iota
-	// JSON for payload.
+	/*// JSON for payload.
 	JSON
 	// ProtoBuffer for payload.
 	ProtoBuffer
 	// MsgPack for payload
 	MsgPack
+	*/
 )
 
 var (
 	// Codecs are codecs supported by rpc.
 	Codecs = map[SerializeType]ICodec{
-		SerializeNone: &ByteCodec{},
-		JSON:          &JSONCodec{},
-		ProtoBuffer:   &PBCodec{},
-		MsgPack:       &MsgpackCodec{},
+		SerializeNone: &byteCodec{},
 	}
 )
 
 // RegisterCodec register customized codec.
-func RegisterCodec(t SerializeType, c ICodec) {
-	Codecs[t] = c
+func RegisterCodec(name string, c ICodec) SerializeType {
+	h := hashName(name)
+	Codecs[h] = c
+	return h
+}
+
+func hashName(s string) SerializeType {
+	v := int(crc32.ChecksumIEEE([]byte(s)))
+	if v >= 0 {
+		return SerializeType(v)
+	}
+	if -v >= 0 {
+		return SerializeType(-v)
+	}
+	// v == MinInt
+	return SerializeType(0)
 }
 
 // Encode returns raw slice of bytes.
-func (c ByteCodec) Encode(i interface{}) ([]byte, error) {
+func (c byteCodec) Encode(i interface{}) ([]byte, error) {
 	if data, ok := i.([]byte); ok {
 		return data, nil
 	}
@@ -59,62 +69,7 @@ func (c ByteCodec) Encode(i interface{}) ([]byte, error) {
 }
 
 // Decode returns raw slice of bytes.
-func (c ByteCodec) Decode(data []byte, i interface{}) error {
+func (c byteCodec) Decode(data []byte, i interface{}) error {
 	reflect.ValueOf(i).SetBytes(data)
 	return nil
-}
-
-// JSONCodec uses json marshaler and unmarshaler.
-type JSONCodec struct{}
-
-// Encode encodes an object into slice of bytes.
-func (c JSONCodec) Encode(i interface{}) ([]byte, error) {
-	return json.Marshal(i)
-}
-
-// Decode decodes an object from slice of bytes.
-func (c JSONCodec) Decode(data []byte, i interface{}) error {
-	return json.Unmarshal(data, i)
-}
-
-// PBCodec uses protobuf marshaler and unmarshaler.
-type PBCodec struct{}
-
-// Encode encodes an object into slice of bytes.
-func (c PBCodec) Encode(i interface{}) ([]byte, error) {
-	if m, ok := i.(proto.Marshaler); ok {
-		return m.Marshal()
-	}
-
-	if m, ok := i.(pb.Message); ok {
-		return pb.Marshal(m)
-	}
-
-	return nil, fmt.Errorf("%T is not a proto.Marshaler", i)
-}
-
-// Decode decodes an object from slice of bytes.
-func (c PBCodec) Decode(data []byte, i interface{}) error {
-	if m, ok := i.(proto.Unmarshaler); ok {
-		return m.Unmarshal(data)
-	}
-
-	if m, ok := i.(pb.Message); ok {
-		return pb.Unmarshal(data, m)
-	}
-
-	return fmt.Errorf("%T is not a proto.Unmarshaler", i)
-}
-
-// MsgpackCodec uses messagepack marshaler and unmarshaler.
-type MsgpackCodec struct{}
-
-// Encode encodes an object into slice of bytes.
-func (c MsgpackCodec) Encode(i interface{}) ([]byte, error) {
-	return msgpack.Marshal(i)
-}
-
-// Decode decodes an object from slice of bytes.
-func (c MsgpackCodec) Decode(data []byte, i interface{}) error {
-	return msgpack.Unmarshal(data, i)
 }
