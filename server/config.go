@@ -14,10 +14,11 @@ type (
 	// OptionFn configures options of server.
 	FConfig func(*TServer)
 
+	// 根据go-ini特性 非输出字段必须些忽略符"-"
 	TConfig struct {
 		*ini.File `ini:"-"`
-		fileName  string // 文件名称
-		filePath  string // 文件路径
+		fileName  string `ini:"-"` // 文件名称
+		filePath  string `ini:"-"` // 文件路径
 		//FilePath    string //设置文件的路径
 		//LastModTime int64  //最后修改时间
 		//RootPath       string // 服务器硬盘地址
@@ -34,8 +35,8 @@ type (
 		DefaultDateFormat     string `ini:default_date_format`
 		DefaultDateTimeFormat string `ini:default_date_time_format`
 
-		StaticDir []string // the static dir allow to visit
-		StaticExt []string // the static file format allow to visit
+		StaticDir []string `ini:"-"` // the static dir allow to visit
+		StaticExt []string `ini:"-"` // the static file format allow to visit
 		/*
 			ModuleDir             string `ini:"module_dir"` //模块,程序块目录
 			TemplateDir           string `ini:"template_dir"`

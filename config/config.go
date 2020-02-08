@@ -14,15 +14,13 @@ const (
 
 var (
 	// App settings.
-	AppVer       string
-	AppName      string
-	AppUrl       string
-	AppSubUrl    string
-	AppPath      string
-	AppFilePath  string
-	AppDir       string
-
-
+	AppVer      string
+	AppName     string
+	AppUrl      string
+	AppSubUrl   string
+	AppPath     string
+	AppFilePath string
+	AppDir      string
 )
 
 func init() {
@@ -38,5 +36,3 @@ func LoadConfig(file_name string) {
 func SaveConfig() {
 
 }
-
-func Get

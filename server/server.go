@@ -78,10 +78,10 @@ type (
 		// TLSConfig for creating tls tcp connection.
 		tlsConfig *tls.Config
 
-		name            string // server name
-		address         string
-		network         string
-		config_filename string
+		name           string // server name
+		address        string
+		network        string
+		configFileName string
 	}
 )
 
@@ -126,7 +126,7 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 	host, port := self.parse_addr(address)
 
 	// TODO 加载配置文件
-	//self.Config.LoadFromFile(self.config_filename)
+	self.Config.LoadFromFile(self.configFileName)
 
 	// 确认配置已经被加载加载
 	// 配置最终处理
@@ -246,5 +246,5 @@ func (self *TServer) Logger() volts.ILogger {
 }
 
 func (self *TServer) LoadConfigFile(filepath string) {
-	self.config_filename = filepath
+	self.configFileName = filepath
 }
