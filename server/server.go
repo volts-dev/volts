@@ -95,6 +95,7 @@ func NewServer(config ...FConfig) *TServer {
 		logger:  logger.NewLogger(""), // TODO 添加配置
 		//Plugins: &pluginContainer{},
 		//options: make(map[string]interface{}),
+		configFileName: CONFIG_FILE_NAME,
 	}
 	// 传递
 	srv.Router.server = srv // 传递服务器指针
@@ -122,21 +123,17 @@ func (self *TServer) RegisterMiddleware(obj ...IMiddleware) {
 // newwork:tcp,http,rpc
 // It is blocked until receiving connectings from clients.
 func (self *TServer) Listen(network string, address ...string) (err error) {
-	// 解析地址
 	host, port := self.parse_addr(address)
-
-	// TODO 加载配置文件
-	self.Config.LoadFromFile(self.configFileName)
 
 	// 确认配置已经被加载加载
 	// 配置最终处理
+	self.Config.LoadFromFile(self.configFileName)
 	sec, err := self.Config.GetSection(self.name)
 	if err != nil {
-
 		// 存储默认
 		sec, err = self.Config.NewSection(self.name)
 		if err != nil {
-			self.logger.Panicf("creating ini' section faild! Name:%s Error:%s", self.name, err.Error())
+			return err
 		}
 		if host != "" {
 			self.Config.Host = host
@@ -146,10 +143,10 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 			self.Config.Port = port
 		}
 		sec.ReflectFrom(self.Config)
+		self.Config.Save() // 保存文件
 	}
 	// 映射到服务器配置结构里
 	sec.MapTo(self.Config) // 加载
-	self.Config.Save()     // 保存文件
 
 	// 显示系统信息
 	new_addr := fmt.Sprintf("%s:%d", self.Config.Host, self.Config.Port)
@@ -165,10 +162,10 @@ func (self *TServer) Listen(network string, address ...string) (err error) {
 	if err != nil {
 		return err
 	}
-	self.ln = ln
 
 	self.logger.Infof("server %s type: %s ", self.name, network)
 	self.logger.Infof("server %s address: %s", self.name, new_addr)
+	self.ln = ln
 	return self.serve(ln)
 }
 

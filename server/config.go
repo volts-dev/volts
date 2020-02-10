@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-ini/ini"
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
 )
 
@@ -167,20 +166,21 @@ func (self *TConfig) Init() {
 	}
 }
 
-func (self *TConfig) LoadFromFile(file_name string) {
-	if file_name == "" {
-		file_name = CONFIG_FILE_NAME
-	}
-
+func (self *TConfig) LoadFromFile(file_name string) error {
 	// STEP:保存数据
 	self.fileName = file_name
 	self.filePath = filepath.Join(AppPath, file_name)
 	err := self.File.Append(self.filePath)
 	if err != nil {
-		logger.Errf("load config file fail %v", err)
+		return err
 	}
 
 	self.File, err = ini.Load(self.filePath)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // TODO Reload
@@ -195,7 +195,6 @@ func (self *TConfig) Reload() bool {
 }
 
 func (self *TConfig) Save() error {
-	logger.Dbg("save", self.filePath)
 	/*section := self.Section("logger")
 	LoggerLevel = section.Key("level").SetValue(LoggerLevel)                   // 日志等级
 	RecoverPanic = section.Key("enabled_recover_panic").SetValue(RecoverPanic) // recover 时 panic
