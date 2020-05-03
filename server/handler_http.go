@@ -31,10 +31,6 @@ import (
 
 */
 
-const (
-	HANDLER_VER = "1.2.0"
-)
-
 var (
 	WebHandlerType       = reflect.TypeOf(TWebHandler{})
 	cookieNameSanitizer  = strings.NewReplacer("\n", "-", "\r", "-")

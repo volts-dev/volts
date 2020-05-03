@@ -32,12 +32,12 @@ type (
 	// TRoute 路,表示一个Link 连接地址"../webgo/"
 	// 提供基础数据参数供Handler处理
 	TRoute struct {
-		Id             int64  // 在Tree里的Id号
-		Path           string // !NOTE! Path存储路由绑定的URL 网络路径
-		FilePath       string // 短存储路径
-		Model          string // 模型/对象/模块名称 Tmodule/Tmodel, "Model.Action", "404"
-		Action         string // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
-		FileName       string
+		Id             int64     // 在Tree里的Id号
+		Path           string    // !NOTE! Path存储路由绑定的URL 网络路径
+		FilePath       string    // 短存储路径
+		Model          string    // 模型/对象/模块名称 Tmodule/Tmodel, "Model.Action", "404"
+		Action         string    // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
+		FileName       string    //
 		Type           RouteType // Route 类型 决定合并的形式
 		Host           *url.URL
 		Url            *TUrl
