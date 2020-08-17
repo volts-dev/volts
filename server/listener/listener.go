@@ -37,7 +37,7 @@ func init() {
 	listeners["tcp4"] = tcpMakeListener
 	listeners["tcp6"] = tcp4MakeListener
 	listeners["rpc"] = tcp4MakeListener
-	listeners["http"] = tcp6MakeListener
+	listeners["http"] = tcpMakeListener
 	//listeners["http3"] = http3Listener // the 3rd generation of http QUIC
 }
 

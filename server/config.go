@@ -122,7 +122,7 @@ func NewConfig(file_name ...string) *TConfig {
 		LoggerLevel:           4,
 		RecoverPanic:          true,
 		PrintRouterTree:       true,
-		Host:                  "localhost",
+		Host:                  "127.0.0.1",
 		Port:                  16888,
 		EnabledTLS:            false,
 		TLSCertFile:           "",
