@@ -22,7 +22,6 @@ import (
 	"github.com/volts-dev/logger"
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
-	"github.com/volts-dev/volts"
 	httpx "github.com/volts-dev/volts/server/listener/http"
 )
 
@@ -87,7 +86,7 @@ type (
 
 	// TWebHandler 负责所有请求任务,每个Handle表示有一个请求
 	TWebHandler struct {
-		volts.ILogger
+		logger.ILogger
 		httpx.IResponseWriter
 		response httpx.IResponseWriter //http.ResponseWriter
 		request  *http.Request         //

@@ -4,7 +4,7 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/volts-dev/volts"
+	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/server/listener/rpc"
 )
 
@@ -15,7 +15,7 @@ var (
 type (
 	// 代表一个控制集
 	TRpcHandler struct {
-		volts.ILogger
+		logger.ILogger
 		context  context.Context
 		response rpc.Response //http.ResponseWriter
 		request  *rpc.Request //

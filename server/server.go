@@ -12,7 +12,6 @@ import (
 
 	"github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
-	"github.com/volts-dev/volts"
 	listener "github.com/volts-dev/volts/server/listener"
 	rpc "github.com/volts-dev/volts/server/listener/rpc"
 )
@@ -70,7 +69,7 @@ type (
 		listener listener.IListeners
 		Router   *TRouter // 路由类
 		Config   *TConfig // 配置类
-		logger   volts.ILogger
+		logger   logger.ILogger
 
 		// BlockCrypt for kcp.BlockCrypt
 		options map[string]interface{}
@@ -233,11 +232,11 @@ func (self *TServer) Shutdown() error {
 }
 
 // Set the new logger for server
-func (self *TServer) SetLogger(log volts.ILogger) {
+func (self *TServer) SetLogger(log logger.ILogger) {
 	self.logger = log
 }
 
-func (self *TServer) Logger() volts.ILogger {
+func (self *TServer) Logger() logger.ILogger {
 	return self.logger
 }
 

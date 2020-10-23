@@ -613,7 +613,6 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) {
 */
 func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	p := req.URL.Path //获得的地址
-
 	// # match route from tree
 	route, params := self.tree.Match(req.Method, p)
 	if route == nil {
