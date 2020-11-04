@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/volts-dev/volts-middleware/event"
 	"github.com/volts-dev/volts/server"
-	"github.com/volts-middleware/event"
 )
 
 type (
