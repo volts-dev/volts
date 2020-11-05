@@ -9,6 +9,7 @@ require (
 	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	github.com/volts-dev/dataset v0.0.0-20201021092516-2bdcd69a83c6
 	github.com/volts-dev/logger v0.0.0-20201021093504-d9dc4be2acb3
+	github.com/volts-dev/orm v0.0.0-20201023072619-72f5e588d18d // indirect
 	github.com/volts-dev/template v0.0.0-20190320164224-0c521881058c
 	github.com/volts-dev/utils v0.0.0-20201021100622-752992a6f736
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
