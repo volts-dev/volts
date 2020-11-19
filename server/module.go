@@ -37,6 +37,7 @@ type (
 		GetRoutes() *TTree
 		GetPath() string
 		GetFilePath() string
+		GetModulePath() string
 		GetTemplateVar() map[string]interface{}
 	}
 
@@ -52,9 +53,10 @@ type (
 		//function map[string]*functionType // registered functions
 		//templateVar map[string]interface{} // TODO 全局变量. 需改进
 
-		path     string // URL 路径
-		filePath string // 短文件系统路径-当前文件夹名称
-		domain   string // 子域名用于区分不同域名不同路由
+		path       string // URL 路径
+		filePath   string // 短文件系统路径-当前文件夹名称
+		modulePath string // 当前模块文件夹路径
+		domain     string // 子域名用于区分不同域名不同路由
 	}
 
 	TemplateVar struct {
@@ -225,12 +227,20 @@ func (self *TModule) GetFilePath() string {
 	return self.filePath
 }
 
+func (self *TModule) GetModulePath() string {
+	return self.modulePath
+}
+
 func (self *TModule) SetPath(path string) {
 	self.path = path
 }
 
-func (self *TModule) SetFilePath(filePath string) {
-	self.filePath = filePath
+func (self *TModule) SetFilePath(path string) {
+	self.filePath = path
+}
+
+func (self *TModule) SetModulePath(path string) {
+	self.modulePath = path
 }
 
 // Static serves files from the given file system root.
