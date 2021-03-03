@@ -12,7 +12,7 @@ import (
 type (
 	TPool struct {
 		active bool
-		pools  map[reflect.Type]sync.Pool
+		pools  map[reflect.Type]*sync.Pool
 		New    func(t reflect.Type) reflect.Value
 	}
 )
@@ -22,7 +22,7 @@ type (
 func NewPool() *TPool {
 	return &TPool{
 		active: true,
-		pools:  make(map[reflect.Type]sync.Pool), //@@@ 改进改为接口 String
+		pools:  make(map[reflect.Type]*sync.Pool), //@@@ 改进改为接口 String
 		New: func(t reflect.Type) reflect.Value {
 			var argv reflect.Value
 
@@ -75,7 +75,8 @@ func (self *TPool) Put(typ reflect.Type, val reflect.Value) {
 	if pool, ok := self.pools[typ]; ok {
 		pool.Put(val)
 	} else {
-		var pool sync.Pool
+		pool := new(sync.Pool)
+
 		pool.Put(val)
 		self.pools[typ] = pool
 	}

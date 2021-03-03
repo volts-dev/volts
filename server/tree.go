@@ -146,7 +146,7 @@ func (self TSubNodes) Less(i, j int) bool {
 		return self[i].Level > self[j].Level
 	}
 
-	return i < j
+	//return i < j
 }
 
 func NewRouteTree(config_fn ...ConfigOption) *TTree {
@@ -692,7 +692,7 @@ func (self *TTree) addNodes(method string, nodes []*TNode, isHook bool) {
 	var p *TNode = cn // 复制方法对应的Root
 
 	// 层级插入Nodes的Node到Root
-	for idx, _ := range nodes {
+	for idx := range nodes {
 		p = cn.addNode(p, nodes, idx, isHook)
 	}
 }

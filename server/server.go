@@ -188,8 +188,6 @@ func (s *TServer) serve(ln net.Listener) error {
 		s.listener = rpc_srv
 		return rpc_srv.Serve(ln)
 	}
-
-	return nil
 }
 
 func (self *TServer) parse_addr(addr []string) (host string, port int) {

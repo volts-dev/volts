@@ -12,18 +12,6 @@
             "program": "${file}"
         },
         {
-            "name": "Launch test function",
-            "type": "go",
-            "request": "launch",
-            "mode": "test",
-            "program": "${workspaceFolder}",
-            "args": [
-                "-test.run",
-                "MyTestFunction"
-            ]
-        },
-
-        {
             "name": "Launch",
             "type": "go",
             "request": "launch",

@@ -31,8 +31,8 @@ type (
 		TLSCertFile           string `ini:"tls_cert_file"`
 		TLSKeyFile            string `ini:"tls_key_file"`
 		CookieSecret          string
-		DefaultDateFormat     string `ini:default_date_format`
-		DefaultDateTimeFormat string `ini:default_date_time_format`
+		DefaultDateFormat     string `ini:"default_date_format"`
+		DefaultDateTimeFormat string `ini:"default_date_time_format"`
 
 		StaticDir []string `ini:"-"` // the static dir allow to visit
 		StaticExt []string `ini:"-"` // the static file format allow to visit

@@ -296,7 +296,7 @@ func (self *TWebHandler) MethodParams(blank ...bool) *TParamsSet {
 		if !useBlank && self.methodParams.Length() == 0 {
 			// # parse the data from GET method #
 			q := self.request.URL.Query()
-			for key, _ := range q {
+			for key := range q {
 				self.methodParams.FieldByName(key).AsInterface(q.Get(key))
 			}
 
@@ -314,7 +314,7 @@ func (self *TWebHandler) MethodParams(blank ...bool) *TParamsSet {
 					self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
 				}
 
-				for key, _ := range self.request.Form {
+				for key := range self.request.Form {
 					//Debug("key2:", key)
 					self.methodParams.FieldByName(key).AsInterface(self.request.FormValue(key))
 				}

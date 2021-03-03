@@ -365,7 +365,7 @@ func (client *TClient) Go(path string, args interface{}, reply interface{}, done
 		// RPCs that will be using that channel. If the channel
 		// is totally unbuffered, it's best not to run at all.
 		if cap(done) == 0 {
-			log.Panic("rpc client: go() channel is unbuffered")
+			panic("rpc client: go() channel is unbuffered")
 		}
 	}
 	call.Done = done
