@@ -39,8 +39,6 @@ github.com/volts-dev/cacher v0.0.0-20180329043438-92d368b7b959 h1:CQObvPFa0aEn6N
 github.com/volts-dev/cacher v0.0.0-20180329043438-92d368b7b959/go.mod h1:l7Wwi0Plu9DT8JYsOjPSpSehuZHnXpCU5mznZQHUaPY=
 github.com/volts-dev/dataset v0.0.0-20200330031940-2cd4b1f8a7fb/go.mod h1:FIzUitmatW6TKx2JVkXmd9DXe1R8Fkad/qbyx9TZL7U=
 github.com/volts-dev/dataset v0.0.0-20200504183218-e2cdcc771d67/go.mod h1:S5phRdynRcRGV2LKOiL+5RkxxfEUi6V1hSVbKYJuKjU=
-github.com/volts-dev/dataset v0.0.0-20210217162820-fa3ef741b53e h1:OnydT0qxrIpZ426BlgTTYRBirKV7kiiXDPORgfejwao=
-github.com/volts-dev/dataset v0.0.0-20210217162820-fa3ef741b53e/go.mod h1:o9AB86cLrEkrbDYhTCoLZ8ADB58/TebB7Q5K7QpqFtk=
 github.com/volts-dev/dataset v0.0.0-20210225083624-a3ebdd782cbb h1:JO8DXTAOUk1Pjtw0wPhrTsn7yQBQ8b5iI71srN7sTSg=
 github.com/volts-dev/dataset v0.0.0-20210225083624-a3ebdd782cbb/go.mod h1:o9AB86cLrEkrbDYhTCoLZ8ADB58/TebB7Q5K7QpqFtk=
 github.com/volts-dev/lexer v0.0.0-20200203085109-5df8ad61a0be/go.mod h1:9Z9bf+B9SPjdzMyz/uTBC849mJFNIDewbGWUzpp/JO4=
