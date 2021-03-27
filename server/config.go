@@ -2,22 +2,43 @@ package server
 
 import (
 	"crypto/tls"
+	"fmt"
+	"net"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-ini/ini"
+	"github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
+	listener "github.com/volts-dev/volts/server/listener"
 )
 
 type (
 	// OptionFn configures options of server.
-	FConfig func(*TServer)
+	Options func(*TConfig) error
 
 	// 根据go-ini特性 非输出字段必须些忽略符"-"
 	TConfig struct {
 		*ini.File `ini:"-"`
-		fileName  string `ini:"-"` // 文件名称
-		filePath  string `ini:"-"` // 文件路径
+		name      string // server name
+
+		configFileName string
+
+		// Network options
+		ln        net.Listener
+		listener  listener.IListeners
+		address   string
+		protocol  string
+		tlsConfig *tls.Config // TLSConfig for creating tls tcp connection.
+
+		// Core Objects
+		Router *TRouter // 路由类
+		logger logger.ILogger
+		//Listener *rpcsrv.TServer
+
+		fileName string `ini:"-"` // 文件名称
+		filePath string `ini:"-"` // 文件路径
 		//FilePath    string //设置文件的路径
 		//LastModTime int64  //最后修改时间
 		//RootPath       string // 服务器硬盘地址
@@ -65,7 +86,7 @@ var (
 		ModulePath     = path.Join(SERVER_ROOT, "/module")   // 模板路径
 	*/
 
-	cfg = ini.Empty()
+	configFile = ini.Empty()
 	// 固定变量
 	// App settings.
 	AppVer      string // #程序版本
@@ -115,9 +136,15 @@ func init() {
 
 // 新建一个配置类
 // 指定文件名时自动加载 不给名字手动加载
-func NewConfig(file_name ...string) *TConfig {
+func NewConfig(fileName ...string) *TConfig {
 	config := &TConfig{
-		File:                  cfg,
+		name:           "VOLTS",
+		Router:         NewRouter(),
+		logger:         logger.NewLogger(""), // TODO 添加配置
+		configFileName: CONFIG_FILE_NAME,
+		protocol:       "http",
+
+		File:                  configFile,
 		DebugMode:             false,
 		LoggerLevel:           4,
 		RecoverPanic:          true,
@@ -133,10 +160,13 @@ func NewConfig(file_name ...string) *TConfig {
 		StaticExt:             []string{"html"},
 	}
 
-	if len(file_name) != 0 {
-		config.LoadFromFile(file_name[0])
+	if len(fileName) != 0 {
+		config.LoadFromFile(fileName[0])
 		config.MapTo(config)
 	}
+
+	// make sure the address refresh
+	config.address = config.genAddress()
 
 	/*
 			section := config.Section("logger")
@@ -180,6 +210,19 @@ func (self *TConfig) LoadFromFile(file_name string) error {
 		return err
 	}
 
+	sec, err := self.GetSection(self.name)
+	if err != nil {
+		// 存储默认
+		sec, err = self.NewSection(self.name)
+		if err != nil {
+			return err
+		}
+
+		sec.ReflectFrom(self)
+		self.Save() // save to file
+	}
+	// 映射到服务器配置结构里
+	sec.MapTo(self) // 加载
 	return nil
 }
 
@@ -223,23 +266,83 @@ func (self *TConfig) FilePath() string {
 	return self.filePath
 }
 
+func (self *TConfig) parseAddr(addr string) (host string, port int) {
+	// 如果已经配置了端口则不使用
+	addrSplitter := strings.Split(addr, ":")
+	if len(addrSplitter) != 2 {
+		logger.Errf("Address %s of server %s is unavailable!", addr[0], self.name)
+	} else {
+		host = addrSplitter[0]
+		port = utils.StrToInt(addrSplitter[1])
+	}
+
+	return
+}
+
+func (self *TConfig) genAddress() string {
+	return fmt.Sprintf("%s:%d", self.Host, self.Port)
+}
+
+// Server Name
+func Name(name string) Options {
+	return func(cfg *TConfig) error {
+		cfg.name = name
+		return nil
+	}
+}
+
+// Server address
+func Address(addr string) Options {
+	return func(cfg *TConfig) error {
+		cfg.Host, cfg.Port = cfg.parseAddr(addr)
+		cfg.address = cfg.genAddress()
+		return nil
+	}
+}
+
+// Server protocol including HTTP|RPC
+func Protocol(protocol string) Options {
+	return func(cfg *TConfig) error {
+		cfg.protocol = strings.ToLower(strings.Trim(protocol, " "))
+		return nil
+	}
+}
+
+func ConfigFile(filepath string) Options {
+	return func(cfg *TConfig) error {
+		cfg.configFileName = filepath
+		return nil
+	}
+}
+
 // WithTLSConfig sets tls.Config.
-func WithTLSConfig(cfg *tls.Config) FConfig {
-	return func(s *TServer) {
-		s.tlsConfig = cfg
+func WithTLSConfig(tlscfg *tls.Config) Options {
+	return func(cfg *TConfig) error {
+		cfg.tlsConfig = tlscfg
+		return nil
 	}
 }
 
 // WithReadTimeout sets readTimeout.
-func WithReadTimeout(readTimeout time.Duration) FConfig {
-	return func(s *TServer) {
-		s.Router.readTimeout = readTimeout
+func WithReadTimeout(readTimeout time.Duration) Options {
+	return func(cfg *TConfig) error {
+		cfg.Router.readTimeout = readTimeout
+		return nil
 	}
 }
 
 // WithWriteTimeout sets writeTimeout.
-func WithWriteTimeout(writeTimeout time.Duration) FConfig {
-	return func(s *TServer) {
-		s.Router.writeTimeout = writeTimeout
+func WithWriteTimeout(writeTimeout time.Duration) Options {
+	return func(cfg *TConfig) error {
+		cfg.Router.writeTimeout = writeTimeout
+		return nil
+	}
+}
+
+// Set the new logger for server
+func Logger(log logger.ILogger) Options {
+	return func(cfg *TConfig) error {
+		cfg.logger = log
+		return nil
 	}
 }

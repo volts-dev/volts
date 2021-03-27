@@ -15,5 +15,5 @@ func main() {
 
 	srv.SetTemplateVar("VOLTS", "Hi Guy")
 	// serve as a http server
-	srv.Listen("http")
+	srv.Listen()
 }

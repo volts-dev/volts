@@ -42,5 +42,5 @@ func main() {
 	srv.Url("GET", "/", ctrls.index)
 
 	// serve as a http server
-	srv.Listen("http")
+	srv.Listen()
 }

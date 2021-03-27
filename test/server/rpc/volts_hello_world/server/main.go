@@ -21,7 +21,9 @@ func (t Arith) Mul(hd *server.TRpcHandler, args *test.Args, reply *test.Reply) e
 }
 
 func main() {
-	srv := server.NewServer()
+	srv := server.NewServer(
+		server.Protocol("RPC"),
+	)
 	srv.Url("CONNECT", "Arith", new(Arith))
-	srv.Listen("RPC")
+	srv.Listen()
 }

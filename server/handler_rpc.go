@@ -36,7 +36,7 @@ type (
 
 func NewRpcHandler(router *TRouter) *TRpcHandler {
 	handler := &TRpcHandler{
-		ILogger: router.server.logger,
+		ILogger: router.server.Config.logger,
 		Router:  router,
 	}
 	handler.val = reflect.ValueOf(handler)

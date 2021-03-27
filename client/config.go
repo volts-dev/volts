@@ -2,53 +2,61 @@ package client
 
 import (
 	"crypto/tls"
+	"net"
 	"time"
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/protocol"
 )
 
-// Option contains all options for creating clients.
-type Option struct {
-	// Group is used to select the services in the same group. Services set group info in their meta.
-	// If it is empty, clients will ignore group.
-	Group string
+type (
+	// Option contains all options for creating clients.
+	Options func(*TConfig) error
+	TConfig struct {
+		conn     net.Conn
+		protocol string
 
-	// Retries retries to send
-	Retries int
+		// Group is used to select the services in the same group. Services set group info in their meta.
+		// If it is empty, clients will ignore group.
+		Group string
 
-	// TLSConfig for tcp and quic
-	TLSConfig *tls.Config
-	// kcp.BlockCrypt
-	Block interface{}
-	// RPCPath for http connection
-	RPCPath string
-	//ConnectTimeout sets timeout for dialing
-	ConnectTimeout time.Duration
-	// ReadTimeout sets readdeadline for underlying net.Conns
-	ReadTimeout time.Duration
-	// WriteTimeout sets writedeadline for underlying net.Conns
-	WriteTimeout time.Duration
+		// Retries retries to send
+		Retries int
 
-	// BackupLatency is used for Failbackup mode. rpc will sends another request if the first response doesn't return in BackupLatency time.
-	BackupLatency time.Duration
+		// TLSConfig for tcp and quic
+		TLSConfig *tls.Config
+		// kcp.BlockCrypt
+		Block interface{}
+		// RPCPath for http connection
+		RPCPath string
+		//ConnectTimeout sets timeout for dialing
+		ConnectTimeout time.Duration
+		// ReadTimeout sets readdeadline for underlying net.Conns
+		ReadTimeout time.Duration
+		// WriteTimeout sets writedeadline for underlying net.Conns
+		WriteTimeout time.Duration
 
-	// Breaker is used to config CircuitBreaker
-	///Breaker Breaker
+		// BackupLatency is used for Failbackup mode. rpc will sends another request if the first response doesn't return in BackupLatency time.
+		BackupLatency time.Duration
 
-	SerializeType codec.SerializeType
-	CompressType  protocol.CompressType
+		// Breaker is used to config CircuitBreaker
+		///Breaker Breaker
 
-	Heartbeat         bool
-	HeartbeatInterval time.Duration
-}
+		SerializeType codec.SerializeType
+		CompressType  protocol.CompressType
 
-// DefaultOption is a common option configuration for client.
-var DefaultOption = Option{
-	Retries: 3,
-	//RPCPath:        share.DefaultRPCPath,
-	ConnectTimeout: 10 * time.Second,
-	SerializeType:  codec.JSON,
-	CompressType:   protocol.None,
-	BackupLatency:  10 * time.Millisecond,
+		Heartbeat         bool
+		HeartbeatInterval time.Duration
+	}
+)
+
+func newConfig(fileName ...string) *TConfig {
+	return &TConfig{
+		Retries: 3,
+		//RPCPath:        share.DefaultRPCPath,
+		ConnectTimeout: 10 * time.Second,
+		SerializeType:  codec.JSON,
+		CompressType:   protocol.None,
+		BackupLatency:  10 * time.Millisecond,
+	}
 }

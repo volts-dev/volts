@@ -16,7 +16,7 @@ func main() {
 	*/
 	addr := "127.0.0.1:16888" //s.Address().String()
 
-	client := client.NewClient(client.DefaultOption)
+	client := client.NewClient()
 	err := client.Connect("tcp", addr)
 	if err != nil {
 		logger.Panicf("failed to connect: %v", err)

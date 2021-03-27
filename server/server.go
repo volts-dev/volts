@@ -2,16 +2,12 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/volts-dev/logger"
-	"github.com/volts-dev/utils"
 	listener "github.com/volts-dev/volts/server/listener"
 	rpc "github.com/volts-dev/volts/server/listener/rpc"
 )
@@ -64,44 +60,23 @@ type (
 	// Server is rpc server that use TCP or UDP.
 	TServer struct {
 		TModule
-		//Listener *rpcsrv.TServer
-		ln       net.Listener
-		listener listener.IListeners
-		Router   *TRouter // 路由类
-		Config   *TConfig // 配置类
-		logger   logger.ILogger
-
-		// BlockCrypt for kcp.BlockCrypt
-		options map[string]interface{}
-
-		// TLSConfig for creating tls tcp connection.
-		tlsConfig *tls.Config
-
-		name           string // server name
-		address        string
-		network        string
-		configFileName string
+		Config *TConfig // 配置类
 	}
 )
 
-// NewServer returns a server.
-func NewServer(config ...FConfig) *TServer {
+// NewServer returns a server. default is Http server
+func NewServer(opts ...Options) *TServer {
 	srv := &TServer{
-		name:    "VOLTS",
 		TModule: *NewModule(),
-		Router:  NewRouter(),
 		Config:  NewConfig(),
-		logger:  logger.NewLogger(""), // TODO 添加配置
-		//Plugins: &pluginContainer{},
-		//options: make(map[string]interface{}),
-		configFileName: CONFIG_FILE_NAME,
 	}
-	// 传递
-	srv.Router.server = srv // 传递服务器指针
 
-	for _, fn := range config {
-		if fn != nil {
-			fn(srv)
+	srv.Config.Router.server = srv
+
+	// init options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(srv.Config)
 		}
 	}
 
@@ -109,67 +84,37 @@ func NewServer(config ...FConfig) *TServer {
 }
 
 func (self *TServer) RegisterModule(obj IModule) {
-	self.Router.RegisterModule(obj)
+	self.Config.Router.RegisterModule(obj)
 }
 
 // 注册中间件
 // 中间件可以使用在Conntroller，全局Object 上
 func (self *TServer) RegisterMiddleware(obj ...IMiddleware) {
-	self.Router.RegisterMiddleware(obj...)
+	self.Config.Router.RegisterMiddleware(obj...)
 }
 
 // Serve starts and listens network requests.
 // newwork:tcp,http,rpc
 // It is blocked until receiving connectings from clients.
-func (self *TServer) Listen(network string, address ...string) (err error) {
-	host, port := self.parse_addr(address)
+func (self *TServer) Listen() (err error) {
+	// load config file
+	self.Config.LoadFromFile(self.Config.configFileName)
 
-	// 确认配置已经被加载加载
-	// 配置最终处理
-	self.Config.LoadFromFile(self.configFileName)
-	sec, err := self.Config.GetSection(self.name)
-	if err != nil {
-		// 存储默认
-		sec, err = self.Config.NewSection(self.name)
-		if err != nil {
-			return err
-		}
-		if host != "" {
-			self.Config.Host = host
-		}
-
-		if port != 0 {
-			self.Config.Port = port
-		}
-		sec.ReflectFrom(self.Config)
-		self.Config.Save() // 保存文件
-	}
-	// 映射到服务器配置结构里
-	sec.MapTo(self.Config) // 加载
-
-	// 显示系统信息
-	new_addr := fmt.Sprintf("%s:%d", self.Config.Host, self.Config.Port)
-	self.address = new_addr
-	self.network = strings.ToLower(network)
-
-	//注册主Route
-	self.Router.RegisterModule(self)
-	self.Router.init()
+	// register server routes
+	self.Config.Router.RegisterModule(self)
+	self.Config.Router.init()
 
 	// new a listener
-	ln, err := listener.NewListener(self.tlsConfig, self.network, self.address)
+	ln, err := listener.NewListener(self.Config.tlsConfig, self.Config.protocol, self.Config.address)
 	if err != nil {
 		return err
 	}
 
-	self.logger.Infof("%s listening and serving %s on %s\n", self.name, network, new_addr)
-	self.ln = ln
-	return self.serve(ln)
-}
+	self.Config.logger.Infof("%s listening and serving %s on %s\n", self.Config.name, self.Config.protocol, self.Config.address)
+	self.Config.ln = ln
 
-// TODO 实现同端口不同协议 超时，加密
-func (s *TServer) serve(ln net.Listener) error {
-	switch s.network {
+	// TODO 实现同端口不同协议 超时，加密
+	switch self.Config.protocol {
 	case "http": // serve as a http server
 		// register dispatcher
 		http_srv := &http.Server{
@@ -177,67 +122,43 @@ func (s *TServer) serve(ln net.Listener) error {
 			WriteTimeout: 10 * time.Second,
 			IdleTimeout:  120 * time.Second,
 			//TLSConfig:    s.Config.tlsConfig,
-			Handler: s.Router,
+			Handler: self.Config.Router,
 		}
-		s.listener = http_srv
+		self.Config.listener = http_srv
 		return http_srv.Serve(ln)
 
 	default: // serve as a RPC server
 		// register dispatcher
-		rpc_srv := &rpc.TServer{Dispatcher: s.Router}
-		s.listener = rpc_srv
+		rpc_srv := &rpc.TServer{Dispatcher: self.Config.Router}
+		self.Config.listener = rpc_srv
 		return rpc_srv.Serve(ln)
 	}
 }
 
-func (self *TServer) parse_addr(addr []string) (host string, port int) {
-	// 如果已经配置了端口则不使用
-	if len(addr) != 0 {
-		lAddrSplitter := strings.Split(addr[0], ":")
-		if len(lAddrSplitter) != 2 {
-			logger.Errf("Address %s of server %s is unavailable!", addr[0], self.name)
-		} else {
-			host = lAddrSplitter[0]
-			port = utils.StrToInt(lAddrSplitter[1])
-		}
-	}
-
-	return
-}
-
 // return the name of server
 func (self *TServer) Name() string {
-	return self.name
+	return self.Config.name
 }
 
 // Address returns listened address.
 func (self *TServer) Address() net.Addr {
-	if self.ln == nil {
+	if self.Config.ln == nil {
 		return nil
 	}
 
-	return self.ln.Addr()
+	return self.Config.ln.Addr()
 }
 
 // close the server gracefully
 func (self *TServer) Close() error {
-	return self.listener.Close()
+	return self.Config.listener.Close()
 }
 
 // shutdown the server forcedly
 func (self *TServer) Shutdown() error {
-	return self.listener.Shutdown(nil)
-}
-
-// Set the new logger for server
-func (self *TServer) SetLogger(log logger.ILogger) {
-	self.logger = log
+	return self.Config.listener.Shutdown(nil)
 }
 
 func (self *TServer) Logger() logger.ILogger {
-	return self.logger
-}
-
-func (self *TServer) LoadConfigFile(filepath string) {
-	self.configFileName = filepath
+	return self.Config.logger
 }

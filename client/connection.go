@@ -13,15 +13,15 @@ func newDirectConn(c *TClient, network, address string) (net.Conn, error) {
 	var tlsConn *tls.Conn
 	var err error
 
-	if c != nil && c.option.TLSConfig != nil {
+	if c != nil && c.Config.TLSConfig != nil {
 		dialer := &net.Dialer{
-			Timeout: c.option.ConnectTimeout,
+			Timeout: c.Config.ConnectTimeout,
 		}
-		tlsConn, err = tls.DialWithDialer(dialer, network, address, c.option.TLSConfig)
+		tlsConn, err = tls.DialWithDialer(dialer, network, address, c.Config.TLSConfig)
 		//or conn:= tls.Client(netConn, &config)
 		conn = net.Conn(tlsConn)
 	} else {
-		conn, err = net.DialTimeout(network, address, c.option.ConnectTimeout)
+		conn, err = net.DialTimeout(network, address, c.Config.ConnectTimeout)
 	}
 
 	if err != nil {

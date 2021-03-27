@@ -30,5 +30,5 @@ func main() {
 	//srv.RegisterMiddleware(event.NewEvent())
 	srv.Url("REST", "/ctrls", new(ctrls))
 	// serve as a http server
-	srv.Listen("http")
+	srv.Listen()
 }

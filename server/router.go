@@ -123,7 +123,7 @@ func (self *TRouter) Server() *TServer {
 // register module
 func (self *TRouter) RegisterModule(mod IModule, build_path ...bool) {
 	if mod == nil {
-		self.server.logger.Warn("RegisterModule is nil")
+		self.server.Config.logger.Warn("RegisterModule is nil")
 		return
 	}
 
@@ -273,7 +273,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 	// report the name of midware which on controller but not register in the server
 	for name, found := range name_lst {
 		if !found {
-			self.server.logger.Errf("%v isn't be register in controller %v", name, ctrl.String())
+			self.server.Config.logger.Errf("%v isn't be register in controller %v", name, ctrl.String())
 		}
 	}
 }
@@ -351,7 +351,7 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 	if req.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(nethttp.Hijacker).Hijack()
 		if err != nil {
-			self.server.logger.Infof("rpc hijacking %v:%v", req.RemoteAddr, ": ", err.Error())
+			self.server.Config.logger.Infof("rpc hijacking %v:%v", req.RemoteAddr, ": ", err.Error())
 			return
 		}
 		io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
@@ -363,7 +363,7 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 
 		msg, err := protocol.Read(conn)
 		if err != nil {
-			self.server.logger.Info("rpc Read ", err.Error())
+			self.server.Config.logger.Info("rpc Read ", err.Error())
 			return
 		}
 
@@ -552,7 +552,7 @@ func (self *TRouter) routeRpc(w rpc.Response, req *rpc.Request) {
 		if coder == nil {
 			err = fmt.Errorf("can not find codec for %d", msg.SerializeType())
 			handleError(res, err)
-
+			return
 		} else {
 			// 获取RPC参数
 			// 获取控制器参数类型
@@ -621,7 +621,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	}
 
 	if self.show_route {
-		self.server.logger.Infof("[Path]%v [Route]%v", p, route.FilePath)
+		self.server.Config.logger.Infof("[Path]%v [Route]%v", p, route.FilePath)
 	}
 
 	/*

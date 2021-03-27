@@ -12,11 +12,10 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/volts-dev/logger"
 	rpc "github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/protocol"
-
-	log "github.com/volts-dev/logger"
 )
 
 const (
@@ -45,15 +44,15 @@ type (
 	ServiceError string
 
 	TClient struct {
-		Conn   net.Conn
-		mutex  sync.Mutex // protects following
-		option Option
+		Config *TConfig
 
-		seq      uint64            // Call任务列队序号
-		pending  map[uint64]*TCall // Call任务列队
-		closing  bool              // user has called Close
-		shutdown bool              // server has told us to stop
+		// 任务列队
+		seq     uint64            // Call任务列队序号
+		pending map[uint64]*TCall // Call任务列队
+		mutex   sync.Mutex        // protects following
 
+		closing           bool // user has called Close
+		shutdown          bool // server has told us to stop
 		r                 *bufio.Reader
 		ServerMessageChan chan<- *protocol.TMessage
 	}
@@ -113,9 +112,16 @@ func convertRes2Raw(res *protocol.TMessage) (map[string]string, []byte, error) {
 	return m, res.Payload, nil
 }
 
-func NewClient(opt Option) *TClient {
+func NewClient(opts ...Options) *TClient {
 	cli := &TClient{
-		option: opt,
+		Config: newConfig(),
+	}
+
+	// init options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cli.Config)
+		}
 	}
 
 	return cli
@@ -140,22 +146,22 @@ func (self *TClient) Connect(network, address string) error {
 	}
 
 	if err == nil && conn != nil {
-		if self.option.ReadTimeout != 0 {
-			conn.SetReadDeadline(time.Now().Add(self.option.ReadTimeout))
+		if self.Config.ReadTimeout != 0 {
+			conn.SetReadDeadline(time.Now().Add(self.Config.ReadTimeout))
 		}
-		if self.option.WriteTimeout != 0 {
-			conn.SetWriteDeadline(time.Now().Add(self.option.WriteTimeout))
+		if self.Config.WriteTimeout != 0 {
+			conn.SetWriteDeadline(time.Now().Add(self.Config.WriteTimeout))
 		}
 
-		self.Conn = conn
+		self.Config.conn = conn
 
 		self.r = bufio.NewReaderSize(conn, ReaderBuffsize)
-		log.Dbg("Connect", self.Conn.RemoteAddr(), self.r.Buffered())
-		log.Dbg("NewCli", self.Conn.LocalAddr())
+		log.Dbg("Connect", self.Config.conn.RemoteAddr(), self.r.Buffered())
+		log.Dbg("NewCli", self.Config.conn.LocalAddr())
 		// start reading and writing since connected
 		go self.input()
 
-		if self.option.Heartbeat && self.option.HeartbeatInterval > 0 {
+		if self.Config.Heartbeat && self.Config.HeartbeatInterval > 0 {
 			go self.heartbeat()
 		}
 
@@ -164,17 +170,17 @@ func (self *TClient) Connect(network, address string) error {
 	return err
 }
 
-func (client *TClient) handleServerRequest(msg *protocol.TMessage) {
+func (self *TClient) handleServerRequest(msg *protocol.TMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errf("ServerMessageChan may be closed so client remove it. Please add it again if you want to handle server requests. error is %v", r)
-			client.ServerMessageChan = nil
+			self.ServerMessageChan = nil
 		}
 	}()
 
 	t := time.NewTimer(5 * time.Second)
 	select {
-	case client.ServerMessageChan <- msg:
+	case self.ServerMessageChan <- msg:
 	case <-t.C:
 		log.Warnf("ServerMessageChan may be full so the server request %d has been dropped", msg.Seq())
 	}
@@ -182,40 +188,40 @@ func (client *TClient) handleServerRequest(msg *protocol.TMessage) {
 }
 
 // 心跳回应
-func (client *TClient) heartbeat() {
-	t := time.NewTicker(client.option.HeartbeatInterval)
+func (self *TClient) heartbeat() {
+	t := time.NewTicker(self.Config.HeartbeatInterval)
 
 	for range t.C {
-		if client.shutdown || client.closing {
+		if self.shutdown || self.closing {
 			return
 		}
 
-		err := client.Call("", nil, nil)
+		err := self.Call("", nil, nil)
 		if err != nil {
-			log.Warnf("failed to heartbeat to %s", client.Conn.RemoteAddr().String())
+			log.Warnf("failed to heartbeat to %s", self.Config.conn.RemoteAddr().String())
 		}
 	}
 }
 
-func (client *TClient) input() {
+func (self *TClient) input() {
 	var err error
 	//var msg = protocol.NewMessage()
 	msg := protocol.GetMessageFromPool()
 
 	for err == nil {
-		if client.option.ReadTimeout != 0 {
-			client.Conn.SetReadDeadline(time.Now().Add(client.option.ReadTimeout))
+		if self.Config.ReadTimeout != 0 {
+			self.Config.conn.SetReadDeadline(time.Now().Add(self.Config.ReadTimeout))
 		}
-		log.Dbg("input", client.r.Size())
+		log.Dbg("input", self.r.Size())
 		//time.Sleep(5 * time.Second)
 		//buf := make([]byte, 6500)
-		//cnt, err := client.r.Read(buf)
+		//cnt, err := self.r.Read(buf)
 		//log.Dbg("buf", buf, cnt, err)
 
 		// 从Reader解码到Msg
-		err = msg.Decode(client.r)
-		log.Dbg("input1", client.r.Size())
-		//msg, err = protocol.Read(client.r)
+		err = msg.Decode(self.r)
+		log.Dbg("input1", self.r.Size())
+		//msg, err = protocol.Read(self.r)
 		if err != nil {
 			log.Dbg("1", err.Error())
 			break
@@ -225,17 +231,17 @@ func (client *TClient) input() {
 		var call *TCall
 		isServerMessage := (msg.MessageType() == protocol.Request && !msg.IsHeartbeat() && msg.IsOneway())
 		if !isServerMessage {
-			client.mutex.Lock()
-			call = client.pending[seq]
-			delete(client.pending, seq)
-			client.mutex.Unlock()
+			self.mutex.Lock()
+			call = self.pending[seq]
+			delete(self.pending, seq)
+			self.mutex.Unlock()
 		}
 
 		switch {
 		case call == nil:
 			if isServerMessage {
-				if client.ServerMessageChan != nil {
-					go client.handleServerRequest(msg)
+				if self.ServerMessageChan != nil {
+					go self.handleServerRequest(msg)
 					msg = protocol.NewMessage()
 				}
 				continue
@@ -277,9 +283,9 @@ func (client *TClient) input() {
 		msg.Reset()
 	}
 	// Terminate pending calls.
-	client.mutex.Lock()
-	client.shutdown = true
-	closing := client.closing
+	self.mutex.Lock()
+	self.shutdown = true
+	closing := self.closing
 	if err == io.EOF {
 		if closing {
 			err = ErrShutdown
@@ -288,12 +294,12 @@ func (client *TClient) input() {
 		}
 	}
 
-	for _, call := range client.pending {
+	for _, call := range self.pending {
 		call.Error = err
 		call.done()
 	}
 
-	client.mutex.Unlock()
+	self.mutex.Unlock()
 
 	if err != nil && err != io.EOF && !closing {
 		log.Err("rpc: client protocol error:", err)
@@ -302,29 +308,29 @@ func (client *TClient) input() {
 
 // Close calls the underlying codec's Close method. If the connection is already
 // shutting down, ErrShutdown is returned.
-func (client *TClient) Close() error {
-	client.mutex.Lock()
-	if client.closing {
-		client.mutex.Unlock()
+func (self *TClient) Close() error {
+	self.mutex.Lock()
+	if self.closing {
+		self.mutex.Unlock()
 		return ErrShutdown
 	}
-	client.closing = true
-	client.mutex.Unlock()
-	return client.Conn.Close()
+	self.closing = true
+	self.mutex.Unlock()
+	return self.Config.conn.Close()
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
-func (client *TClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (self *TClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	var err error
-	Done := client.Go(serviceMethod, args, reply, make(chan *TCall, 1)).Done
+	Done := self.Go(serviceMethod, args, reply, make(chan *TCall, 1)).Done
 
 	select {
 	/*
 		case <-ctx.Done(): //cancel by context
-			client.mutex.Lock()
-			call := client.pending[*seq]
-			delete(client.pending, *seq)
-			client.mutex.Unlock()
+			self.mutex.Lock()
+			call := self.pending[*seq]
+			delete(self.pending, *seq)
+			self.mutex.Unlock()
 			if call != nil {
 				call.Error = ctx.Err()
 				call.done()
@@ -349,7 +355,7 @@ func (client *TClient) Call(serviceMethod string, args interface{}, reply interf
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (client *TClient) Go(path string, args interface{}, reply interface{}, done chan *TCall) *TCall {
+func (self *TClient) Go(path string, args interface{}, reply interface{}, done chan *TCall) *TCall {
 	// TODO 缓存
 	call := new(TCall)
 	call.ServiceMethod = path // 废弃
@@ -370,39 +376,39 @@ func (client *TClient) Go(path string, args interface{}, reply interface{}, done
 	}
 	call.Done = done
 
-	client.send(nil, call)
+	self.send(nil, call)
 	return call
 }
 
 // 发送消息
-func (client *TClient) send(ctx context.Context, call *TCall) {
+func (self *TClient) send(ctx context.Context, call *TCall) {
 	// Register this call.
-	client.mutex.Lock()
-	if client.shutdown || client.closing {
+	self.mutex.Lock()
+	if self.shutdown || self.closing {
 		call.Error = rpc.ErrShutdown
-		client.mutex.Unlock()
+		self.mutex.Unlock()
 		call.done()
 		return
 	}
 
 	// 获得解码器
-	//log.Dbg("codec", client.option.SerializeType)
-	codec := codec.Codecs[client.option.SerializeType]
+	//log.Dbg("codec", self.option.SerializeType)
+	codec := codec.Codecs[self.Config.SerializeType]
 	if codec == nil {
 		call.Error = rpc.ErrUnsupportedCodec
-		client.mutex.Unlock()
+		self.mutex.Unlock()
 		call.done()
 		return
 	}
 
-	if client.pending == nil {
-		client.pending = make(map[uint64]*TCall)
+	if self.pending == nil {
+		self.pending = make(map[uint64]*TCall)
 	}
 
-	seq := client.seq
-	client.seq++
-	client.pending[seq] = call
-	client.mutex.Unlock()
+	seq := self.seq
+	self.seq++
+	self.pending[seq] = call
+	self.mutex.Unlock()
 
 	///if cseq, ok := ctx.Value(seqKey{}).(*uint64); ok {
 	///	*cseq = seq
@@ -418,7 +424,7 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 	if call.Path == "" {
 		req.SetHeartbeat(true)
 	} else {
-		req.SetSerializeType(client.option.SerializeType)
+		req.SetSerializeType(self.Config.SerializeType)
 		if call.Metadata != nil {
 			req.Metadata = call.Metadata
 		}
@@ -434,7 +440,7 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 			call.done()
 			return
 		}
-		if len(data) > 1024 && client.option.CompressType == protocol.Gzip {
+		if len(data) > 1024 && self.Config.CompressType == protocol.Gzip {
 			data, err = protocol.Zip(data)
 			if err != nil {
 				call.Error = err
@@ -442,7 +448,7 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 				return
 			}
 
-			req.SetCompressType(client.option.CompressType)
+			req.SetCompressType(self.Config.CompressType)
 		}
 
 		req.Payload = data
@@ -452,12 +458,12 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 	data := req.Encode()
 
 	// 返回编译过的数据
-	_, err := client.Conn.Write(data)
+	_, err := self.Config.conn.Write(data)
 	if err != nil {
-		client.mutex.Lock()
-		call = client.pending[seq]
-		delete(client.pending, seq)
-		client.mutex.Unlock()
+		self.mutex.Lock()
+		call = self.pending[seq]
+		delete(self.pending, seq)
+		self.mutex.Unlock()
 		if call != nil {
 			log.Dbg("asdfa", err.Error())
 			call.Error = err
@@ -468,10 +474,10 @@ func (client *TClient) send(ctx context.Context, call *TCall) {
 	//protocol.FreeMsg(req)
 
 	if req.IsOneway() {
-		client.mutex.Lock()
-		call = client.pending[seq]
-		delete(client.pending, seq)
-		client.mutex.Unlock()
+		self.mutex.Lock()
+		call = self.pending[seq]
+		delete(self.pending, seq)
+		self.mutex.Unlock()
 		if call != nil {
 			call.done()
 		}

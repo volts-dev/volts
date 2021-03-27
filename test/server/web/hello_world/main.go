@@ -33,5 +33,5 @@ func main() {
 	srv.Url("GET", "/(:all)/(:all2)/1", ctrls.macth_all)
 
 	// serve as a http server
-	srv.Listen("http")
+	srv.Listen()
 }

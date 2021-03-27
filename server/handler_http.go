@@ -177,7 +177,7 @@ func NewParamsSet(hd *TWebHandler) *TParamsSet {
 
 func NewWebHandler(router *TRouter) *TWebHandler {
 	hd := &TWebHandler{
-		ILogger: router.server.logger,
+		ILogger: router.server.Config.logger,
 		Router:  router,
 		//Route:   route,
 		//iResponseWriter: writer,

@@ -47,6 +47,10 @@ func RegisterCodec(name string, c ICodec) SerializeType {
 	return h
 }
 
+func GetCodec(name SerializeType) ICodec {
+	return Codecs[name]
+}
+
 func hashName(s string) SerializeType {
 	v := int(crc32.ChecksumIEEE([]byte(s)))
 	if v >= 0 {
