@@ -22,3 +22,7 @@ func (c jsonCodec) Encode(i interface{}) ([]byte, error) {
 func (c jsonCodec) Decode(data []byte, i interface{}) error {
 	return json.Unmarshal(data, i)
 }
+
+func (c jsonCodec) String() string {
+	return "JSON"
+}

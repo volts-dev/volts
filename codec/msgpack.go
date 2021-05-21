@@ -22,3 +22,7 @@ func (c msgpackCodec) Encode(i interface{}) ([]byte, error) {
 func (c msgpackCodec) Decode(data []byte, i interface{}) error {
 	return msgpack.Unmarshal(data, i)
 }
+
+func (c msgpackCodec) String() string {
+	return "MsgPack"
+}

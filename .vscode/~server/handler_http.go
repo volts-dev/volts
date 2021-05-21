@@ -22,7 +22,7 @@ import (
 	"github.com/volts-dev/logger"
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
-	httpx "github.com/volts-dev/volts/server/listener/http"
+	//httpx "github.com/volts-dev/volts/server/listener/http"
 )
 
 /*
@@ -177,7 +177,7 @@ func NewParamsSet(hd *TWebHandler) *TParamsSet {
 
 func NewWebHandler(router *TRouter) *TWebHandler {
 	hd := &TWebHandler{
-		ILogger: router.server.Config.logger,
+		ILogger: router.server.config.logger,
 		Router:  router,
 		//Route:   route,
 		//iResponseWriter: writer,

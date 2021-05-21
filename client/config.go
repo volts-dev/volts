@@ -7,12 +7,17 @@ import (
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/protocol"
+	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/selector"
 )
 
 type (
 	// Option contains all options for creating clients.
-	Options func(*TConfig) error
-	TConfig struct {
+	Option func(*Config) error
+	Config struct {
+		Registry registry.IRegistry
+		Selector selector.ISelector
+
 		conn     net.Conn
 		protocol string
 
@@ -50,8 +55,8 @@ type (
 	}
 )
 
-func newConfig(fileName ...string) *TConfig {
-	return &TConfig{
+func newConfig(fileName ...string) *Config {
+	return &Config{
 		Retries: 3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,

@@ -36,7 +36,7 @@ type (
 	}
 
 	IMiddlewareInit interface {
-		Init(*TRouter)
+		Init(*router)
 	}
 
 	/*

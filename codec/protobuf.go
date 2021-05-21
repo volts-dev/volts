@@ -41,3 +41,7 @@ func (c pbCodec) Decode(data []byte, i interface{}) error {
 
 	return fmt.Errorf("%T is not a proto.Unmarshaler", i)
 }
+
+func (c pbCodec) String() string {
+	return "ProtoBuffer"
+}

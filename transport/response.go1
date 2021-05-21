@@ -1,0 +1,13 @@
+package transport
+
+// Response is the response writer for unencoded messages
+type IResponse interface {
+	Interface() interface{}
+	Header() IHeader
+	// Encoded writer
+	//Codec() codec.Writer
+	// Write the header
+	WriteHeader(map[string]string)
+	// write a response directly to the client
+	Write([]byte) (int, error)
+}

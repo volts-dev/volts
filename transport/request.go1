@@ -1,0 +1,33 @@
+package transport
+
+import (
+	"context"
+)
+
+// Request is a synchronous request interface
+type (
+	IRequest interface {
+		Interface() interface{}
+		// Service name requested
+		//Service() string
+		// The action requested
+		Method() string
+		Path() string
+		// Endpoint name requested
+		//Endpoint() string
+		// Content type provided
+		ContentType() string
+		// Header of the request
+		Header() IHeader
+		// Body is the initial decoded value
+		//Body() interface{}
+		// Read the undecoded request body
+		Read() ([]byte, error)
+		Context() context.Context
+		RemoteAddr() string
+		// The encoded message stream
+		//Codec() codec.Reader
+		// Indicates whether its a stream
+		Stream() bool
+	}
+)

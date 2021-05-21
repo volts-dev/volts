@@ -7,14 +7,15 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/rpc"
 	"net/url"
 	"strconv"
 	"sync"
 	"time"
 
 	log "github.com/volts-dev/logger"
-	rpc "github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/codec"
+	verrors "github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/protocol"
 )
 
@@ -32,19 +33,28 @@ const (
 	XErrorMessage      = "X-RPC-ErrorMessage"
 )
 
-// ErrShutdown connection is closed.
-var (
-	ErrShutdown         = errors.New("connection is shut down")
-	ErrUnsupportedCodec = errors.New("unsupported codec")
-)
-
 type (
 	seqKey struct{}
 	// ServiceError is an error from server.
 	ServiceError string
 
+	// Client is the interface used to make requests to services.
+	// It supports Request/Response via Transport and Publishing via the Broker.
+	// It also supports bidirectional streaming of requests.
+	IClient interface {
+		Init(...Option) error
+		Config() *Config
+		////NewMessage(topic string, msg interface{}, opts ...MessageOption) Message
+		///NewRequest(service, endpoint string, req interface{}, reqOpts ...RequestOption) Request
+		//Call(ctx context.Context, req Request, rsp interface{} ) error
+		Call(serviceMethod string, args interface{}, reply interface{}) error
+		//Stream(ctx context.Context, req Request, opts ...CallOption) (Stream, error)
+		//Publish(ctx context.Context, msg Message, opts ...PublishOption) error
+		//String() string
+	}
+
 	TClient struct {
-		Config *TConfig
+		config *Config
 
 		// 任务列队
 		seq     uint64            // Call任务列队序号
@@ -56,6 +66,13 @@ type (
 		r                 *bufio.Reader
 		ServerMessageChan chan<- *protocol.TMessage
 	}
+)
+
+// ErrShutdown connection is closed.
+var (
+	ErrShutdown                 = errors.New("connection is shut down")
+	ErrUnsupportedCodec         = errors.New("unsupported codec")
+	DefaultClient       IClient = NewClient()
 )
 
 const (
@@ -112,19 +129,29 @@ func convertRes2Raw(res *protocol.TMessage) (map[string]string, []byte, error) {
 	return m, res.Payload, nil
 }
 
-func NewClient(opts ...Options) *TClient {
+func NewClient(opts ...Option) IClient {
 	cli := &TClient{
-		Config: newConfig(),
+		config: newConfig(),
 	}
 
 	// init options
 	for _, opt := range opts {
 		if opt != nil {
-			opt(cli.Config)
+			opt(cli.config)
 		}
 	}
 
 	return cli
+}
+
+func (self *TClient) Init(opts ...Option) error {
+	// init options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(self.config)
+		}
+	}
+	return nil
 }
 
 // Connect connects the server via specified network.
@@ -146,22 +173,22 @@ func (self *TClient) Connect(network, address string) error {
 	}
 
 	if err == nil && conn != nil {
-		if self.Config.ReadTimeout != 0 {
-			conn.SetReadDeadline(time.Now().Add(self.Config.ReadTimeout))
+		if self.config.ReadTimeout != 0 {
+			conn.SetReadDeadline(time.Now().Add(self.config.ReadTimeout))
 		}
-		if self.Config.WriteTimeout != 0 {
-			conn.SetWriteDeadline(time.Now().Add(self.Config.WriteTimeout))
+		if self.config.WriteTimeout != 0 {
+			conn.SetWriteDeadline(time.Now().Add(self.config.WriteTimeout))
 		}
 
-		self.Config.conn = conn
+		self.config.conn = conn
 
 		self.r = bufio.NewReaderSize(conn, ReaderBuffsize)
-		log.Dbg("Connect", self.Config.conn.RemoteAddr(), self.r.Buffered())
-		log.Dbg("NewCli", self.Config.conn.LocalAddr())
+		log.Dbg("Connect", self.config.conn.RemoteAddr(), self.r.Buffered())
+		log.Dbg("NewCli", self.config.conn.LocalAddr())
 		// start reading and writing since connected
 		go self.input()
 
-		if self.Config.Heartbeat && self.Config.HeartbeatInterval > 0 {
+		if self.config.Heartbeat && self.config.HeartbeatInterval > 0 {
 			go self.heartbeat()
 		}
 
@@ -189,7 +216,7 @@ func (self *TClient) handleServerRequest(msg *protocol.TMessage) {
 
 // 心跳回应
 func (self *TClient) heartbeat() {
-	t := time.NewTicker(self.Config.HeartbeatInterval)
+	t := time.NewTicker(self.config.HeartbeatInterval)
 
 	for range t.C {
 		if self.shutdown || self.closing {
@@ -198,7 +225,7 @@ func (self *TClient) heartbeat() {
 
 		err := self.Call("", nil, nil)
 		if err != nil {
-			log.Warnf("failed to heartbeat to %s", self.Config.conn.RemoteAddr().String())
+			log.Warnf("failed to heartbeat to %s", self.config.conn.RemoteAddr().String())
 		}
 	}
 }
@@ -209,8 +236,8 @@ func (self *TClient) input() {
 	msg := protocol.GetMessageFromPool()
 
 	for err == nil {
-		if self.Config.ReadTimeout != 0 {
-			self.Config.conn.SetReadDeadline(time.Now().Add(self.Config.ReadTimeout))
+		if self.config.ReadTimeout != 0 {
+			self.config.conn.SetReadDeadline(time.Now().Add(self.config.ReadTimeout))
 		}
 		log.Dbg("input", self.r.Size())
 		//time.Sleep(5 * time.Second)
@@ -316,7 +343,7 @@ func (self *TClient) Close() error {
 	}
 	self.closing = true
 	self.mutex.Unlock()
-	return self.Config.conn.Close()
+	return self.config.conn.Close()
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
@@ -393,9 +420,9 @@ func (self *TClient) send(ctx context.Context, call *TCall) {
 
 	// 获得解码器
 	//log.Dbg("codec", self.option.SerializeType)
-	codec := codec.Codecs[self.Config.SerializeType]
+	codec := codec.Codecs[self.config.SerializeType]
 	if codec == nil {
-		call.Error = rpc.ErrUnsupportedCodec
+		call.Error = verrors.ErrUnsupportedCodec
 		self.mutex.Unlock()
 		call.done()
 		return
@@ -424,7 +451,7 @@ func (self *TClient) send(ctx context.Context, call *TCall) {
 	if call.Path == "" {
 		req.SetHeartbeat(true)
 	} else {
-		req.SetSerializeType(self.Config.SerializeType)
+		req.SetSerializeType(self.config.SerializeType)
 		if call.Metadata != nil {
 			req.Metadata = call.Metadata
 		}
@@ -440,7 +467,7 @@ func (self *TClient) send(ctx context.Context, call *TCall) {
 			call.done()
 			return
 		}
-		if len(data) > 1024 && self.Config.CompressType == protocol.Gzip {
+		if len(data) > 1024 && self.config.CompressType == protocol.Gzip {
 			data, err = protocol.Zip(data)
 			if err != nil {
 				call.Error = err
@@ -448,7 +475,7 @@ func (self *TClient) send(ctx context.Context, call *TCall) {
 				return
 			}
 
-			req.SetCompressType(self.Config.CompressType)
+			req.SetCompressType(self.config.CompressType)
 		}
 
 		req.Payload = data
@@ -458,7 +485,7 @@ func (self *TClient) send(ctx context.Context, call *TCall) {
 	data := req.Encode()
 
 	// 返回编译过的数据
-	_, err := self.Config.conn.Write(data)
+	_, err := self.config.conn.Write(data)
 	if err != nil {
 		self.mutex.Lock()
 		call = self.pending[seq]

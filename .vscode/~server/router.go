@@ -101,7 +101,7 @@ func NewRouter() *TRouter {
 
 // init when the router is active
 func (self *TRouter) init() {
-	if self.server.Config.PrintRouterTree {
+	if self.server.config.PrintRouterTree {
 		self.tree.PrintTrees()
 	}
 
@@ -123,7 +123,7 @@ func (self *TRouter) Server() *TServer {
 // register module
 func (self *TRouter) RegisterModule(mod IModule, build_path ...bool) {
 	if mod == nil {
-		self.server.Config.logger.Warn("RegisterModule is nil")
+		self.server.config.logger.Warn("RegisterModule is nil")
 		return
 	}
 
@@ -273,7 +273,7 @@ func (self *TRouter) routeMiddleware(method string, route *TRoute, handler IHand
 	// report the name of midware which on controller but not register in the server
 	for name, found := range name_lst {
 		if !found {
-			self.server.Config.logger.Errf("%v isn't be register in controller %v", name, ctrl.String())
+			self.server.config.logger.Errf("%v isn't be register in controller %v", name, ctrl.String())
 		}
 	}
 }
@@ -294,7 +294,7 @@ func (self *TRouter) routeHttpStatic(req *nethttp.Request, w *http.TResponseWrit
 			}
 
 		} else {
-			for _, dir := range self.server.Config.StaticDir {
+			for _, dir := range self.server.config.StaticDir {
 				//如果第一个是静态文件夹名则选用主静态文件夹,反之使用模块
 				// /static/js/base.js
 				// /ModuleName/static/js/base.js
@@ -351,7 +351,7 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 	if req.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(nethttp.Hijacker).Hijack()
 		if err != nil {
-			self.server.Config.logger.Infof("rpc hijacking %v:%v", req.RemoteAddr, ": ", err.Error())
+			self.server.config.logger.Infof("rpc hijacking %v:%v", req.RemoteAddr, ": ", err.Error())
 			return
 		}
 		io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
@@ -363,7 +363,7 @@ func (self *TRouter) ServeHTTP(w nethttp.ResponseWriter, req *nethttp.Request) {
 
 		msg, err := protocol.Read(conn)
 		if err != nil {
-			self.server.Config.logger.Info("rpc Read ", err.Error())
+			self.server.config.logger.Info("rpc Read ", err.Error())
 			return
 		}
 
@@ -481,7 +481,7 @@ func (self *TRouter) callCtrl(route *TRoute, ct *TController, handler IHandler) 
 func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, handler IHandler, ct *TController, ctrl reflect.Value) {
 	defer func() {
 		if err := recover(); err != nil {
-			if self.server.Config.RecoverPanic { //是否绕过错误处理直接关闭程序
+			if self.server.config.RecoverPanic { //是否绕过错误处理直接关闭程序
 				// handle middleware
 				self.routeMiddleware("panic", route, handler, ct, ctrl)
 
@@ -621,7 +621,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 	}
 
 	if self.show_route {
-		self.server.Config.logger.Infof("[Path]%v [Route]%v", p, route.FilePath)
+		self.server.config.logger.Infof("[Path]%v [Route]%v", p, route.FilePath)
 	}
 
 	/*
@@ -661,7 +661,7 @@ func (self *TRouter) routeHttp(req *nethttp.Request, w *http.TResponseWriter) {
 
 		//添加[static]静态文件路径
 		// log.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(route.FilePath), STATIC_DIR))
-		for _, dir := range self.server.Config.StaticDir {
+		for _, dir := range self.server.config.StaticDir {
 			handler.templateVar[dir] = path.Join(utils.FilePathToPath(route.FilePath), dir)
 		}
 	}

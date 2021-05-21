@@ -153,7 +153,7 @@ func (h Header) MessageStatusType() MessageStatusType {
 func (h *Header) SetMessageStatusType(mt MessageStatusType) {
 	h[2] = h[2] | (byte(mt) & 0x03)
 }
-
+/*
 // SerializeType returns serialization type of payload.
 func (h Header) SerializeType() codec.SerializeType {
 	return codec.SerializeType((h[3] & 0xF0) >> 4)
@@ -163,7 +163,7 @@ func (h Header) SerializeType() codec.SerializeType {
 func (h *Header) SetSerializeType(st codec.SerializeType) {
 	h[3] = h[3] | (byte(st) << 4)
 }
-
+*/
 // Seq returns sequence number of messages.
 func (h Header) Seq() uint64 {
 	return binary.BigEndian.Uint64(h[4:])

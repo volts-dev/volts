@@ -1,4 +1,4 @@
-package volts
+package errors
 
 import (
 	"errors"

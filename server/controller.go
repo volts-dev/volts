@@ -1,27 +1,15 @@
 package server
 
 type (
-	// Controller support middleware
-	TController struct {
-		rpcHandler *TRpcHandler
-		webHandler *TWebHandler
+	Handle     func(ctrl *Controller)
+	Controller struct {
 	}
 )
 
-// return the handler for rpc
-func (self *TController) GetHttpHandler() *TWebHandler {
-	return self.webHandler
+func (self *Controller) Handle(hd Handle) {
+	hd(self)
 }
 
-// return the handler for web
-func (self *TController) GetRpcHandler() *TRpcHandler {
-	return self.rpcHandler
-}
+func (self *Controller) Done() {
 
-func (self *TController) GetProtocol() string {
-	if self.rpcHandler == nil {
-		return "HTTP"
-	} else {
-		return "RPC"
-	}
 }

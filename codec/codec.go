@@ -1,58 +1,40 @@
 package codec
 
 import (
-	"fmt"
 	"hash/crc32"
-	"reflect"
 )
 
 type (
+	// SerializeType defines serialization type of payload.
+	SerializeType byte
+
 	// Codec defines the interface that decode/encode payload.
 	ICodec interface {
 		Encode(i interface{}) ([]byte, error)
 		Decode(data []byte, i interface{}) error
+		//Close() error
+		String() string
 	}
-
-	// SerializeType defines serialization type of payload.
-	SerializeType byte
-
-	// byteCodec uses raw slice pf bytes and don't encode/decode.
-	byteCodec struct{}
-)
-
-const (
-
-	// SerializeNone uses raw []byte and don't serialize/deserialize
-	SerializeNone SerializeType = iota
-	/*// JSON for payload.
-	JSON
-	// ProtoBuffer for payload.
-	ProtoBuffer
-	// MsgPack for payload
-	MsgPack
-	*/
 )
 
 var (
 	// Codecs are codecs supported by rpc.
-	Codecs = map[SerializeType]ICodec{
-		SerializeNone: &byteCodec{},
-	}
+	codecs = map[SerializeType]ICodec{}
 )
 
 // RegisterCodec register customized codec.
-func RegisterCodec(name string, c ICodec) SerializeType {
+func RegisterCodec(name string, codec ICodec) SerializeType {
 	h := hashName(name)
-	Codecs[h] = c
+	codecs[h] = codec
 	return h
 }
 
-func GetCodec(name SerializeType) ICodec {
-	return Codecs[name]
+func IdentifyCodec(st SerializeType) ICodec {
+	return codecs[st]
 }
 
 func hashName(s string) SerializeType {
-	v := int(crc32.ChecksumIEEE([]byte(s)))
+	v := int(crc32.ChecksumIEEE([]byte(s))) // 输入一个字符等到唯一标识
 	if v >= 0 {
 		return SerializeType(v)
 	}
@@ -61,19 +43,4 @@ func hashName(s string) SerializeType {
 	}
 	// v == MinInt
 	return SerializeType(0)
-}
-
-// Encode returns raw slice of bytes.
-func (c byteCodec) Encode(i interface{}) ([]byte, error) {
-	if data, ok := i.([]byte); ok {
-		return data, nil
-	}
-
-	return nil, fmt.Errorf("%T is not a []byte", i)
-}
-
-// Decode returns raw slice of bytes.
-func (c byteCodec) Decode(data []byte, i interface{}) error {
-	reflect.ValueOf(i).SetBytes(data)
-	return nil
 }
