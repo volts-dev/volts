@@ -5,7 +5,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/server"
 )
@@ -119,9 +118,9 @@ func (self *service) Run() error {
 				defer self.opts.Profile.Stop()
 			}
 	*/
-	if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-		logger.Infof("Starting [service] %s", self.Name())
-	}
+	//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
+	//	logger.Infof("Starting [service] %s", self.Name())
+	//}
 
 	if err := self.Start(); err != nil {
 		return err
@@ -151,5 +150,5 @@ func (self *service) Server() server.IServer {
 }
 
 func (self *service) String() string {
-	return "volts"
+	return "Volts Service"
 }

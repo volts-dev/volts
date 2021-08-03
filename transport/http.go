@@ -6,9 +6,9 @@ import (
 	"net"
 	"net/http"
 
-	maddr "github.com/asim/go-micro/v3/util/addr"
-	mnet "github.com/asim/go-micro/v3/util/net"
-	mls "github.com/asim/go-micro/v3/util/tls"
+	vaddr "github.com/volts-dev/volts/util/addr"
+	vnet "github.com/volts-dev/volts/util/net"
+	mls "github.com/volts-dev/volts/util/tls"
 )
 
 type (
@@ -25,6 +25,7 @@ func NewHTTPTransport(opts ...Option) *httpTransport {
 	return &httpTransport{config: cfg}
 }
 
+// to make a Dial with server
 func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	cfg := DialConfig{
 		Timeout: DefaultDialTimeout,
@@ -65,7 +66,6 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		addr:   addr,
 		conn:   conn,
 		buff:   bufio.NewReader(conn),
-
 		r:      make(chan *http.Request, 1),
 		local:  conn.LocalAddr().String(),
 		remote: conn.RemoteAddr().String(),
@@ -74,8 +74,8 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 
 func (self *httpTransport) Listen(addr string, opts ...ListenOption) (IListener, error) {
 	var options ListenConfig
-	for _, o := range opts {
-		o(&options)
+	for _, opt := range opts {
+		opt(&options)
 	}
 
 	var l net.Listener
@@ -92,7 +92,7 @@ func (self *httpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 				// check if its a valid host:port
 				if host, _, err := net.SplitHostPort(addr); err == nil {
 					if len(host) == 0 {
-						hosts = maddr.IPs()
+						hosts = vaddr.IPs()
 					} else {
 						hosts = []string{host}
 					}
@@ -108,13 +108,13 @@ func (self *httpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 			return tls.Listen("tcp", addr, config)
 		}
 
-		l, err = mnet.Listen(addr, fn)
+		l, err = vnet.Listen(addr, fn)
 	} else {
 		fn := func(addr string) (net.Listener, error) {
 			return net.Listen("tcp", addr)
 		}
 
-		l, err = mnet.Listen(addr, fn)
+		l, err = vnet.Listen(addr, fn)
 	}
 
 	if err != nil {
@@ -133,6 +133,7 @@ func (self *httpTransport) Init(opts ...Option) error {
 	for _, o := range opts {
 		o(self.config)
 	}
+
 	return nil
 }
 
@@ -150,5 +151,5 @@ func (self *httpTransport) Config() *Config {
 }
 
 func (self *httpTransport) String() string {
-	return "http"
+	return "Http Transport"
 }

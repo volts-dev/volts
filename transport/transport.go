@@ -11,8 +11,6 @@ type (
 		Config() *Config
 		Dial(addr string, opts ...DialOption) (IClient, error)       // for client
 		Listen(addr string, opts ...ListenOption) (IListener, error) // for server
-		//Request(Message, *Socket, codec.ICodec) IRequest
-		//Response(*Socket, codec.ICodec) IResponse
 		String() string
 	}
 
@@ -34,10 +32,10 @@ type (
 		Accept() (net.Conn, error)
 		//Serve(func(ISocket)) error // 阻塞监听
 		Serve(Handler) error // 阻塞监听
-
-		Sock() ISocket
+		//Sock() ISocket
 	}
 
+	// the handler interface
 	Handler interface {
 		String() string
 		Handler() interface{}

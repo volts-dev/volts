@@ -390,7 +390,7 @@ func (m Message) CloneTo(msg *Message) *Message {
 // Reset clean data of this message but keep allocated data
 func (m *Message) Reset() {
 	resetHeader(m.Bom)
-	m.Header = nil
+	m.Header = make(map[string]string)
 	m.Payload = m.Payload[:0]
 	m.Body = m.Body[:0]
 }

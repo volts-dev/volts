@@ -1,20 +1,78 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"time"
 
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/protocol"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
+	"github.com/volts-dev/volts/transport"
 )
 
 type (
+	RequestOptions struct {
+		ContentType string
+		Stream      bool
+
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Context context.Context
+	}
+
 	// Option contains all options for creating clients.
-	Option func(*Config) error
+	Option func(*Config)
+	// CallOption used by Call or Stream
+	CallOption func(*CallOptions)
+
+	CallOptions struct {
+		SelectOptions []selector.SelectOption
+
+		// Address of remote hosts
+		Address []string
+		// Backoff func
+		//Backoff BackoffFunc
+		// Check if retriable func
+		Retry RetryFunc
+		// Transport Dial Timeout
+		DialTimeout time.Duration
+		// Number of Call attempts
+		Retries int
+		// Request/Response timeout
+		RequestTimeout time.Duration
+		// Stream timeout for the stream
+		StreamTimeout time.Duration
+		// Use the services own auth token
+		ServiceToken bool
+		// Duration to cache the response for
+		CacheExpiry time.Duration
+
+		// Middleware for low level call func
+		//CallWrappers []CallWrapper
+
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Context context.Context
+	}
+
 	Config struct {
+		Transport transport.ITransport
+
+		// Connection Pool
+		PoolSize    int
+		PoolTTL     time.Duration
+		Retries     int         // Retries retries to send
+		CallOptions CallOptions // Default Call Options
+
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Context context.Context
+
+		// Used to select codec
+		ContentType string
+
 		Registry registry.IRegistry
 		Selector selector.ISelector
 
@@ -24,9 +82,6 @@ type (
 		// Group is used to select the services in the same group. Services set group info in their meta.
 		// If it is empty, clients will ignore group.
 		Group string
-
-		// Retries retries to send
-		Retries int
 
 		// TLSConfig for tcp and quic
 		TLSConfig *tls.Config
@@ -48,20 +103,68 @@ type (
 		///Breaker Breaker
 
 		SerializeType codec.SerializeType
-		CompressType  protocol.CompressType
+		CompressType  transport.CompressType
 
 		Heartbeat         bool
 		HeartbeatInterval time.Duration
 	}
+
+	// RequestOption used by NewRequest
+	RequestOption func(*RequestOptions)
 )
 
-func newConfig(fileName ...string) *Config {
-	return &Config{
+func newConfig(opts ...Option) *Config {
+	cfg := &Config{
 		Retries: 3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,
 		SerializeType:  codec.JSON,
-		CompressType:   protocol.None,
+		CompressType:   transport.None,
 		BackupLatency:  10 * time.Millisecond,
+
+		CallOptions: CallOptions{
+			//Backoff:        DefaultBackoff,
+			//Retry:          DefaultRetry,
+			Retries:        DefaultRetries,
+			RequestTimeout: DefaultRequestTimeout,
+			DialTimeout:    transport.DefaultDialTimeout,
+		},
+		PoolSize: DefaultPoolSize,
+		PoolTTL:  DefaultPoolTTL,
+		//	Broker:    broker.DefaultBroker,
+		Selector:  selector.DefaultSelector,
+		Registry:  registry.DefaultRegistry,
+		Transport: transport.NewTCPTransport(),
+	}
+
+	// init options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+
+	return cfg
+}
+
+// WithRequestTimeout is a CallOption which overrides that which
+// set in Options.CallOptions
+func WithRequestTimeout(d time.Duration) CallOption {
+	return func(o *CallOptions) {
+		o.RequestTimeout = d
+	}
+}
+
+// WithAddress sets the remote addresses to use rather than using service discovery
+func WithAddress(a ...string) CallOption {
+	return func(o *CallOptions) {
+		o.Address = a
+	}
+}
+
+// Transport to use for communication e.g http, rabbitmq, etc
+func Transport(t transport.ITransport) Option {
+	return func(cfg *Config) {
+		cfg.Transport = t
 	}
 }

@@ -12,12 +12,7 @@ type (
 	}
 )
 
-var DefaultLogger log.ILogger
-
-// build a new logger for entire orm
-func init() {
-	DefaultLogger = log.NewLogger(`{"Prefix":"VOLTS"}`)
-}
+var DefaultLogger log.ILogger = log.NewLogger(`{"Prefix":"VOLTS"}`)
 
 // return the logger instance
 func Logger() log.ILogger {

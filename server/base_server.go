@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/asim/go-micro/v3/metadata"
-	"github.com/asim/go-micro/v3/util/addr"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/util/addr"
 	"github.com/volts-dev/volts/util/backoff"
 	vnet "github.com/volts-dev/volts/util/net"
 )
@@ -39,11 +39,9 @@ type (
 	//}
 
 	server struct {
+		*router
 		sync.RWMutex
-		config *Config
-		//router *router
-
-		//handlers    map[string]Handler
+		config      *Config
 		httpRspPool sync.Pool
 
 		// server status
@@ -55,20 +53,22 @@ type (
 	}
 )
 
-func newServer(opts ...Option) IServer {
+// new a server for the service node
+func NewServer(opts ...Option) *server {
 	cfg := newConfig(opts...)
 
 	// if not special router use the default
 	if cfg.Router == nil {
-		cfg.Router = newRouter()
+		cfg.Router = DefaultRouter
 	}
 	//router.hdlrWrappers = options.HdlrWrappers
 	//router.subWrappers = options.SubWrappers
 	// inite HandlerPool New function
 
 	srv := &server{
-		RWMutex: sync.RWMutex{},
 		config:  cfg,
+		router:  cfg.Router.(*router),
+		RWMutex: sync.RWMutex{},
 		//handlers:   map[string]Handler{},
 		started:    false,
 		registered: false,
@@ -76,9 +76,11 @@ func newServer(opts ...Option) IServer {
 		wg:         &sync.WaitGroup{},
 	}
 
-	srv.httpRspPool.New = func() interface{} {
-		return &httpResponse{}
-	}
+	cfg.Router.(*router).server = srv // 传递服务器指针
+
+	//srv.httpRspPool.New = func() interface{} {
+	//	return &httpResponse{}
+	//}
 
 	return srv
 }
@@ -90,16 +92,6 @@ func (self *server) Init(opts ...Option) error {
 	for _, opt := range opts {
 		opt(self.config)
 	}
-	// update router if its the default
-	if self.config.Router == nil {
-		//r := newServer()
-		//r.hdlrWrappers = self.config.HdlrWrappers
-		//r.serviceMap = self.router.serviceMap
-		//r.subWrappers = self.config.SubWrappers
-		//self.router = r
-	}
-
-	//self.rsvc = nil
 
 	return nil
 }
@@ -308,6 +300,7 @@ func (self *server) Register() error {
 
 	return nil
 }
+
 func (self *server) Deregister() error {
 	var err error
 	var advt, host, port string
@@ -397,14 +390,18 @@ func (self *server) Deregister() error {
 
 // serve connection
 func (self *server) serve() error {
-	config := self.config
-
 	self.RLock()
 	if self.started {
 		self.RUnlock()
 		return nil
 	}
 	self.RUnlock()
+
+	config := self.config
+
+	if config.PrintRouterTree {
+		self.tree.PrintTrees()
+	}
 
 	// start listening on the transport
 	ts, err := config.Transport.Listen(config.Address)
@@ -450,6 +447,7 @@ func (self *server) serve() error {
 	*/
 	exit := make(chan bool)
 
+	// 监听链接
 	go func() {
 		for {
 			// listen for connections
@@ -477,6 +475,7 @@ func (self *server) serve() error {
 		}
 	}()
 
+	// 监听退出
 	go func() {
 		t := new(time.Ticker)
 
@@ -517,7 +516,7 @@ func (self *server) serve() error {
 
 				}
 			// wait for exit
-			case ch = <-self.exit:
+			case ch = <-self.exit: // 监听来自self.Stop()信号
 				t.Stop()
 				close(exit)
 				break Loop
@@ -572,7 +571,6 @@ func (self *server) serve() error {
 }
 
 func (self *server) Start() error {
-
 	return self.serve()
 }
 
@@ -600,12 +598,12 @@ func (self *server) Name() string {
 }
 
 func (self *server) String() string {
-	return "mucp"
+	return self.config.Transport.String() + "+" + self.config.Router.String() + " Server"
 }
 
 func (self *server) Config() *Config {
 	self.RLock()
-	opts := self.config
+	cfg := self.config
 	self.RUnlock()
-	return opts
+	return cfg
 }

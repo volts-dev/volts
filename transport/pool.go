@@ -18,15 +18,24 @@ var (
 			bom[0] = MagicNumber
 
 			return &Message{
-				Bom: &bom,
+				Bom:    &bom,
+				Header: make(map[string]string), //TODO 优化替代或者删除
 			}
 		},
+	}
+)
+
+type (
+	Pool struct {
+		sync.RWMutex
+		pool map[string]*Socket
 	}
 )
 
 func GetMessageFromPool() *Message {
 	return msgPool.Get().(*Message)
 }
+
 func PutMessageToPool(msg *Message) {
 	if msg != nil {
 		msg.Reset()
@@ -34,9 +43,11 @@ func PutMessageToPool(msg *Message) {
 	}
 }
 
-type Pool struct {
-	sync.RWMutex
-	pool map[string]*Socket
+// NewPool returns a new socket pool
+func NewPool() *Pool {
+	return &Pool{
+		pool: make(map[string]*Socket),
+	}
 }
 
 func (p *Pool) Get(id string) (*Socket, bool) {
@@ -81,12 +92,5 @@ func (p *Pool) Close() {
 	for id, sock := range p.pool {
 		sock.Close()
 		delete(p.pool, id)
-	}
-}
-
-// NewPool returns a new socket pool
-func NewPool() *Pool {
-	return &Pool{
-		pool: make(map[string]*Socket),
 	}
 }

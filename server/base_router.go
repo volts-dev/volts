@@ -3,24 +3,24 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"reflect"
-	"strings"
+	"runtime"
 	"sync"
 
 	"github.com/volts-dev/logger"
 	"github.com/volts-dev/template"
-	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/transport"
 )
 
 type (
 	handler interface {
+		Context() context.Context
+		ControllerIndex() int
 		// pravite
+		setControllerIndex(num int)
 		//reset(rw IResponse, req IRequest, Router *TRouter, Route *TRoute)
 		//setData(v interface{}) // TODO 修改API名称  设置response数据
 
@@ -34,17 +34,15 @@ type (
 
 	// router represents an RPC router.
 	router struct {
-		name       string
+		TGroup     // router is a group set
 		server     *server
-		tree       *TTree
 		middleware *TMiddlewareManager // 中间件
 		template   *template.TTemplateSet
-		show_route bool
 		//msgPool    sync.Pool
-		objectPool     *TPool
-		webHandlerPool sync.Pool
-		rpcHandlerPool sync.Pool
-		respPool       sync.Pool
+		objectPool       *TPool
+		respPool         sync.Pool
+		httpbHandlerPool map[int]sync.Pool //根据Route缓存
+		rpcHandlerPool   map[int]sync.Pool
 	}
 )
 
@@ -72,8 +70,17 @@ func cloneInterfacePtrFeild(model interface{}) reflect.Value {
 	return new_model_value
 }
 
-func newRouter() *router {
-	return &router{}
+func NewRouter() *router {
+	r := &router{
+		TGroup:     *NewGroup(),
+		objectPool: NewPool(),
+	}
+
+	r.respPool.New = func() interface{} {
+		return &transport.THttpResponse{}
+	}
+
+	return r
 }
 
 func (self *router) String() string {
@@ -82,6 +89,32 @@ func (self *router) String() string {
 
 func (self *router) Handler() interface{} {
 	return self
+}
+
+// 注册中间件
+func (self *router) RegisterMiddleware(middlewares ...IMiddleware) {
+	for _, m := range middlewares {
+		if mm, ok := m.(IMiddlewareName); ok {
+			self.middleware.Add(mm.Name(), m)
+		} else {
+			typ := reflect.TypeOf(m)
+			if typ.Kind() == reflect.Ptr {
+				typ = typ.Elem()
+			}
+			name := typ.String()
+			self.middleware.Add(name, m)
+		}
+	}
+}
+
+// register module
+func (self *router) RegisterGroup(grp *TGroup, build_path ...bool) {
+	if grp == nil {
+		logger.Warn("RegisterModule is nil")
+		return
+	}
+
+	self.tree.Conbine(grp.GetRoutes())
 }
 
 func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -102,35 +135,31 @@ func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logger.Info("rpc Read ", err.Error())
 		}
 
-		ctx := context.Background()
 		req := &transport.RpcRequest{
 			Message: msg,
-			Context: ctx,
+			Context: context.Background(),
 		}
 
 		self.ServeRPC(w, req)
 	} else { // serve as a web server
 		// Pool 提供TResponseWriter
-		rsp := self.respPool.Get().(*httpResponse)
-		rsp.Connect(w.(http.ResponseWriter))
-		defer func() {
-			// Pool 回收TResponseWriter
-			rsp.rsp = nil
-			self.respPool.Put(rsp)
-		}()
+		rsp := self.respPool.Get().(*transport.THttpResponse)
+		rsp.Connect(w)
+
 		path := r.URL.Path //获得的地址
 
 		// # match route from tree
 		route, params := self.tree.Match(r.Method, path)
 		if route == nil {
-			self.routeHttpStatic(w, r) // # serve as a static file link
+			rsp.WriteHeader(http.StatusNotFound)
 			return
 		}
 
-		if self.show_route {
-			logger.Infof("[Path]%v [Route]%v", path, route.FilePath)
-		}
-
+		defer func() {
+			if self.server.config.PrintRequest {
+				self.server.config.Logger.Infof("[Path]%v [Route]%v", path, route.FilePath)
+			}
+		}()
 		/*
 			if route.isReverseProxy {
 				self.routeProxy(route, params, req, w)
@@ -138,39 +167,41 @@ func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		*/
+		// # get the new Handler from pool
+		p, has := self.httpbHandlerPool[route.Id]
+		if !has {
+			p.New = func() interface{} {
+				return NewHttpHandler(self)
+			}
+		}
+		handler := p.Get().(*HttpHandler)
+		if !handler.inited {
+			handler.Router = self
+			handler.Route = *route
+			handler.inited = true
+			handler.Template = template.DefaultTemplateSet
+		}
 
-		// # init Handler
-		handler := self.webHandlerPool.Get().(*HttpHandler)
-		handler.reset(w, r, self, route)
+		handler.reset(rsp, r)
 		handler.setPathParams(params)
 
 		self.callCtrl(route, handler)
 
-		//##################
-		//设置某些默认头
-		//设置默认的 content-type
-		//TODO 由Tree完成
-		//tm := time.Now().UTC()
-		handler.SetHeader(true, "Engine", "Volts") //取当前时间
-		/*
-			if handler.TemplateSrc != "" {
-
-				//添加[static]静态文件路径
-				// log.Dbg(STATIC_DIR, path.Join(utils.FilePathToPath(route.FilePath), STATIC_DIR))
-				for _, dir := range self.server.Config.StaticDir {
-					handler.templateVar[dir] = path.Join(utils.FilePathToPath(route.FilePath), dir)
-				}
-			}*/
-
 		// 结束Route并返回内容
 		handler.Apply()
-		self.webHandlerPool.Put(handler) // Pool 回收Handler
+		p.Put(handler) // Pool 回收Handler
+
+		// Pool 回收TResponseWriter
+		rsp.ResponseWriter = nil
+		self.respPool.Put(rsp)
 	}
 }
 
 func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
+	reqMessage := r.Message // return the packet struct
+
 	// 心跳包 直接返回
-	if r.Message.IsHeartbeat() {
+	if reqMessage.IsHeartbeat() {
 		//data := req.Message.Encode()
 		//w.Write(data)
 		//TODO 补全状态吗
@@ -186,41 +217,50 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 	//	share.ResMetaDataKey, resMetadata)
 
 	//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-	msg := r.Message // return the packet struct
-	serviceName := msg.Header["ServicePath"]
+	serviceName := reqMessage.Header["ServicePath"]
 	//methodName := msg.ServiceMethod
 
-	// TODO 无需克隆
-	resraw := transport.GetMessageFromPool()
-	res := msg.CloneTo(resraw)
-
-	//protocol.PutMessageToPool(resraw)
+	res := transport.GetMessageFromPool()
 	res.SetMessageType(transport.MT_RESPONSE)
+	res.SetSerializeType(reqMessage.SerializeType())
 	// 匹配路由树
 	//route, _ := self.tree.Match("HEAD", msg.ServicePath+"."+msg.ServiceMethod)
 	var coder codec.ICodec
 	var handler *RpcHandler
-	route, _ := self.tree.Match("CONNECT", msg.Path)
-	if route == nil {
-		err = errors.New("rpc: can't match route " + serviceName)
-		handleError(res, err)
+	// 获取支持的序列模式
+	coder = codec.IdentifyCodec(res.SerializeType())
+	if coder == nil {
+		logger.Warnf("can not find codec for %v", res.SerializeType())
+		return
+		//handleError(res, err)
 	} else {
-		// 获取支持的序列模式
-		coder = codec.IdentifyCodec(msg.SerializeType())
-		if coder == nil {
-			err = fmt.Errorf("can not find codec for %d", msg.SerializeType())
+		route, _ := self.tree.Match("CONNECT", reqMessage.Path)
+		if route == nil {
+			err = errors.New("rpc: can't match route " + serviceName)
 			handleError(res, err)
-
 		} else {
 			// 获取RPC参数
 			// 获取控制器参数类型
 			var argv = self.objectPool.Get(route.MainCtrl.ArgType)
-			err = coder.Decode(msg.Payload, argv.Interface()) //反序列化获得参数值
+			err = coder.Decode(reqMessage.Payload, argv.Interface()) //反序列化获得参数值
 
 			if err != nil {
 				handleError(res, err)
 			} else {
-				handler = self.rpcHandlerPool.Get().(*RpcHandler)
+
+				p, has := self.rpcHandlerPool[route.Id]
+				if !has { // TODO 优化
+					p.New = func() interface{} {
+						return NewRpcHandler(self)
+					}
+				}
+				handler := p.Get().(*RpcHandler)
+				if !handler.inited {
+					handler.Router = self
+					handler.Route = *route
+					handler.inited = true
+				}
+
 				handler.reset(w, r, self, route)
 				handler.argv = argv
 				handler.replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
@@ -232,7 +272,7 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 	}
 
 	// 返回数据
-	if !msg.IsOneway() {
+	if !reqMessage.IsOneway() {
 		// 序列化数据
 		data, err := coder.Encode(handler.replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
@@ -264,75 +304,10 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 	return
 }
 
-// TODO 有待优化
-// 执行静态文件路由
-func (self *router) routeHttpStatic(w http.ResponseWriter, req *http.Request) {
-	if req.Method == "GET" || req.Method == "HEAD" {
-		path, file_Name := filepath.Split(req.URL.Path) //products/js/base.js
-		//urlPath := strings.Split(strings.Trim(req.URL.Path, `/`), `/`) // Split不能去除/products
-
-		//根目录静态文件映射过滤
-		file_path := ""
-		if path == "/" {
-			switch filepath.Ext(file_Name) {
-			case ".txt", ".html", ".htm": // 目前只开放这种格式
-				file_path = filepath.Join(file_Name)
-			}
-
-		} else {
-			for _, dir := range self.server.config.StaticDir {
-				//如果第一个是静态文件夹名则选用主静态文件夹,反之使用模块
-				// /static/js/base.js
-				// /ModuleName/static/js/base.js
-				dirs := strings.Split(path, "/")
-				if strings.EqualFold(dirs[1], dir) {
-					file_path = filepath.Join(req.URL.Path)
-					break
-
-				} else if strings.EqualFold(dirs[2], dir) { // 如果请求是 products/Static/js/base.js
-					//Debug("lDirsD", lDirs, STATIC_DIR, string(os.PathSeparator))
-					// 再次检查 Module Name 后必须是 /static 目录
-					file_path = filepath.Join(
-						MODULE_DIR, // c:\project\Modules
-						req.URL.Path)
-					break
-				}
-			}
-		}
-
-		// the path is not allow to visit
-		if file_path != "" {
-			// 当模块路径无该文件时，改为程序static文件夹
-			if !utils.FileExists(file_path) {
-				idx := strings.Index(file_path, STATIC_DIR)
-				if idx != -1 {
-					file_path = file_path[idx-1:]
-
-				}
-			}
-
-			// 当程序文件夹无该文件时
-			if utils.FileExists(file_path) { //TODO 缓存结果避免IO
-				// need full path for ServeFile()
-				file_path = filepath.Join(
-					AppPath,
-					file_path)
-
-				// serve the file with full path
-				http.ServeFile(w, req, file_path)
-				return
-			}
-		}
-	}
-
-	http.NotFound(w, req)
-	return
-}
-
 // the order is according by controller for modular register middleware.
 // TODO 优化遍历 缓存中间件列表
 // TODO 优化 route the midware request,response,panic
-func (self *router) routeMiddleware(method string, route *TRoute, handler handler) {
+func (self *router) routeMiddleware(method string, route *TRoute, handler handler, ctrl reflect.Value) {
 	var (
 		mid_val, mid_ptr_val reflect.Value
 		mid_typ              reflect.Type
@@ -404,17 +379,17 @@ func (self *router) routeMiddleware(method string, route *TRoute, handler handle
 			// call api
 			if method == "request" {
 				if m, ok := mid_val.Interface().(IMiddlewareRequest); ok {
-					m.Request(ctrl.Interface(), c)
+					m.Request(ctrl.Interface(), handler)
 				}
 
 			} else if method == "response" {
 				if m, ok := mid_val.Interface().(IMiddlewareResponse); ok {
-					m.Response(ctrl.Interface(), c)
+					m.Response(ctrl.Interface(), handler)
 				}
 
 			} else if method == "panic" {
 				if m, ok := mid_val.Interface().(IMiddlewarePanic); ok {
-					m.Panic(ctrl.Interface(), c)
+					m.Panic(ctrl.Interface(), handler)
 				}
 			}
 		}
@@ -430,7 +405,6 @@ func (self *router) routeMiddleware(method string, route *TRoute, handler handle
 
 func (self *router) callCtrl(route *TRoute, ctx handler) {
 	var (
-		args     []reflect.Value //handler参数
 		ctrl_val reflect.Value
 		ctrl_typ reflect.Type
 		parm     reflect.Type
@@ -438,18 +412,19 @@ func (self *router) callCtrl(route *TRoute, ctx handler) {
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
 	//logger.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, lRoute.MainCtrl, len(lRoute.Ctrls), lRoute.Ctrls)
-	for _, ctrl := range route.Ctrls {
+	for idx, ctrl := range route.Ctrls {
+		ctx.setControllerIndex(idx)
 		// stop runing ctrl
 		if ctx.IsDone() {
-			break
+			return
 		}
 
+		var args []reflect.Value
 		//handler.ControllerIndex = index //index
 		// STEP#: 获取<Ctrl.Func()>方法的参数
 		for i := 0; i < ctrl.FuncType.NumIn(); i++ {
 			parm = ctrl.FuncType.In(i) // 获得参数
 
-			//log.Dbg("aaa", parm.String(), handler.TypeModel().String())
 			switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
 			case ctx.TypeModel(): // TODO 优化调用 // if is a pointer of TWebHandler
 				{
@@ -458,7 +433,6 @@ func (self *router) callCtrl(route *TRoute, ctx handler) {
 			default:
 				{
 					//
-					//log.Dbg("aaa", parm.Kind())
 					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
 						ctrl_typ = parm
 						ctrl_val = self.objectPool.Get(parm)
@@ -492,29 +466,32 @@ func (self *router) callCtrl(route *TRoute, ctx handler) {
 		if CtrlValidable {
 			self.objectPool.Put(ctrl_typ, ctrl_val)
 		}
+
 	}
 }
 
 func (self *router) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, handler handler, ctrl reflect.Value) {
 	defer func() {
 		if err := recover(); err != nil {
-			/*	if self.server.Config.RecoverPanic { //是否绕过错误处理直接关闭程序
-					// handle middleware
+			if self.server.config.RecoverPanic { //是否绕过错误处理直接关闭程序
+				// handle middleware
+				if ctrl.IsValid() {
 					self.routeMiddleware("panic", route, handler, ctrl)
-
-					// report error information
-					logger.Errf("r:%s err:%v", route.Path, err)
-					for i := 1; ; i++ {
-						_, file, line, ok := runtime.Caller(i)
-						if !ok {
-							break
-						}
-						logger.Errf("file: %s %d", file, line)
-					}
-				} else {
-					panic(err)
 				}
-			*/
+
+				// report error information
+				logger.Errf("r:%s err:%v", route.Path, err)
+				for i := 1; ; i++ {
+					_, file, line, ok := runtime.Caller(i)
+					if !ok {
+						break
+					}
+					logger.Errf("file: %s %d", file, line)
+				}
+			} else {
+				panic(err)
+			}
+
 		}
 	}()
 

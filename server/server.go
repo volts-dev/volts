@@ -1,28 +1,17 @@
 package server
 
-type (
+import (
+	"context"
+	"time"
 
-	// Message is an async message interface
-	xxMessage interface {
-		// Topic of the message
-		Topic() string
-		// The decoded payload value
-		Payload() interface{}
-		// The content type of the payload
-		ContentType() string
-		// The raw headers of the message
-		Header() map[string]string
-		// The raw body of the message
-		Body() []byte
-		// Codec used to decode the message
-		//	Codec() codec.Reader
-	}
+	"github.com/google/uuid"
+)
+
+type (
 	// Server is a simple micro server abstraction
 	IServer interface {
-		// Initialise options
-		Init(...Option) error
-		// Retrieve the options
-		Config() *Config
+		Init(...Option) error // Initialise options
+		Config() *Config      // Retrieve the options
 
 		Name() string
 		// Register a handler
@@ -33,18 +22,27 @@ type (
 		//NewSubscriber(string, interface{}, ...SubscriberOption) Subscriber
 		// Register a subscriber
 		//Subscribe(Subscriber) error
-		// Start the server
-		Start() error
-		// Stop the server
-		Stop() error
-		// Server implementation
-		String() string
+
+		Start() error   // Start the server
+		Stop() error    // Stop the server
+		String() string // Server implementation
 	}
 
 	// Router handle serving messages
 	IRouter interface {
 		String() string
-		// 连接入口 serveHTTP 等接口实现
-		Handler() interface{}
+		Handler() interface{} // 连接入口 serveHTTP 等接口实现
 	}
+)
+
+var (
+	DefaultAddress                  = ":0"
+	DefaultName                     = "volts.server"
+	DefaultVersion                  = "latest"
+	DefaultId                       = uuid.New().String()
+	DefaultServer           IServer = NewServer()
+	DefaultRouter                   = NewRouter()
+	DefaultRegisterCheck            = func(context.Context) error { return nil }
+	DefaultRegisterInterval         = time.Second * 30
+	DefaultRegisterTTL              = time.Second * 90
 )

@@ -10,17 +10,15 @@ type (
 
 	// Codec defines the interface that decode/encode payload.
 	ICodec interface {
-		Encode(i interface{}) ([]byte, error)
-		Decode(data []byte, i interface{}) error
+		Encode(input interface{}) ([]byte, error)
+		Decode(input []byte, output interface{}) error
 		//Close() error
 		String() string
 	}
 )
 
-var (
-	// Codecs are codecs supported by rpc.
-	codecs = map[SerializeType]ICodec{}
-)
+// Codecs are codecs supported by rpc.
+var codecs = make(map[SerializeType]ICodec)
 
 // RegisterCodec register customized codec.
 func RegisterCodec(name string, codec ICodec) SerializeType {

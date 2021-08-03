@@ -2,18 +2,17 @@ package transport
 
 import (
 	"bufio"
-	"encoding/gob"
 	"net"
 	"time"
 )
 
 type tcpTransportClient struct {
-	dialOpts DialConfig
-	conn     net.Conn
-	enc      *gob.Encoder
-	dec      *gob.Decoder
-	encBuf   *bufio.Writer
-	timeout  time.Duration
+	config DialConfig
+	conn   net.Conn
+	//enc      *gob.Encoder
+	//dec     *gob.Decoder
+	encBuf  *bufio.Writer
+	timeout time.Duration
 }
 
 func (t *tcpTransportClient) Local() string {
@@ -29,9 +28,11 @@ func (t *tcpTransportClient) Send(m *Message) error {
 	if t.timeout > time.Duration(0) {
 		t.conn.SetDeadline(time.Now().Add(t.timeout))
 	}
-	if err := t.enc.Encode(m); err != nil {
+
+	if _, err := t.conn.Write(m.Encode()); err != nil {
 		return err
 	}
+
 	return t.encBuf.Flush()
 }
 
@@ -40,7 +41,8 @@ func (t *tcpTransportClient) Recv(m *Message) error {
 	if t.timeout > time.Duration(0) {
 		t.conn.SetDeadline(time.Now().Add(t.timeout))
 	}
-	return t.dec.Decode(&m)
+
+	return m.Decode(t.conn)
 }
 
 func (t *tcpTransportClient) Close() error {

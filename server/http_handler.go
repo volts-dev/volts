@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/volts-dev/logger"
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/transport"
 	//httpx "github.com/volts-dev/volts/server/listener/http"
 )
 
@@ -87,30 +89,32 @@ type (
 	// HttpHandler 负责所有请求任务,每个Handle表示有一个请求
 	HttpHandler struct {
 		logger.ILogger
-		httpx.IResponseWriter
-		response httpx.IResponseWriter //http.ResponseWriter
-		request  *http.Request         //
+		http.ResponseWriter
+		context  context.Context
+		response *transport.THttpResponse //http.ResponseWriter
+		request  *http.Request            //
 		Router   *router
-		Route    *TRoute                //执行本次Handle的Route
-		Template *template.TTemplateSet // 概念改进  为Hd添加 hd.Template.Params.Set("模板数据",Val)/Get()/Del()
+		Route    TRoute //执行本次Handle的Route
 
+		// data set
 		data         *TParamsSet // 数据缓存在各个Controler间调用
 		methodParams *TParamsSet //map[string]string // Post Get 传递回来的参数
 		pathParams   *TParamsSet //map[string]string // Url 传递回来的参数
 		body         *TContentBody
 
 		// 模板
+		TemplateVar
+		Template    *template.TTemplateSet // 概念改进  为Hd添加 hd.Template.Params.Set("模板数据",Val)/Get()/Del()
 		TemplateSrc string                 // 模板名称
-		templateVar map[string]interface{} // TODO (name TemplateData) Args passed to the template.
 
 		// 返回
 		ContentType string
 		Result      []byte // 最终返回数据由Apply提交
 
-		ControllerIndex int // -- 提示目前控制器Index
-		//CtrlCount int           // --
-		isDone    bool // -- 已经提交过
-		finalCall func(handler *HttpHandler)
+		controllerIndex int  // -- 提示目前控制器Index
+		isDone          bool // -- 已经提交过
+		inited          bool // 初始化固定值保存进POOL
+		finalCall       func(handler *HttpHandler)
 		//finalCall reflect.Value // -- handler 结束执行的动作处理器
 		val reflect.Value
 		typ reflect.Type
@@ -118,9 +122,9 @@ type (
 
 	// 反向代理
 	TProxyHandler struct {
-		httpx.IResponseWriter
-		Response httpx.IResponseWriter //http.ResponseWriter
-		Request  *http.Request         //
+		http.ResponseWriter
+		Response http.ResponseWriter //http.ResponseWriter
+		Request  *http.Request       //
 
 		Router *router
 		Route  *TRoute //执行本次Handle的Route
@@ -175,9 +179,9 @@ func NewParamsSet(hd *HttpHandler) *TParamsSet {
 	}
 }
 
-func NewWebHandler(router *TRouter) *HttpHandler {
+func NewHttpHandler(router *router) *HttpHandler {
 	hd := &HttpHandler{
-		ILogger: router.server.logger,
+		ILogger: router.server.config.Logger,
 		Router:  router,
 		//Route:   route,
 		//iResponseWriter: writer,
@@ -185,7 +189,6 @@ func NewWebHandler(router *TRouter) *HttpHandler {
 		//Request:         request,
 		//MethodParams: map[string]string{},
 		//PathParams:   map[string]string{},
-		templateVar: make(map[string]interface{}),
 		//Data:       make(map[string]interface{}),
 	} // 这个handle将传递给 请求函数的头一个参数func test(hd *webgo.HttpHandler) {}
 
@@ -265,7 +268,7 @@ func (self *HttpHandler) Request() *http.Request {
 	return self.request
 }
 
-func (self *HttpHandler) Response() httpx.IResponseWriter {
+func (self *HttpHandler) Response() *transport.THttpResponse {
 	return self.response
 }
 
@@ -364,28 +367,37 @@ func (self *HttpHandler) UpdateSession() {
 #刷新Handler的新请求数据
 */
 // Inite and Connect a new ResponseWriter when a new request is coming
-func (self *HttpHandler) reset(rw IResponse, req IRequest, router *TRouter, route *TRoute) {
-	self.data = nil // 清空
+func (self *HttpHandler) reset(rw *transport.THttpResponse, req *http.Request) {
+	self.TemplateVar = *newTemplateVar() // 清空
+	self.data = nil                      // 清空
 	self.pathParams = nil
 	self.methodParams = nil
-	self.request = req.(*http.Request)
-	self.response = rw.(*httpx.TResponseWriter)
-	self.IResponseWriter = rw.(*httpx.TResponseWriter)
-	self.Route = route
-	self.Template = router.template
+	self.request = req
+	self.response = rw
+	self.ResponseWriter = rw
 	self.TemplateSrc = ""
 	self.ContentType = ""
-	self.templateVar = make(map[string]interface{}) // 清空
 	self.body = nil
 	self.Result = nil
-	self.ControllerIndex = 0 // -- 提示目前控制器Index
-	//self.CtrlCount = 0     // --
-	self.isDone = false // -- 已经提交过
+	self.controllerIndex = 0 // -- 提示目前控制器Index
+	self.isDone = false      // -- 已经提交过
 }
 
 // TODO 修改API名称  设置response数据
 func (self *HttpHandler) setData(v interface{}) {
 	// self.Result = v.([]byte)
+}
+
+func (self *HttpHandler) setControllerIndex(num int) {
+	self.controllerIndex = num
+}
+
+func (self *HttpHandler) ControllerIndex() int {
+	return self.controllerIndex
+}
+
+func (self *HttpHandler) Context() context.Context {
+	return self.context
 }
 
 // apply all changed to data
@@ -430,7 +442,7 @@ func (self *HttpHandler) GetCookie(name, key string) (value string, err error) {
 	return url.QueryUnescape(ck.Value)
 }
 
-func (self *HttpHandler) GetModulePath() string {
+func (self *HttpHandler) GetGroupPath() string {
 	return self.Route.FileName
 }
 
@@ -608,7 +620,7 @@ func (self *HttpHandler) RespondError(error string) {
 }
 
 func (self *HttpHandler) NotModified() {
-	self.IResponseWriter.WriteHeader(304)
+	self.response.WriteHeader(304)
 }
 
 // Respond content by Json mode
@@ -662,17 +674,15 @@ func (self *HttpHandler) ServeFile(file_path string) {
 func (self *HttpHandler) RenderTemplate(tmpl string, args interface{}) {
 	self.ContentType = "text/html; charset=utf-8"
 	if vars, ok := args.(map[string]interface{}); ok {
-		self.templateVar = utils.MergeMaps(self.Router.templateVar, vars) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.Route.group.templateVar, vars) // 添加Router的全局变量到Templete
 	} else {
-		self.templateVar = self.Router.templateVar // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.Route.group.templateVar) // 添加Router的全局变量到Templete
 	}
 
 	if self.Route.FilePath == "" {
 		self.TemplateSrc = filepath.Join(TEMPLATE_DIR, tmpl)
 	} else {
-		self.TemplateSrc = filepath.Join(MODULE_DIR, self.Route.FilePath, TEMPLATE_DIR, tmpl)
-		//self.TemplateSrc = filepath.Join(self.Route.FilePath,TEMPLATE_DIR, tmpl)
-
+		self.TemplateSrc = filepath.Join(self.Route.FilePath, TEMPLATE_DIR, tmpl)
 	}
 }
 
@@ -712,10 +722,10 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
-func (self *TProxyHandler) connect(rw httpx.IResponseWriter, req *http.Request, Router *TRouter, Route *TRoute) {
+func (self *TProxyHandler) connect(rw *transport.THttpResponse, req *http.Request, Router *router, Route *TRoute) {
 	self.Request = req
 	self.Response = rw
-	self.IResponseWriter = rw
+	self.ResponseWriter = rw
 	self.Router = Router
 	self.Route = Route
 	//self.Logger = Router.Server.Logger

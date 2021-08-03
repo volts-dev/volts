@@ -3,51 +3,33 @@ package transport
 import (
 	"bufio"
 	"crypto/tls"
-	"encoding/gob"
 	"net"
 
-	maddr "github.com/asim/go-micro/v3/util/addr"
-	mnet "github.com/asim/go-micro/v3/util/net"
-	mls "github.com/asim/go-micro/v3/util/tls"
+	vaddr "github.com/volts-dev/volts/util/addr"
+	vnet "github.com/volts-dev/volts/util/net"
+	mls "github.com/volts-dev/volts/util/tls"
 )
-
-type Reader interface {
-	ReadHeader(*Message, MessageType) error
-	ReadBody(interface{}) error
-}
-
-type Writer interface {
-	Write(*Message, interface{}) error
-}
 
 type tcpTransport struct {
 	config *Config
 }
 
 func NewTCPTransport(opts ...Option) ITransport {
-	var cfg Config
-	for _, o := range opts {
-		o(&cfg)
+	cfg := &Config{}
+	for _, opt := range opts {
+		opt(cfg)
 	}
-	return &tcpTransport{config: &cfg}
+
+	return &tcpTransport{config: cfg}
 }
 
-/*
-func (h *tcpTransport) Request(msg Message, sock *Socket, cde codec.ICodec) IRequest {
-	return nil
-}
-
-func (h *tcpTransport) Response(sock *Socket, cde codec.ICodec) IResponse {
-	return nil
-}
-*/
 func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
-	dopts := DialConfig{
+	cfg := DialConfig{
 		Timeout: DefaultDialTimeout,
 	}
 
 	for _, opt := range opts {
-		opt(&dopts)
+		opt(&cfg)
 	}
 
 	var conn net.Conn
@@ -61,9 +43,9 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 				InsecureSkipVerify: true,
 			}
 		}
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dopts.Timeout}, "tcp", addr, config)
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: cfg.Timeout}, "tcp", addr, config)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, dopts.Timeout)
+		conn, err = net.DialTimeout("tcp", addr, cfg.Timeout)
 	}
 
 	if err != nil {
@@ -71,14 +53,11 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	}
 
 	encBuf := bufio.NewWriter(conn)
-
 	return &tcpTransportClient{
-		dialOpts: dopts,
-		conn:     conn,
-		encBuf:   encBuf,
-		enc:      gob.NewEncoder(encBuf),
-		dec:      gob.NewDecoder(conn),
-		timeout:  t.config.Timeout,
+		config:  cfg,
+		conn:    conn,
+		encBuf:  encBuf,
+		timeout: t.config.Timeout,
 	}, nil
 }
 
@@ -102,7 +81,7 @@ func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, err
 				// check if its a valid host:port
 				if host, _, err := net.SplitHostPort(addr); err == nil {
 					if len(host) == 0 {
-						hosts = maddr.IPs()
+						hosts = vaddr.IPs()
 					} else {
 						hosts = []string{host}
 					}
@@ -118,13 +97,13 @@ func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, err
 			return tls.Listen("tcp", addr, config)
 		}
 
-		l, err = mnet.Listen(addr, fn)
+		l, err = vnet.Listen(addr, fn)
 	} else {
 		fn := func(addr string) (net.Listener, error) {
 			return net.Listen("tcp", addr)
 		}
 
-		l, err = mnet.Listen(addr, fn)
+		l, err = vnet.Listen(addr, fn)
 	}
 
 	if err != nil {
@@ -151,5 +130,5 @@ func (t *tcpTransport) Config() *Config {
 }
 
 func (t *tcpTransport) String() string {
-	return "tcp"
+	return "TCP Transport"
 }
