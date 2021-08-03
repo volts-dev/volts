@@ -7,11 +7,7 @@ import (
 // jsonCodec uses json marshaler and unmarshaler.
 type jsonCodec struct{}
 
-var JSON SerializeType
-
-func init() {
-	JSON = RegisterCodec("JSON", &jsonCodec{})
-}
+var JSON SerializeType = RegisterCodec("JSON", new(jsonCodec))
 
 // Encode encodes an object into slice of bytes.
 func (c jsonCodec) Encode(i interface{}) ([]byte, error) {

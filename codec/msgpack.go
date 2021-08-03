@@ -7,11 +7,7 @@ import (
 // msgpackCodec uses messagepack marshaler and unmarshaler.
 type msgpackCodec struct{}
 
-var MsgPack SerializeType
-
-func init() {
-	MsgPack = RegisterCodec("MsgPack", &msgpackCodec{})
-}
+var MsgPack SerializeType = RegisterCodec("MsgPack", &msgpackCodec{})
 
 // Encode encodes an object into slice of bytes.
 func (c msgpackCodec) Encode(i interface{}) ([]byte, error) {

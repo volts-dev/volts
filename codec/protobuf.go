@@ -10,11 +10,7 @@ import (
 // pbCodec uses protobuf marshaler and unmarshaler.
 type pbCodec struct{}
 
-var ProtoBuffer SerializeType
-
-func init() {
-	ProtoBuffer = RegisterCodec("ProtoBuffer", &pbCodec{})
-}
+var ProtoBuffer SerializeType = RegisterCodec("ProtoBuffer", &pbCodec{})
 
 // Encode encodes an object into slice of bytes.
 func (c pbCodec) Encode(i interface{}) ([]byte, error) {

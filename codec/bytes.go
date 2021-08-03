@@ -7,9 +7,7 @@ import (
 
 type byteCodec struct{}
 
-func init() {
-	RegisterCodec("Bytes", &byteCodec{})
-}
+var Bytes SerializeType = RegisterCodec("Bytes", &byteCodec{})
 
 // Encode returns raw slice of bytes.
 func (c byteCodec) Encode(i interface{}) ([]byte, error) {
