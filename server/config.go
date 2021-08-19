@@ -6,25 +6,28 @@ import (
 	"path/filepath"
 	"time"
 
+	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/transport"
 )
+
+var logger log.ILogger = log.NewLogger(log.WithPrefix("Server"))
 
 type (
 	Option func(*Config)
 
 	Config struct {
 		Codecs map[string]codec.ICodec
-		//Broker broker.Broker
+		Bus    bus.IBus
 		//Tracer    trace.Tracer
 		Registry  registry.IRegistry
 		Transport transport.ITransport
-		Router    IRouter        // The router for requests
-		Logger    logger.ILogger //
-		TLSConfig *tls.Config    // TLSConfig specifies tls.Config for secure serving
+		Router    IRouter     // The router for requests
+		Logger    log.ILogger //
+		TLSConfig *tls.Config // TLSConfig specifies tls.Config for secure serving
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -74,20 +77,21 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Id:        DefaultId,
-		Name:      DefaultName,
-		Logger:    logger.DefaultLogger,
-		Router:    DefaultRouter,
-		Registry:  registry.DefaultRegistry,
-		Transport: transport.DefaultTransport,
-		Codecs:    make(map[string]codec.ICodec),
-		Metadata:  map[string]string{},
-		Address:   DefaultAddress,
-		//RegisterInterval: DefaultRegisterInterval,
-		//RegisterTTL:      DefaultRegisterTTL,
-		RecoverPanic: true,
-		//RegisterCheck: ,
-		Version: DefaultVersion,
+		Id:               DefaultId,
+		Name:             DefaultName,
+		Logger:           logger,
+		Router:           DefaultRouter,
+		Bus:              bus.DefaultBus,
+		Registry:         registry.DefaultRegistry,
+		Transport:        transport.DefaultTransport,
+		Codecs:           make(map[string]codec.ICodec),
+		Metadata:         map[string]string{},
+		Address:          DefaultAddress,
+		RecoverPanic:     true,
+		RegisterInterval: DefaultRegisterInterval,
+		RegisterTTL:      DefaultRegisterTTL,
+		RegisterCheck:    DefaultRegisterCheck,
+		Version:          DefaultVersion,
 	}
 
 	for _, opt := range opts {

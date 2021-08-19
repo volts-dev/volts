@@ -83,8 +83,8 @@ func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
 		// Update Client and Server
-		//cfg.Client.Init(client.Registry(r))
-		//cfg.Server.Init(server.Registry(r))
+		cfg.Client.Init(client.Registry(r))
+		cfg.Server.Init(server.Registry(r))
 		// Update Broker
 		//cfg.Broker.Init(broker.Registry(r))
 	}

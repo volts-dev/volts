@@ -11,17 +11,17 @@ type (
 	}
 )
 
-func (action ctrls) Get(hd *server.HttpHandler) {
+func (action ctrls) Get(hd *server.THttpContext) {
 	hd.Info("Middleware")
 	hd.Respond([]byte("Middleware"))
 }
 
-func (action ctrls) Post(hd *server.HttpHandler) {
+func (action ctrls) Post(hd *server.THttpContext) {
 	hd.Info("Before")
 	hd.Respond([]byte("Before"))
 }
 
-func (action ctrls) delete(hd *server.HttpHandler) {
+func (action ctrls) delete(hd *server.THttpContext) {
 	hd.Info("After")
 	hd.Respond([]byte("After"))
 }

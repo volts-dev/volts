@@ -10,9 +10,8 @@ type (
 
 	// Codec defines the interface that decode/encode payload.
 	ICodec interface {
-		Encode(input interface{}) ([]byte, error)
-		Decode(input []byte, output interface{}) error
-		//Close() error
+		Encode(interface{}) ([]byte, error)
+		Decode([]byte, interface{}) error
 		String() string
 	}
 )

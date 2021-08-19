@@ -56,8 +56,8 @@ func (h *HttpConn) Recv(m *Message) error {
 	// process http 1
 	if h.r.ProtoMajor == 1 {
 		// set timeout if its greater than 0
-		if h.ht.config.Timeout > time.Duration(0) {
-			h.conn.SetDeadline(time.Now().Add(h.ht.config.Timeout))
+		if h.ht.config.ReadTimeout > time.Duration(0) {
+			h.conn.SetDeadline(time.Now().Add(h.ht.config.ReadTimeout))
 		}
 
 		var r *http.Request
@@ -163,8 +163,8 @@ func (h *HttpConn) Send(m *Message) error {
 		}
 
 		// set timeout if its greater than 0
-		if h.ht.config.Timeout > time.Duration(0) {
-			h.conn.SetDeadline(time.Now().Add(h.ht.config.Timeout))
+		if h.ht.config.WriteTimeout > time.Duration(0) {
+			h.conn.SetDeadline(time.Now().Add(h.ht.config.WriteTimeout))
 		}
 
 		return rsp.Write(h.conn)

@@ -24,8 +24,8 @@ type (
 
 	tcpTransportListener struct {
 		listener net.Listener
-		timeout  time.Duration
-		sock     *tcpTransportSocket
+		//timeout  time.Duration
+		sock *tcpTransportSocket
 	}
 )
 
@@ -86,11 +86,11 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 
 		encBuf := bufio.NewWriter(conn)
 		t.sock = &tcpTransportSocket{
-			timeout: t.timeout,
-			conn:    conn,
-			encBuf:  encBuf,
-			enc:     gob.NewEncoder(encBuf),
-			dec:     gob.NewDecoder(conn),
+			//timeout: t.timeout,
+			conn:   conn,
+			encBuf: encBuf,
+			enc:    gob.NewEncoder(encBuf),
+			dec:    gob.NewDecoder(conn),
 		}
 
 		go func() {

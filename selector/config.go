@@ -31,7 +31,7 @@ type (
 )
 
 // Registry sets the registry used by the selector
-func WithRegistry(r registry.IRegistry) Option {
+func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) error {
 		cfg.Registry = r
 		return nil

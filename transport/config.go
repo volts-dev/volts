@@ -27,8 +27,14 @@ type (
 		// TLSConfig to secure the connection. The assumption is that this
 		// is mTLS keypair
 		TLSConfig *tls.Config
-		// Timeout sets the timeout for Send/Recv
-		Timeout time.Duration
+
+		//ConnectTimeout sets timeout for dialing
+		ConnectTimeout time.Duration
+		// ReadTimeout sets readdeadline for underlying net.Conns
+		ReadTimeout time.Duration
+		// WriteTimeout sets writedeadline for underlying net.Conns
+		WriteTimeout time.Duration
+
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context
@@ -39,7 +45,7 @@ type (
 		// multiple calls to send/recv and that send may not even be called
 		Stream bool
 		// Timeout for dialing
-		Timeout time.Duration
+		//Timeout time.Duration
 
 		// TODO: add tls options when dialling
 		// Currently set in global options
@@ -59,6 +65,14 @@ type (
 	}
 )
 
+func newConfig() *Config {
+	return &Config{
+		ConnectTimeout: DefaultTimeout,
+		ReadTimeout:    DefaultTimeout,
+		WriteTimeout:   DefaultTimeout,
+	}
+}
+
 // Addrs to use for transport
 func Addrs(addrs ...string) Option {
 	return func(o *Config) {
@@ -77,7 +91,30 @@ func Codec(c codec.Marshaler) Option {
 // Timeout sets the timeout for Send/Recv execution
 func Timeout(t time.Duration) Option {
 	return func(o *Config) {
-		o.Timeout = t
+		o.ReadTimeout = t
+		o.WriteTimeout = t
+		o.ConnectTimeout = t
+	}
+}
+
+// Timeout sets the timeout for Send/Recv execution
+func ReadTimeout(t time.Duration) Option {
+	return func(o *Config) {
+		o.ReadTimeout = t
+	}
+}
+
+// Timeout sets the timeout for Send/Recv execution
+func WriteTimeout(t time.Duration) Option {
+	return func(o *Config) {
+		o.WriteTimeout = t
+	}
+}
+
+// Timeout sets the timeout for Send/Recv execution
+func ConnectTimeout(t time.Duration) Option {
+	return func(o *Config) {
+		o.ConnectTimeout = t
 	}
 }
 
@@ -100,12 +137,5 @@ func TLSConfig(t *tls.Config) Option {
 func WithStream() DialOption {
 	return func(o *DialConfig) {
 		o.Stream = true
-	}
-}
-
-// Timeout used when dialling the remote side
-func WithTimeout(d time.Duration) DialOption {
-	return func(o *DialConfig) {
-		o.Timeout = d
 	}
 }

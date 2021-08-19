@@ -6,11 +6,14 @@ import (
 	"net"
 	"time"
 
+	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 )
+
+var logger log.ILogger = log.NewLogger(log.WithPrefix("Client"))
 
 type (
 	RequestOptions struct {
@@ -59,6 +62,7 @@ type (
 
 	Config struct {
 		Transport transport.ITransport
+		logger    log.ILogger
 
 		// Connection Pool
 		PoolSize    int
@@ -115,6 +119,7 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		logger:  logger,
 		Retries: 3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,
@@ -127,7 +132,7 @@ func newConfig(opts ...Option) *Config {
 			//Retry:          DefaultRetry,
 			Retries:        DefaultRetries,
 			RequestTimeout: DefaultRequestTimeout,
-			DialTimeout:    transport.DefaultDialTimeout,
+			DialTimeout:    transport.DefaultTimeout,
 		},
 		PoolSize: DefaultPoolSize,
 		PoolTTL:  DefaultPoolTTL,
@@ -159,6 +164,15 @@ func WithRequestTimeout(d time.Duration) CallOption {
 func WithAddress(a ...string) CallOption {
 	return func(o *CallOptions) {
 		o.Address = a
+	}
+}
+
+// Registry to find nodes for a given service
+func Registry(r registry.IRegistry) Option {
+	return func(cfg *Config) {
+		cfg.Registry = r
+		// set in the selector
+		cfg.Selector.Init(selector.Registry(r))
 	}
 }
 

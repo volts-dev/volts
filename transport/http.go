@@ -18,17 +18,19 @@ type (
 )
 
 func NewHTTPTransport(opts ...Option) *httpTransport {
-	cfg := &Config{}
+	cfg := newConfig()
+
 	for _, o := range opts {
 		o(cfg)
 	}
+
 	return &httpTransport{config: cfg}
 }
 
 // to make a Dial with server
 func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	cfg := DialConfig{
-		Timeout: DefaultDialTimeout,
+		//Timeout: DefaultDialTimeout,
 	}
 
 	for _, opt := range opts {
@@ -48,11 +50,11 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		}
 		config.NextProtos = []string{"http/1.1"}
 		conn, err = newConn(func(addr string) (net.Conn, error) {
-			return tls.DialWithDialer(&net.Dialer{Timeout: cfg.Timeout}, "tcp", addr, config)
+			return tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
 		})(addr)
 	} else {
 		conn, err = newConn(func(addr string) (net.Conn, error) {
-			return net.DialTimeout("tcp", addr, cfg.Timeout)
+			return net.DialTimeout("tcp", addr, self.config.ConnectTimeout)
 		})(addr)
 	}
 

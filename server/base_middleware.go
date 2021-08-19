@@ -3,8 +3,6 @@ package server
 import (
 	"fmt"
 	"sync"
-
-	"github.com/volts-dev/logger"
 )
 
 /**
@@ -45,7 +43,7 @@ type (
 		@hd: the Handler interface for controller
 	*/
 	IMiddlewareRequest interface {
-		Request(controller interface{}, route handler)
+		Request(controller interface{}, ctx IContext)
 	}
 
 	/*
@@ -54,11 +52,11 @@ type (
 		@hd: the Handler interface for controller
 	*/
 	IMiddlewareResponse interface {
-		Response(controller interface{}, route handler)
+		Response(controller interface{}, ctx IContext)
 	}
 
 	IMiddlewarePanic interface {
-		Panic(controller interface{}, route handler)
+		Panic(controller interface{}, ctx IContext)
 	}
 
 	TMiddlewareManager struct {

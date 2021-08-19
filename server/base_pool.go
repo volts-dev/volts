@@ -10,7 +10,7 @@ import (
 */
 
 type (
-	TPool struct {
+	pool struct {
 		active bool
 		pools  map[reflect.Type]*sync.Pool
 		New    func(t reflect.Type) reflect.Value
@@ -19,8 +19,8 @@ type (
 
 // TODO 使用字符串名称
 // TODO 测试效率
-func NewPool() *TPool {
-	return &TPool{
+func newPool() *pool {
+	return &pool{
 		active: true,
 		pools:  make(map[reflect.Type]*sync.Pool), //@@@ 改进改为接口 String
 		New: func(t reflect.Type) reflect.Value {
@@ -37,14 +37,14 @@ func NewPool() *TPool {
 	}
 }
 
-func (self *TPool) Active(open bool) {
+func (self *pool) Active(open bool) {
 	self.active = open
 }
 
 //@@@ 改进改为接口
 // Resul:nil 当取不到时直接返回Nil 方便外部判断
 // TODO:优化速度
-func (self *TPool) Get(object reflect.Type) reflect.Value {
+func (self *pool) Get(object reflect.Type) reflect.Value {
 	if object == nil {
 		return reflect.ValueOf(nil)
 	}
@@ -67,7 +67,7 @@ func (self *TPool) Get(object reflect.Type) reflect.Value {
 	}
 }
 
-func (self *TPool) Put(typ reflect.Type, val reflect.Value) {
+func (self *pool) Put(typ reflect.Type, val reflect.Value) {
 	if !self.active {
 		return
 	}

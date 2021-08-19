@@ -9,6 +9,6 @@ type (
 	}
 )
 
-func (self ctrl) index(hd *server.HttpHandler) {
+func (self ctrl) index(hd *server.THttpContext) {
 	hd.RenderTemplate("index.html", nil)
 }

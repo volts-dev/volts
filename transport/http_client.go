@@ -76,8 +76,8 @@ func (h *httpTransportClient) Send(m *Message) error {
 	h.Unlock()
 
 	// set timeout if its greater than 0
-	if h.ht.config.Timeout > time.Duration(0) {
-		h.conn.SetDeadline(time.Now().Add(h.ht.config.Timeout))
+	if h.ht.config.WriteTimeout > time.Duration(0) {
+		h.conn.SetDeadline(time.Now().Add(h.ht.config.WriteTimeout))
 	}
 
 	return req.Write(h.conn)
@@ -98,8 +98,8 @@ func (h *httpTransportClient) Recv(m *Message) error {
 	}
 
 	// set timeout if its greater than 0
-	if h.ht.config.Timeout > time.Duration(0) {
-		h.conn.SetDeadline(time.Now().Add(h.ht.config.Timeout))
+	if h.ht.config.ReadTimeout > time.Duration(0) {
+		h.conn.SetDeadline(time.Now().Add(h.ht.config.ReadTimeout))
 	}
 
 	rsp, err := http.ReadResponse(h.buff, r)

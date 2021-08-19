@@ -9,19 +9,18 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/transport"
 )
 
 type (
-	handler interface {
+	IContext interface {
 		Context() context.Context
 		ControllerIndex() int
 		// pravite
 		setControllerIndex(num int)
-		//reset(rw IResponse, req IRequest, Router *TRouter, Route *TRoute)
+		//reset(rw IResponse, req IRequest, Router *TRouter, Route *route)
 		//setData(v interface{}) // TODO 修改API名称  设置response数据
 
 		// public
@@ -35,11 +34,11 @@ type (
 	// router represents an RPC router.
 	router struct {
 		TGroup     // router is a group set
-		server     *server
+		server     *TServer
 		middleware *TMiddlewareManager // 中间件
 		template   *template.TTemplateSet
 		//msgPool    sync.Pool
-		objectPool       *TPool
+		objectPool       *pool
 		respPool         sync.Pool
 		httpbHandlerPool map[int]sync.Pool //根据Route缓存
 		rpcHandlerPool   map[int]sync.Pool
@@ -73,7 +72,7 @@ func cloneInterfacePtrFeild(model interface{}) reflect.Value {
 func NewRouter() *router {
 	r := &router{
 		TGroup:     *NewGroup(),
-		objectPool: NewPool(),
+		objectPool: newPool(),
 	}
 
 	r.respPool.New = func() interface{} {
@@ -108,7 +107,7 @@ func (self *router) RegisterMiddleware(middlewares ...IMiddleware) {
 }
 
 // register module
-func (self *router) RegisterGroup(grp *TGroup, build_path ...bool) {
+func (self *router) RegisterGroup(grp IGroup, build_path ...bool) {
 	if grp == nil {
 		logger.Warn("RegisterModule is nil")
 		return
@@ -171,25 +170,25 @@ func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p, has := self.httpbHandlerPool[route.Id]
 		if !has {
 			p.New = func() interface{} {
-				return NewHttpHandler(self)
+				return NewHttpContext(self)
 			}
 		}
-		handler := p.Get().(*HttpHandler)
-		if !handler.inited {
-			handler.Router = self
-			handler.Route = *route
-			handler.inited = true
-			handler.Template = template.DefaultTemplateSet
+		ctx := p.Get().(*THttpContext)
+		if !ctx.inited {
+			ctx.Router = self
+			ctx.Route = *route
+			ctx.inited = true
+			ctx.Template = template.DefaultTemplateSet
 		}
 
-		handler.reset(rsp, r)
-		handler.setPathParams(params)
+		ctx.reset(rsp, r)
+		ctx.setPathParams(params)
 
-		self.callCtrl(route, handler)
+		self.route(route, ctx)
 
 		// 结束Route并返回内容
-		handler.Apply()
-		p.Put(handler) // Pool 回收Handler
+		ctx.Apply()
+		p.Put(ctx) // Pool 回收Handler
 
 		// Pool 回收TResponseWriter
 		rsp.ResponseWriter = nil
@@ -226,7 +225,7 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 	// 匹配路由树
 	//route, _ := self.tree.Match("HEAD", msg.ServicePath+"."+msg.ServiceMethod)
 	var coder codec.ICodec
-	var handler *RpcHandler
+	var ctx *TRpcContext
 	// 获取支持的序列模式
 	coder = codec.IdentifyCodec(res.SerializeType())
 	if coder == nil {
@@ -254,19 +253,19 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 						return NewRpcHandler(self)
 					}
 				}
-				handler := p.Get().(*RpcHandler)
-				if !handler.inited {
-					handler.Router = self
-					handler.Route = *route
-					handler.inited = true
+				ctx = p.Get().(*TRpcContext)
+				if !ctx.inited {
+					ctx.Router = self
+					ctx.Route = *route
+					ctx.inited = true
 				}
 
-				handler.reset(w, r, self, route)
-				handler.argv = argv
-				handler.replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
+				ctx.reset(w, r, self, route)
+				ctx.argv = argv
+				ctx.replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
 
 				// 执行控制器
-				self.callCtrl(route, handler)
+				self.route(route, ctx)
 			}
 		}
 	}
@@ -274,7 +273,7 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 	// 返回数据
 	if !reqMessage.IsOneway() {
 		// 序列化数据
-		data, err := coder.Encode(handler.replyv.Interface())
+		data, err := coder.Encode(ctx.replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
 		if err != nil {
 			handleError(res, err)
@@ -307,7 +306,7 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 // the order is according by controller for modular register middleware.
 // TODO 优化遍历 缓存中间件列表
 // TODO 优化 route the midware request,response,panic
-func (self *router) routeMiddleware(method string, route *TRoute, handler handler, ctrl reflect.Value) {
+func (self *router) routeMiddleware(method string, route *route, ctx IContext, ctrl reflect.Value) {
 	var (
 		mid_val, mid_ptr_val reflect.Value
 		mid_typ              reflect.Type
@@ -324,7 +323,7 @@ func (self *router) routeMiddleware(method string, route *TRoute, handler handle
 	name_lst := make(map[string]bool)            // TODO　不用MAP list of midware found it ctrl
 	for i := 0; i < controller.NumField(); i++ { // middlewares under controller
 		// @:直接返回 放弃剩下的Handler
-		if handler.IsDone() {
+		if ctx.IsDone() {
 			name_lst = nil // not report
 			break          // igonre the following any controls
 		}
@@ -379,17 +378,17 @@ func (self *router) routeMiddleware(method string, route *TRoute, handler handle
 			// call api
 			if method == "request" {
 				if m, ok := mid_val.Interface().(IMiddlewareRequest); ok {
-					m.Request(ctrl.Interface(), handler)
+					m.Request(ctrl.Interface(), ctx)
 				}
 
 			} else if method == "response" {
 				if m, ok := mid_val.Interface().(IMiddlewareResponse); ok {
-					m.Response(ctrl.Interface(), handler)
+					m.Response(ctrl.Interface(), ctx)
 				}
 
 			} else if method == "panic" {
 				if m, ok := mid_val.Interface().(IMiddlewarePanic); ok {
-					m.Panic(ctrl.Interface(), handler)
+					m.Panic(ctrl.Interface(), ctx)
 				}
 			}
 		}
@@ -403,7 +402,7 @@ func (self *router) routeMiddleware(method string, route *TRoute, handler handle
 	}
 }
 
-func (self *router) callCtrl(route *TRoute, ctx handler) {
+func (self *router) route(route *route, ctx IContext) {
 	var (
 		ctrl_val reflect.Value
 		ctrl_typ reflect.Type
@@ -470,7 +469,7 @@ func (self *router) callCtrl(route *TRoute, ctx handler) {
 	}
 }
 
-func (self *router) safelyCall(function reflect.Value, args []reflect.Value, route *TRoute, handler handler, ctrl reflect.Value) {
+func (self *router) safelyCall(function reflect.Value, args []reflect.Value, route *route, handler IContext, ctrl reflect.Value) {
 	defer func() {
 		if err := recover(); err != nil {
 			if self.server.config.RecoverPanic { //是否绕过错误处理直接关闭程序

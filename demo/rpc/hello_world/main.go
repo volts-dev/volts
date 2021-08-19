@@ -2,22 +2,25 @@ package main
 
 import (
 	"context"
-	"time"
 
+	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
 	test "github.com/volts-dev/volts/demo"
-	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/server"
 	"github.com/volts-dev/volts/transport"
 )
 
 type (
-	Arith struct {
+	arith struct {
+	}
+
+	Arith interface {
+		Mul(hd *server.TRpcContext, args *test.Args, reply *test.Reply) error
 	}
 )
 
-func (t Arith) Mul(hd *server.RpcHandler, args *test.Args, reply *test.Reply) error {
+func (t arith) Mul(hd *server.TRpcContext, args *test.Args, reply *test.Reply) error {
 	hd.Info("IP:")
 	reply.Flt = 0.01001
 	reply.Str = "Mul"
@@ -28,12 +31,8 @@ func (t Arith) Mul(hd *server.RpcHandler, args *test.Args, reply *test.Reply) er
 }
 
 func main() {
-	service := "Arith.Mul"
-	endpoint := "Test.Endpoint"
-	address := "127.0.0.1:35999"
-
 	srv := server.NewServer()
-	srv.Url("CONNECT", "Arith", new(Arith))
+	srv.Url("CONNECT", "Arith", new(arith))
 
 	app := volts.NewService(
 		volts.Server(srv),
@@ -42,7 +41,10 @@ func main() {
 	)
 
 	go app.Run()
-	time.Sleep(800 * time.Millisecond)
+
+	service := "Arith.Mul"
+	endpoint := "Test.Endpoint"
+	address := "127.0.0.1:35999"
 
 	req := client.NewRequest(service, endpoint, nil)
 
@@ -51,5 +53,5 @@ func main() {
 		logger.Err("call with address error:", err)
 	}
 
-	<-make(chan error, 1)
+	<-make(chan byte)
 }

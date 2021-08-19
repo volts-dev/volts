@@ -165,12 +165,12 @@ func (self *Bom) SetMessageStatusType(mt MessageStatusType) {
 
 // SerializeType returns serialization type of payload.
 func (self Bom) SerializeType() codec.SerializeType {
-	return codec.SerializeType((self[3] & 0xF0) >> 4)
+	return codec.SerializeType((self[3]))
 }
 
 // SetSerializeType sets the serialization type.
 func (self *Bom) SetSerializeType(st codec.SerializeType) {
-	self[3] = self[3] | (byte(st) << 4)
+	self[3] = self[3] | byte(st)
 }
 
 // Seq returns sequence number of messages.

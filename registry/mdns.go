@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/asim/go-micro/v3/logger"
 	"github.com/asim/go-micro/v3/util/mdns"
 	"github.com/google/uuid"
 )
@@ -146,7 +145,7 @@ func (self *mdnsRegistry) Init(opts ...Option) error {
 	return nil
 }
 
-func (self *mdnsRegistry) Options() *Config {
+func (self *mdnsRegistry) Config() *Config {
 	return self.config
 }
 
@@ -220,9 +219,9 @@ func (m *mdnsRegistry) Register(service *Service, opts ...Option) error {
 		}
 		port, _ := strconv.Atoi(pt)
 
-		if logger.V(logger.DebugLevel, logger.DefaultLogger) {
-			logger.Debugf("[mdns] registry create new service with ip: %s for: %s", net.ParseIP(host).String(), host)
-		}
+		//if logger.GetLevel()=={
+		logger.Dbgf("[mdns] registry create new service with ip: %s for: %s", net.ParseIP(host).String(), host)
+		//}
 		// we got here, new node
 		s, err := mdns.NewMDNSService(
 			node.Id,
@@ -345,9 +344,9 @@ func (m *mdnsRegistry) GetService(service string) ([]*Service, error) {
 				} else if len(e.AddrV6) > 0 {
 					addr = "[" + e.AddrV6.String() + "]"
 				} else {
-					if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-						logger.Infof("[mdns]: invalid endpoint received: %v", e)
-					}
+					//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
+					logger.Infof("[mdns]: invalid endpoint received: %v", e)
+					//}
 					continue
 				}
 				s.Nodes = append(s.Nodes, &Node{

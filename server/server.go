@@ -33,6 +33,15 @@ type (
 		String() string
 		Handler() interface{} // 连接入口 serveHTTP 等接口实现
 	}
+
+	___IModule interface {
+		// 返回Module所有Routes 理论上只需被调用一次
+		GetRoutes() *TTree
+		GetPath() string
+		GetFilePath() string
+		GetModulePath() string
+		GetTemplateVar() map[string]interface{}
+	}
 )
 
 var (

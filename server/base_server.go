@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/asim/go-micro/v3/metadata"
-	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/util/addr"
 	"github.com/volts-dev/volts/util/backoff"
@@ -38,7 +37,7 @@ type (
 	//	Options() HandlerOptions
 	//}
 
-	server struct {
+	TServer struct {
 		*router
 		sync.RWMutex
 		config      *Config
@@ -54,7 +53,7 @@ type (
 )
 
 // new a server for the service node
-func NewServer(opts ...Option) *server {
+func NewServer(opts ...Option) *TServer {
 	cfg := newConfig(opts...)
 
 	// if not special router use the default
@@ -65,7 +64,7 @@ func NewServer(opts ...Option) *server {
 	//router.subWrappers = options.SubWrappers
 	// inite HandlerPool New function
 
-	srv := &server{
+	srv := &TServer{
 		config:  cfg,
 		router:  cfg.Router.(*router),
 		RWMutex: sync.RWMutex{},
@@ -85,7 +84,7 @@ func NewServer(opts ...Option) *server {
 	return srv
 }
 
-func (self *server) Init(opts ...Option) error {
+func (self *TServer) Init(opts ...Option) error {
 	self.Lock()
 	defer self.Unlock()
 
@@ -97,7 +96,7 @@ func (self *server) Init(opts ...Option) error {
 }
 
 // 注册到服务发现
-func (self *server) Register() error {
+func (self *TServer) Register() error {
 	self.RLock()
 	rsvc := self.rsvc
 	config := self.config
@@ -301,7 +300,7 @@ func (self *server) Register() error {
 	return nil
 }
 
-func (self *server) Deregister() error {
+func (self *TServer) Deregister() error {
 	var err error
 	var advt, host, port string
 
@@ -350,7 +349,7 @@ func (self *server) Deregister() error {
 	}
 
 	//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-	//log.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Id)
+	logger.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Id)
 	//}
 	if err := config.Registry.Deregister(service); err != nil {
 		return err
@@ -389,7 +388,7 @@ func (self *server) Deregister() error {
 }
 
 // serve connection
-func (self *server) serve() error {
+func (self *TServer) serve() error {
 	self.RLock()
 	if self.started {
 		self.RUnlock()
@@ -430,21 +429,21 @@ func (self *server) serve() error {
 		if logger.V(logger.InfoLevel, logger.DefaultLogger) {
 			logger.Infof("Broker [%s] Connected to %s", bname, config.Broker.Address())
 		}
-
-		// use RegisterCheck func before register
-		if err = s.opts.RegisterCheck(s.opts.Context); err != nil {
-			if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-				logger.Errorf("Server %s-%s register check error: %s", config.Name, config.Id, err)
-			}
-		} else {
-			// announce self to the world
-			if err = s.Register(); err != nil {
-				if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-					logger.Errorf("Server %s-%s register error: %s", config.Name, config.Id, err)
-				}
-			}
-		}
 	*/
+	// use RegisterCheck func before register
+	if err = self.config.RegisterCheck(self.config.Context); err != nil {
+		//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+		logger.Errf("Server %s-%s register check error: %s", config.Name, config.Id, err)
+		//}
+	} else {
+		// announce self to the world
+		if err = self.Register(); err != nil {
+			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+			logger.Errf("Server %s-%s register error: %s", config.Name, config.Id, err)
+			//}
+		}
+	}
+
 	exit := make(chan bool)
 
 	// 监听链接
@@ -570,11 +569,11 @@ func (self *server) serve() error {
 	return nil
 }
 
-func (self *server) Start() error {
+func (self *TServer) Start() error {
 	return self.serve()
 }
 
-func (self *server) Stop() error {
+func (self *TServer) Stop() error {
 	self.RLock()
 	if !self.started {
 		self.RUnlock()
@@ -593,15 +592,15 @@ func (self *server) Stop() error {
 	return err
 }
 
-func (self *server) Name() string {
+func (self *TServer) Name() string {
 	return self.config.Name
 }
 
-func (self *server) String() string {
+func (self *TServer) String() string {
 	return self.config.Transport.String() + "+" + self.config.Router.String() + " Server"
 }
 
-func (self *server) Config() *Config {
+func (self *TServer) Config() *Config {
 	self.RLock()
 	cfg := self.config
 	self.RUnlock()

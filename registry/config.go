@@ -4,15 +4,36 @@ import (
 	"context"
 	"crypto/tls"
 	"time"
+
+	log "github.com/volts-dev/logger"
 )
 
 // use a .volts domain rather than .local
 var mdnsDomain = "volts"
+var logger log.ILogger = log.NewLogger(log.WithPrefix("Client"))
 
 type (
-	Option       func(*Config) error
+	Option       func(*Config)
 	WatchOptions func(*WatchConfig) error
 
+	RegisterConfig struct {
+		TTL time.Duration
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Context context.Context
+	}
+
+	DeregisterConfig struct {
+		Context context.Context
+	}
+
+	GetConfig struct {
+		Context context.Context
+	}
+
+	ListConfig struct {
+		Context context.Context
+	}
 	Config struct {
 		Addrs     []string
 		Timeout   time.Duration
@@ -43,40 +64,39 @@ func newConfig() *Config {
 	}
 }
 
+func Logger() log.ILogger {
+	return logger
+}
+
 // Addrs is the registry addresses to use
 func Addrs(addrs ...string) Option {
-	return func(cfg *Config) error {
+	return func(cfg *Config) {
 		cfg.Addrs = addrs
-		return nil
 	}
 }
 
 func Timeout(t time.Duration) Option {
-	return func(cfg *Config) error {
+	return func(cfg *Config) {
 		cfg.Timeout = t
-		return nil
 	}
 }
 
 // Secure communication with the registry
 func Secure(b bool) Option {
-	return func(cfg *Config) error {
+	return func(cfg *Config) {
 		cfg.Secure = b
-		return nil
 	}
 }
 
 // Specify TLS Config
 func TLSConfig(t *tls.Config) Option {
-	return func(cfg *Config) error {
+	return func(cfg *Config) {
 		cfg.TLSConfig = t
-		return nil
 	}
 }
 
 func RegisterTTL(t time.Duration) Option {
-	return func(o *Config) error {
+	return func(o *Config) {
 		o.TTL = t
-		return nil
 	}
 }

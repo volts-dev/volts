@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/volts-dev/utils"
-	"github.com/volts-dev/volts/logger"
 )
 
 type (
@@ -37,12 +36,12 @@ type (
 		//Fragment   string    // fragment for references, without '#'
 	}
 
-	___IGroup interface {
+	// 非volts通用接口
+	IGroup interface {
 		// 返回Module所有Routes 理论上只需被调用一次
 		GetRoutes() *TTree
 		GetPath() string
 		GetFilePath() string
-		//GetGroupPath() string
 		GetTemplateVar() map[string]interface{}
 	}
 
@@ -211,7 +210,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))          // binding a file server
 	self.SetTemplateVar(relativePath[1:], gpath.Join(self.path, relativePath)) // set the template var value
 
-	handler := func(c *HttpHandler) {
+	handler := func(c *THttpContext) {
 		file := c.pathParams.FieldByName("filepath").AsString()
 		// Check if file exists and/or if we have permission to access it
 		if _, err := fs.Open(file); err != nil {
@@ -236,7 +235,7 @@ func (self *TGroup) StaticFile(relativePath, filepath string) {
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
 		panic("URL parameters can not be used when serving a static file")
 	}
-	handler := func(c *HttpHandler) {
+	handler := func(c *THttpContext) {
 		c.ServeFile(filepath)
 	}
 
@@ -262,7 +261,7 @@ Example: string:id only match "abc"
 '/web/content/(string:model)/(int:id)/(string:field)',
 '/web/content/(string:model)/(int:id)/(string:field)/(string:filename)'
 for details please read tree.go */
-func (self *TGroup) Url(method string, path string, controller interface{}) *TRoute {
+func (self *TGroup) Url(method string, path string, controller interface{}) *route {
 	path = gpath.Join(self.config.PrefixPath, path)
 	method = strings.ToUpper(method)
 	switch method {
@@ -283,7 +282,7 @@ func (self *TGroup) Url(method string, path string, controller interface{}) *TRo
 /*
 pos: true 为插入Before 反之After
 */
-func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, controller interface{}) *TRoute {
+func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, controller interface{}) *route {
 	// check vaild
 	if routeType != ProxyRoute && controller == nil {
 		panic("the route must binding a controller!")
@@ -390,7 +389,7 @@ func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, contro
 
 		// First arg must be context.Context
 		ctxType := ctrl_type.In(1)
-		if ctxType != reflect.TypeOf(new(RpcHandler)) {
+		if ctxType != reflect.TypeOf(new(TRpcContext)) {
 			//log.Info("method", url.Action, " must use context.Context as the first parameter")
 			return nil
 		}

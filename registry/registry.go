@@ -16,9 +16,9 @@ type (
 	// 注册中心接口
 	IRegistry interface {
 		Init(...Option) error
-		Options() *Config
-		Register(*Service, ...Option) error
-		Deregister(*Service, ...Option) error
+		Config() *Config
+		Register(*Service, ...Option) error   // 注册
+		Deregister(*Service, ...Option) error // 注销
 		GetService(string) ([]*Service, error)
 		ListServices() ([]*Service, error)
 		Watch(...WatchOptions) (Watcher, error)

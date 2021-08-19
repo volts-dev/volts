@@ -27,6 +27,8 @@ type (
 		Server() server.IServer
 		// Run the service
 		Run() error
+
+		Stop() error
 		// The service implementation
 		String() string
 	}

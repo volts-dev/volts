@@ -48,6 +48,6 @@ type (
 )
 
 var (
-	DefaultTransport   ITransport = NewHTTPTransport()
-	DefaultDialTimeout            = time.Second * 5
+	DefaultTransport ITransport = NewHTTPTransport()
+	DefaultTimeout              = time.Second * 5
 )

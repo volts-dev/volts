@@ -7,12 +7,13 @@ import (
 )
 
 type tcpTransportClient struct {
-	config DialConfig
-	conn   net.Conn
+	transport *tcpTransport
+	config    DialConfig
+	conn      net.Conn
 	//enc      *gob.Encoder
 	//dec     *gob.Decoder
-	encBuf  *bufio.Writer
-	timeout time.Duration
+	encBuf *bufio.Writer
+	//timeout time.Duration
 }
 
 func (t *tcpTransportClient) Local() string {
@@ -25,8 +26,8 @@ func (t *tcpTransportClient) Remote() string {
 
 func (t *tcpTransportClient) Send(m *Message) error {
 	// set timeout if its greater than 0
-	if t.timeout > time.Duration(0) {
-		t.conn.SetDeadline(time.Now().Add(t.timeout))
+	if t.transport.config.WriteTimeout > time.Duration(0) {
+		t.conn.SetDeadline(time.Now().Add(t.transport.config.WriteTimeout))
 	}
 
 	if _, err := t.conn.Write(m.Encode()); err != nil {
@@ -38,8 +39,8 @@ func (t *tcpTransportClient) Send(m *Message) error {
 
 func (t *tcpTransportClient) Recv(m *Message) error {
 	// set timeout if its greater than 0
-	if t.timeout > time.Duration(0) {
-		t.conn.SetDeadline(time.Now().Add(t.timeout))
+	if t.transport.config.ReadTimeout > time.Duration(0) {
+		t.conn.SetDeadline(time.Now().Add(t.transport.config.ReadTimeout))
 	}
 
 	return m.Decode(t.conn)

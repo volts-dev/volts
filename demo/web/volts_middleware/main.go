@@ -17,22 +17,22 @@ type (
 //	router.Server().Logger().Info("Init")
 //}
 
-func (action ctrls) index(hd *server.HttpHandler) {
+func (action ctrls) index(hd *server.THttpContext) {
 	hd.Info("Middleware")
 	hd.Respond([]byte("Middleware"))
 }
 
-func (action ctrls) Before(hd *server.HttpHandler) {
+func (action ctrls) Before(hd *server.THttpContext) {
 	hd.Info("Before")
 	hd.Respond([]byte("Before"))
 }
 
-func (action ctrls) After(hd *server.HttpHandler) {
+func (action ctrls) After(hd *server.THttpContext) {
 	hd.Info("After")
 	hd.Respond([]byte("After"))
 }
 
-func (action ctrls) Panic(hd *server.HttpHandler) {
+func (action ctrls) Panic(hd *server.THttpContext) {
 	hd.Info("Panic")
 	hd.Respond([]byte("Panic"))
 }

@@ -29,9 +29,9 @@ type (
 		//ReplyType []reflect.Type //TODO 返回多结果
 	}
 
-	// TRoute 路,表示一个Link 连接地址"../webgo/"
+	// route 路,表示一个Link 连接地址"../webgo/"
 	// 提供基础数据参数供Handler处理
-	TRoute struct {
+	route struct {
 		group          *TGroup
 		Id             int       // 用于定位
 		Path           string    // !NOTE! Path存储路由绑定的URL 网络路径
@@ -53,8 +53,8 @@ type (
 
 var idQueue int = 0 //id 自动递增值
 
-func newRoute(group *TGroup, url *TUrl, path, filePath, name, action string, rt RouteType) *TRoute {
-	return &TRoute{
+func newRoute(group *TGroup, url *TUrl, path, filePath, name, action string, rt RouteType) *route {
+	return &route{
 		group:    group,
 		Id:       idQueue + 1,
 		Url:      url,
@@ -70,13 +70,13 @@ func newRoute(group *TGroup, url *TUrl, path, filePath, name, action string, rt 
 	}
 }
 
-func (self *TRoute) Group() *TGroup {
+func (self *route) Group() *TGroup {
 	return self.group
 }
 
 // TODO 管理Ctrl 顺序 before center after
 // 根据不同Action 名称合并Ctrls
-func (self *TRoute) CombineController(from *TRoute) {
+func (self *route) CombineController(from *route) {
 	switch from.Type {
 	/*	case CommomRoute:
 		// 普通Tree合并

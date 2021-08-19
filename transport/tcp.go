@@ -15,7 +15,8 @@ type tcpTransport struct {
 }
 
 func NewTCPTransport(opts ...Option) ITransport {
-	cfg := &Config{}
+	cfg := newConfig()
+
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -25,7 +26,7 @@ func NewTCPTransport(opts ...Option) ITransport {
 
 func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	cfg := DialConfig{
-		Timeout: DefaultDialTimeout,
+		//Timeout: t.config.ConnectTimeout,
 	}
 
 	for _, opt := range opts {
@@ -43,9 +44,9 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 				InsecureSkipVerify: true,
 			}
 		}
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: cfg.Timeout}, "tcp", addr, config)
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: t.config.ConnectTimeout}, "tcp", addr, config)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, cfg.Timeout)
+		conn, err = net.DialTimeout("tcp", addr, t.config.ConnectTimeout)
 	}
 
 	if err != nil {
@@ -54,10 +55,10 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 
 	encBuf := bufio.NewWriter(conn)
 	return &tcpTransportClient{
-		config:  cfg,
-		conn:    conn,
-		encBuf:  encBuf,
-		timeout: t.config.Timeout,
+		config: cfg,
+		conn:   conn,
+		encBuf: encBuf,
+		//timeout: t.config.Timeout,
 	}, nil
 }
 
@@ -111,7 +112,7 @@ func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, err
 	}
 
 	t.config.Listener = &tcpTransportListener{
-		timeout:  t.config.Timeout,
+		//timeout:  t.config.Timeout,
 		listener: l,
 	}
 

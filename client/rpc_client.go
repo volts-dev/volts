@@ -8,9 +8,6 @@ import (
 	"github.com/asim/go-micro/v3/metadata"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/errors"
-	"github.com/volts-dev/volts/logger"
-
-	//"github.com/volts-dev/volts/protocol"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
@@ -75,6 +72,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 			msg.Header[k] = v
 		}
 	}
+	msg.SetMessageType(transport.MT_REQUEST)
 	msg.SetSerializeType(self.config.SerializeType)
 
 	// set timeout in nanoseconds
@@ -97,9 +95,9 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		transport.WithStream(),
 	}
 
-	if opts.DialTimeout >= 0 {
-		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout))
-	}
+	//if opts.DialTimeout >= 0 {
+	//	dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout))
+	//}
 
 	// 获取空闲链接
 	conn, err := self.pool.Get(address, dOpts...)
@@ -151,7 +149,6 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		// recv request
 		msg = transport.GetMessageFromPool()
 		err = conn.Recv(msg)
-		//err = msg.Decode(conn) // 从Reader解码到Msg
 		if err != nil {
 			ch <- err
 			return
@@ -185,6 +182,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		return err
 	case <-ctx.Done():
 		grr = errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
+		break
 	}
 
 	// set the stream error
@@ -273,6 +271,7 @@ func (self *rpcClient) Call(ctx context.Context, request IRequest, response inte
 			gerr = err
 		}
 	}
+
 	return gerr
 }
 

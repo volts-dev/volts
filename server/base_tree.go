@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
 )
 
@@ -78,7 +77,7 @@ type (
 	TSubNodes []*TNode
 
 	TNode struct {
-		Route       *TRoute
+		Route       *route
 		Type        NodeType
 		ContentType ContentType
 		Children    TSubNodes
@@ -478,7 +477,7 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 	return nil
 }
 
-func (r *TTree) Match(method string, path string) (*TRoute, Params) {
+func (r *TTree) Match(method string, path string) (*route, Params) {
 	delimitChar := r.DelimitChar
 	if delimitChar == 0 {
 		delimitChar = '/'
@@ -542,7 +541,7 @@ func validNodes(nodes []*TNode) bool {
 }
 
 // 添加路由到Tree
-func (self *TTree) AddRoute(method, path string, route TRoute) {
+func (self *TTree) AddRoute(method, path string, route route) {
 	delimitChar := self.DelimitChar
 	if delimitChar == 0 {
 		delimitChar = '/'
@@ -699,7 +698,7 @@ func printNode(i int, node *TNode) {
 		if c.Route != nil {
 			fmt.Print(" <*", len(c.Route.Ctrls), ">")
 		}
-		//if !reflect.DeepEqual(c.Route, TRoute{}) {
+		//if !reflect.DeepEqual(c.Route, route{}) {
 		if c.Route != nil {
 			//fmt.Print("  ", c.Route.HandleType.String())
 			//fmt.Printf("  %p", c.handle.method.Interface())
