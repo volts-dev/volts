@@ -11,6 +11,8 @@ import (
 	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/router"
+
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -25,9 +27,9 @@ type (
 		//Tracer    trace.Tracer
 		Registry  registry.IRegistry
 		Transport transport.ITransport
-		Router    IRouter     // The router for requests
-		Logger    log.ILogger //
-		TLSConfig *tls.Config // TLSConfig specifies tls.Config for secure serving
+		Router    router.IRouter // The router for requests
+		Logger    log.ILogger    //
+		TLSConfig *tls.Config    // TLSConfig specifies tls.Config for secure serving
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -37,7 +39,7 @@ type (
 		Name      string
 		Address   string
 		Advertise string
-		Id        string
+		Uid       string
 		Version   string
 		//HdlrWrappers []HandlerWrapper
 		//SubWrappers  []SubscriberWrapper
@@ -48,20 +50,11 @@ type (
 		RegisterTTL time.Duration
 		// The interval on which to register
 		RegisterInterval time.Duration
-
-		StaticDir []string `ini:"-"` // the static dir allow to visit
-		StaticExt []string `ini:"-"` // the static file format allow to visit
-
-		RecoverPanic    bool
-		PrintRouterTree bool `ini:"enabled_print_router_tree"`
-		PrintRequest    bool
 	}
 )
 
 const (
 	CONFIG_FILE_NAME = "config.ini"
-	STATIC_DIR       = "static"
-	TEMPLATE_DIR     = "template"
 )
 
 var (
@@ -77,17 +70,16 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Id:               DefaultId,
+		Uid:              DefaultUid,
 		Name:             DefaultName,
 		Logger:           logger,
-		Router:           DefaultRouter,
+		Router:           router.DefaultRouter,
 		Bus:              bus.DefaultBus,
 		Registry:         registry.DefaultRegistry,
 		Transport:        transport.DefaultTransport,
 		Codecs:           make(map[string]codec.ICodec),
 		Metadata:         map[string]string{},
 		Address:          DefaultAddress,
-		RecoverPanic:     true,
 		RegisterInterval: DefaultRegisterInterval,
 		RegisterTTL:      DefaultRegisterTTL,
 		RegisterCheck:    DefaultRegisterCheck,
@@ -112,6 +104,7 @@ func Name(name string) Option {
 func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
+		cfg.Router.Config().Registry = r
 	}
 }
 
@@ -123,7 +116,7 @@ func Transport(t transport.ITransport) Option {
 }
 
 // Server name
-func Router(router IRouter) Option {
+func Router(router router.IRouter) Option {
 	return func(cfg *Config) {
 		// not accept other router
 	}
@@ -190,19 +183,5 @@ func TLSConfig(t *tls.Config) Option {
 			transport.Secure(true),
 			transport.TLSConfig(t),
 		)
-	}
-}
-
-// Register the service with a TTL
-func PrintRoutesTree() Option {
-	return func(cfg *Config) {
-		cfg.PrintRouterTree = true
-	}
-}
-
-// Register the service with a TTL
-func PrintRequest() Option {
-	return func(cfg *Config) {
-		cfg.PrintRequest = true
 	}
 }

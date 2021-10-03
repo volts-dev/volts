@@ -1,4 +1,4 @@
-package server
+package router
 
 import (
 	"bytes"
@@ -94,7 +94,7 @@ type (
 		response *transport.THttpResponse //http.ResponseWriter
 		request  *http.Request            //
 		Router   *router
-		Route    route //执行本次Handle的Route
+		route    route //执行本次Handle的Route
 
 		// data set
 		data         *TParamsSet // 数据缓存在各个Controler间调用
@@ -111,10 +111,10 @@ type (
 		ContentType string
 		Result      []byte // 最终返回数据由Apply提交
 
-		controllerIndex int  // -- 提示目前控制器Index
-		isDone          bool // -- 已经提交过
-		inited          bool // 初始化固定值保存进POOL
-		finalCall       func(handler *THttpContext)
+		handlerIndex int  // -- 提示目前控制器Index
+		isDone       bool // -- 已经提交过
+		inited       bool // 初始化固定值保存进POOL
+		finalCall    func(handler *THttpContext)
 		//finalCall reflect.Value // -- handler 结束执行的动作处理器
 		val reflect.Value
 		typ reflect.Type
@@ -127,7 +127,7 @@ type (
 		Request  *http.Request       //
 
 		Router *router
-		Route  *route //执行本次Handle的Route
+		route  *route //执行本次Handle的Route
 
 		//Logger *logger.TLogger
 
@@ -253,11 +253,11 @@ func (self *THttpContext) FinalCall(handler func(*THttpContext)) {
 /*
 func (self *THttpContext) getPathParams() {
 	// 获得正则字符做为Handler参数
-	lSubmatch := self.Route.regexp.FindStringSubmatch(self.Request.URL.Path) //更加深层次正则表达式比对nil 为没有
+	lSubmatch := self.route.regexp.FindStringSubmatch(self.Request.URL.Path) //更加深层次正则表达式比对nil 为没有
 	if lSubmatch != nil && lSubmatch[0] == self.Request.URL.Path {           // 第一个是Match字符串本身
 		for i, arg := range lSubmatch[1:] { ///Url正则字符作为参数
 			if arg != "" {
-				self.PathParams[self.Route.regexp.SubexpNames()[i+1]] = arg //SubexpNames 获得URL 上的(?P<keywords>.*)
+				self.PathParams[self.route.regexp.SubexpNames()[i+1]] = arg //SubexpNames 获得URL 上的(?P<keywords>.*)
 			}
 		}
 	}
@@ -332,7 +332,9 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 func (self *THttpContext) PathParams() *TParamsSet {
 	return self.pathParams
 }
-
+func (self *THttpContext) String() string {
+	return "HttpContext"
+}
 func (self *THttpContext) Body() *TContentBody {
 	if self.body == nil {
 		self.body = NewContentBody(self)
@@ -379,8 +381,8 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *http.Request) 
 	self.ContentType = ""
 	self.body = nil
 	self.Result = nil
-	self.controllerIndex = 0 // -- 提示目前控制器Index
-	self.isDone = false      // -- 已经提交过
+	self.handlerIndex = 0 // -- 提示目前控制器Index
+	self.isDone = false   // -- 已经提交过
 }
 
 // TODO 修改API名称  设置response数据
@@ -389,11 +391,11 @@ func (self *THttpContext) setData(v interface{}) {
 }
 
 func (self *THttpContext) setControllerIndex(num int) {
-	self.controllerIndex = num
+	self.handlerIndex = num
 }
 
-func (self *THttpContext) ControllerIndex() int {
-	return self.controllerIndex
+func (self *THttpContext) HandlerIndex() int {
+	return self.handlerIndex
 }
 
 func (self *THttpContext) Context() context.Context {
@@ -420,8 +422,19 @@ func (self *THttpContext) Apply() {
 	return
 }
 
+func (self *THttpContext) Route() route {
+	return self.route
+}
+
+func (self *THttpContext) Handler(index ...int) handler {
+	if index != nil {
+		return self.route.handlers[index[0]]
+	}
+	return self.route.handlers[self.handlerIndex]
+}
+
 func (self *THttpContext) _CtrlCount() int {
-	return len(self.Route.Ctrls)
+	return len(self.route.handlers)
 }
 
 // 数据缓存供传递用
@@ -442,8 +455,9 @@ func (self *THttpContext) GetCookie(name, key string) (value string, err error) 
 	return url.QueryUnescape(ck.Value)
 }
 
-func (self *THttpContext) GetGroupPath() string {
-	return self.Route.FileName
+func (self *THttpContext) ___GetGroupPath() string {
+	//return self.route.FileName
+	return ""
 }
 
 func (self *THttpContext) IP() (res []string) {
@@ -674,15 +688,15 @@ func (self *THttpContext) ServeFile(file_path string) {
 func (self *THttpContext) RenderTemplate(tmpl string, args interface{}) {
 	self.ContentType = "text/html; charset=utf-8"
 	if vars, ok := args.(map[string]interface{}); ok {
-		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.Route.group.templateVar, vars) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.route.group.templateVar, vars) // 添加Router的全局变量到Templete
 	} else {
-		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.Route.group.templateVar) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.route.group.templateVar) // 添加Router的全局变量到Templete
 	}
 
-	if self.Route.FilePath == "" {
+	if self.route.FilePath == "" {
 		self.TemplateSrc = filepath.Join(TEMPLATE_DIR, tmpl)
 	} else {
-		self.TemplateSrc = filepath.Join(self.Route.FilePath, TEMPLATE_DIR, tmpl)
+		self.TemplateSrc = filepath.Join(self.route.FilePath, TEMPLATE_DIR, tmpl)
 	}
 }
 
@@ -727,14 +741,14 @@ func (self *TProxyHandler) connect(rw *transport.THttpResponse, req *http.Reques
 	self.Response = rw
 	self.ResponseWriter = rw
 	self.Router = Router
-	self.Route = Route
+	self.route = Route
 	//self.Logger = Router.Server.Logger
 
 	director := func(req *http.Request) {
-		target := self.Route.Host
+		target := self.route.Host
 		targetQuery := target.RawQuery
-		req.URL.Scheme = self.Route.Host.Scheme
-		req.URL.Host = self.Route.Host.Host
+		req.URL.Scheme = self.route.Host.Scheme
+		req.URL.Host = self.route.Host.Host
 		req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
 		if targetQuery == "" || req.URL.RawQuery == "" {
 			req.URL.RawQuery = targetQuery + req.URL.RawQuery

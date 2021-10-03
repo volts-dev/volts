@@ -1,14 +1,12 @@
 package web
 
-import (
-	"github.com/volts-dev/volts/server"
-)
+import "github.com/volts-dev/volts/router"
 
-var Web *server.TGroup
+var Web *router.TGroup
 
 func init() {
-	Web = server.NewGroup()
-	Web.Url("GET", "/web", func(hd *server.THttpContext) {
+	Web = router.NewGroup()
+	Web.Url("GET", "/web", func(hd *router.THttpContext) {
 		hd.Respond([]byte("Hello World"))
 	})
 }

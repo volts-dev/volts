@@ -1,4 +1,4 @@
-package volts
+package config
 
 import (
 	"github.com/volts-dev/utils"

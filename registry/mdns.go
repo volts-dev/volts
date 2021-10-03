@@ -185,7 +185,7 @@ func (m *mdnsRegistry) Register(service *Service, opts ...Option) error {
 		var e *mdnsEntry
 
 		for _, entry := range entries {
-			if node.Id == entry.id {
+			if node.Uid == entry.id {
 				seen = true
 				e = entry
 				break
@@ -224,7 +224,7 @@ func (m *mdnsRegistry) Register(service *Service, opts ...Option) error {
 		//}
 		// we got here, new node
 		s, err := mdns.NewMDNSService(
-			node.Id,
+			node.Uid,
 			service.Name,
 			m.domain+".",
 			"",
@@ -243,7 +243,7 @@ func (m *mdnsRegistry) Register(service *Service, opts ...Option) error {
 			continue
 		}
 
-		e.id = node.Id
+		e.id = node.Uid
 		e.node = srv
 		entries = append(entries, e)
 	}
@@ -265,7 +265,7 @@ func (m *mdnsRegistry) Deregister(service *Service, opts ...Option) error {
 		var remove bool
 
 		for _, node := range service.Nodes {
-			if node.Id == entry.id {
+			if node.Uid == entry.id {
 				entry.node.Shutdown()
 				remove = true
 				break
@@ -350,7 +350,7 @@ func (m *mdnsRegistry) GetService(service string) ([]*Service, error) {
 					continue
 				}
 				s.Nodes = append(s.Nodes, &Node{
-					Id:       strings.TrimSuffix(e.Name, "."+p.Service+"."+p.Domain+"."),
+					Uid:      strings.TrimSuffix(e.Name, "."+p.Service+"."+p.Domain+"."),
 					Address:  fmt.Sprintf("%s:%d", addr, e.Port),
 					Metadata: txt.Metadata,
 				})
@@ -577,7 +577,7 @@ func (m *mdnsWatcher) Next() (*Result, error) {
 			}
 
 			service.Nodes = append(service.Nodes, &Node{
-				Id:       strings.TrimSuffix(e.Name, suffix),
+				Uid:      strings.TrimSuffix(e.Name, suffix),
 				Address:  fmt.Sprintf("%s:%d", addr, e.Port),
 				Metadata: txt.Metadata,
 			})

@@ -10,7 +10,7 @@ import (
 
 // use a .volts domain rather than .local
 var mdnsDomain = "volts"
-var logger log.ILogger = log.NewLogger(log.WithPrefix("Client"))
+var logger log.ILogger = log.NewLogger(log.WithPrefix("registry"))
 
 type (
 	Option       func(*Config)
@@ -34,6 +34,7 @@ type (
 	ListConfig struct {
 		Context context.Context
 	}
+
 	Config struct {
 		Addrs     []string
 		Timeout   time.Duration

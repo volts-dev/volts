@@ -19,7 +19,7 @@ func addNodes(old, neu []*registry.Node) []*registry.Node {
 		// check against new nodes
 		for _, n := range nodes {
 			// ids match then skip
-			if o.Id == n.Id {
+			if o.Uid == n.Uid {
 				exists = true
 				break
 			}
@@ -40,7 +40,7 @@ func delNodes(old, del []*registry.Node) []*registry.Node {
 	for _, o := range old {
 		var rem bool
 		for _, n := range del {
-			if o.Id == n.Id {
+			if o.Uid == n.Uid {
 				rem = true
 				break
 			}

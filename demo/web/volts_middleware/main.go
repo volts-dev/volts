@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts-middleware/event"
+	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 )
 
@@ -17,30 +18,34 @@ type (
 //	router.Server().Logger().Info("Init")
 //}
 
-func (action ctrls) index(hd *server.THttpContext) {
+func (action ctrls) index(hd *router.THttpContext) {
 	hd.Info("Middleware")
 	hd.Respond([]byte("Middleware"))
 }
 
-func (action ctrls) Before(hd *server.THttpContext) {
+func (action ctrls) Before(hd *router.THttpContext) {
 	hd.Info("Before")
 	hd.Respond([]byte("Before"))
 }
 
-func (action ctrls) After(hd *server.THttpContext) {
+func (action ctrls) After(hd *router.THttpContext) {
 	hd.Info("After")
 	hd.Respond([]byte("After"))
 }
 
-func (action ctrls) Panic(hd *server.THttpContext) {
+func (action ctrls) Panic(hd *router.THttpContext) {
 	hd.Info("Panic")
 	hd.Respond([]byte("Panic"))
 }
 
 func main() {
-	srv := server.NewServer()
-	srv.RegisterMiddleware(event.NewEvent())
-	srv.Url("GET", "/", ctrls.index)
+	r := router.DefaultRouter
+	r.RegisterMiddleware(event.NewEvent())
+	r.Url("GET", "/", ctrls.index)
+
+	srv := server.NewServer(
+		server.Router(r),
+	)
 
 	// serve as a http server
 	app := volts.NewService(volts.Server(srv))

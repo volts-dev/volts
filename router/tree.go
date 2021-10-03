@@ -1,4 +1,4 @@
-package server
+package router
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/registry"
 )
 
 /*
@@ -34,7 +35,7 @@ const (
 )
 
 var (
-	HttpMethods = []string{
+	___HttpMethods = []string{
 		"GET",
 		"POST",
 		"HEAD",
@@ -59,10 +60,17 @@ var (
 	}
 )
 
-type (
-	NodeType    byte // 节点类型
-	ContentType byte // 变量类型
+type NodeType byte // 节点类型
+func (self NodeType) String() string {
+	return [...]string{"StaticNode", "VariantNode", "AnyNode", "RegexpNode"}[self]
+}
 
+type ContentType byte // 变量类型
+func (self ContentType) String() string {
+	return [...]string{"AllType", "NumberType", "CharType"}[self]
+}
+
+type (
 	param struct {
 		Name  string
 		Value string
@@ -89,13 +97,12 @@ type (
 
 	// safely tree
 	TTree struct {
-		Text        string
-		IgnoreCase  bool
-		DelimitChar byte // Delimit Char xxx<.>xxx
-		PrefixChar  byte // the Prefix Char </>xxx.xxx
-
-		root         map[string]*TNode
 		sync.RWMutex // lock for conbine action
+		root         map[string]*TNode
+		Text         string
+		IgnoreCase   bool
+		DelimitChar  byte // Delimit Char xxx<.>xxx
+		PrefixChar   byte // the Prefix Char </>xxx.xxx
 	}
 )
 
@@ -477,6 +484,29 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 	return nil
 }
 
+//
+func (self *TTree) Endpoints() []*registry.Endpoint {
+	eps := make([]*registry.Endpoint, 0)
+
+	var match func(method string, i int, node *TNode)
+	match = func(method string, i int, node *TNode) {
+		for _, c := range node.Children {
+			if c.Route != nil {
+				eps = append(eps, RouteToEndpiont(c.Route))
+			}
+			match(method, i+1, c)
+		}
+	}
+
+	for method, node := range self.root {
+		if len(node.Children) > 0 {
+			match(method, 1, node)
+		}
+	}
+
+	return eps
+}
+
 func (r *TTree) Match(method string, path string) (*route, Params) {
 	delimitChar := r.DelimitChar
 	if delimitChar == 0 {
@@ -541,7 +571,7 @@ func validNodes(nodes []*TNode) bool {
 }
 
 // 添加路由到Tree
-func (self *TTree) AddRoute(method, path string, route route) {
+func (self *TTree) AddRoute(method, path string, route route) error {
 	delimitChar := self.DelimitChar
 	if delimitChar == 0 {
 		delimitChar = '/'
@@ -551,7 +581,7 @@ func (self *TTree) AddRoute(method, path string, route route) {
 	nodes, is_dyn := self.parsePath(path, delimitChar)
 
 	// marked as a dynamic route
-	route.isDynRoute = is_dyn // 即将Hook的新Route是动态地址
+	route.___isDynRoute = is_dyn // 即将Hook的新Route是动态地址
 
 	// 绑定Route到最后一个Node
 	node := nodes[len(nodes)-1]
@@ -567,11 +597,32 @@ func (self *TTree) AddRoute(method, path string, route route) {
 
 	// insert the node to tree
 	self.addNodes(method, nodes, false)
+	return nil
 }
 
 // delete the route
-func (self *TTree) DeleteRoute(method, path string) {
+func (self *TTree) DelRoute(method, path string, route route) error {
+	n := self.root[method]
+	if n == nil {
+		return nil
+	}
 
+	delimitChar := self.DelimitChar
+	if delimitChar == 0 {
+		delimitChar = '/'
+	}
+
+	// to parse path as a List node
+	nodes, _ := self.parsePath(path, delimitChar)
+
+	var p *TNode = n // 复制方法对应的Root
+
+	// 层级插入Nodes的Node到Root
+	for idx := range nodes {
+		p = n.delNode(p, nodes, idx)
+	}
+
+	return nil
 }
 
 // conbine 2 node together
@@ -599,7 +650,7 @@ func (self *TTree) conbine(target, from *TNode) {
 				exist_node.Route = from.Route
 			} else {
 				// 叠加合并Controller
-				exist_node.Route.CombineController(from.Route)
+				exist_node.Route.CombineHandler(from.Route)
 			}
 		}
 
@@ -648,7 +699,7 @@ func (self *TNode) addNode(parent *TNode, nodes []*TNode, i int, isHook bool) *T
 			if i == len(nodes)-1 {
 				// 原始路由会被替换
 				if isHook {
-					n.Route.CombineController(nodes[i].Route)
+					n.Route.CombineHandler(nodes[i].Route)
 				} else {
 					n.Route = nodes[i].Route
 				}
@@ -659,6 +710,23 @@ func (self *TNode) addNode(parent *TNode, nodes []*TNode, i int, isHook bool) *T
 
 	// 如果:该节点没有对应分支则插入同级的nodes为新的分支
 	parent.Children = append(parent.Children, nodes[i])
+	sort.Sort(parent.Children)
+	return nodes[i]
+}
+
+func (self *TNode) delNode(parent *TNode, nodes []*TNode, i int) *TNode {
+	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
+	for _, n := range parent.Children {
+		if n.Equal(nodes[i]) {
+			// 如果:插入的节点层级已经到末尾,则为该节点注册路由
+			if i == len(nodes)-1 {
+				// 剥离目标控制器
+				n.Route.StripController(nodes[i].Route)
+			}
+			return n
+		}
+	}
+
 	sort.Sort(parent.Children)
 	return nodes[i]
 }
@@ -696,7 +764,7 @@ func printNode(i int, node *TNode) {
 
 		fmt.Printf(`%s <Lv:%d; Type:%v; VarType:%v>`, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType])
 		if c.Route != nil {
-			fmt.Print(" <*", len(c.Route.Ctrls), ">")
+			fmt.Print(" <*", len(c.Route.handlers), ">")
 		}
 		//if !reflect.DeepEqual(c.Route, route{}) {
 		if c.Route != nil {

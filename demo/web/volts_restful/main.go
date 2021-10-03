@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/volts-dev/volts"
+	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 )
 
@@ -11,25 +12,28 @@ type (
 	}
 )
 
-func (action ctrls) Get(hd *server.THttpContext) {
+func (action ctrls) Get(hd *router.THttpContext) {
 	hd.Info("Middleware")
 	hd.Respond([]byte("Middleware"))
 }
 
-func (action ctrls) Post(hd *server.THttpContext) {
+func (action ctrls) Post(hd *router.THttpContext) {
 	hd.Info("Before")
 	hd.Respond([]byte("Before"))
 }
 
-func (action ctrls) delete(hd *server.THttpContext) {
+func (action ctrls) delete(hd *router.THttpContext) {
 	hd.Info("After")
 	hd.Respond([]byte("After"))
 }
 
 func main() {
+	r := router.DefaultRouter
+	//r.RegisterMiddleware(event.NewEvent())
+	r.Url("REST", "/ctrls", new(ctrls))
+
 	srv := server.NewServer()
-	//srv.RegisterMiddleware(event.NewEvent())
-	srv.Url("REST", "/ctrls", new(ctrls))
+
 	// serve as a http server
 	app := volts.NewService(
 		volts.Server(srv),

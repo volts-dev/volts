@@ -1,4 +1,4 @@
-package server
+package router
 
 import (
 	"context"
@@ -6,44 +6,52 @@ import (
 	"io"
 	"net/http"
 	"reflect"
-	"runtime"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/registry/cacher"
 	"github.com/volts-dev/volts/transport"
 )
 
 type (
-	IContext interface {
-		Context() context.Context
-		ControllerIndex() int
-		// pravite
-		setControllerIndex(num int)
-		//reset(rw IResponse, req IRequest, Router *TRouter, Route *route)
-		//setData(v interface{}) // TODO 修改API名称  设置response数据
+	// Router handle serving messages
+	IRouter interface {
+		Config() *Config // Retrieve the options
+		String() string
+		Handler() interface{} // 连接入口 serveHTTP 等接口实现
+		// Register endpoint in router
+		Register(ep *registry.Endpoint) error
+		// Deregister endpoint from router
+		Deregister(ep *registry.Endpoint) error
+		// list all endpiont from router
+		Endpoints() []*registry.Endpoint
 
-		// public
-		//Request() IRequest
-		//Response() IResponse
-		ValueModel() reflect.Value //
-		TypeModel() reflect.Type
-		IsDone() bool //response data is done
+		PrintRoutes()
 	}
 
 	// router represents an RPC router.
 	router struct {
-		TGroup     // router is a group set
-		server     *TServer
-		middleware *TMiddlewareManager // 中间件
-		template   *template.TTemplateSet
-		//msgPool    sync.Pool
+		sync.RWMutex
+		TGroup           // router is a group set
+		config           *Config
+		rc               cacher.ICacher      // registry cache
+		middleware       *TMiddlewareManager // 中间件
+		template         *template.TTemplateSet
 		objectPool       *pool
 		respPool         sync.Pool
 		httpbHandlerPool map[int]sync.Pool //根据Route缓存
 		rpcHandlerPool   map[int]sync.Pool
+
+		// compiled regexp for host and path
+		exit chan bool
 	}
 )
+
+var DefaultRouter = NewRouter()
 
 // clone the middleware object
 // 克隆interface 并复制里面的指针
@@ -69,17 +77,227 @@ func cloneInterfacePtrFeild(model interface{}) reflect.Value {
 	return new_model_value
 }
 
+// Validate validates an endpoint to guarantee it won't blow up when being served
+func Validate(e *registry.Endpoint) error {
+	/*	if e == nil {
+			return errors.New("endpoint is nil")
+		}
+
+		if len(e.Name) == 0 {
+			return errors.New("name required")
+		}
+
+		for _, p := range e.Path {
+			ps := p[0]
+			pe := p[len(p)-1]
+
+			if ps == '^' && pe == '$' {
+				_, err := regexp.CompilePOSIX(p)
+				if err != nil {
+					return err
+				}
+			} else if ps == '^' && pe != '$' {
+				return errors.New("invalid path")
+			} else if ps != '^' && pe == '$' {
+				return errors.New("invalid path")
+			}
+		}
+
+		if len(e.Handler) == 0 {
+			return errors.New("invalid handler")
+		}
+	*/
+	return nil
+}
+
+func strip(s string) string {
+	return strings.TrimSpace(s)
+}
+
+func slice(s string) []string {
+	var sl []string
+
+	for _, p := range strings.Split(s, ",") {
+		if str := strip(p); len(str) > 0 {
+			sl = append(sl, strip(p))
+		}
+	}
+
+	return sl
+}
+
 func NewRouter() *router {
+	cfg := newConfig()
 	r := &router{
 		TGroup:     *NewGroup(),
+		config:     cfg,
 		objectPool: newPool(),
+		rc:         cacher.New(cfg.Registry),
+		exit:       make(chan bool),
 	}
 
 	r.respPool.New = func() interface{} {
 		return &transport.THttpResponse{}
 	}
 
+	go r.watch()
+	go r.refresh()
 	return r
+}
+
+func (self *router) PrintRoutes() {
+	self.tree.PrintTrees()
+}
+
+func (self *router) isClosed() bool {
+	select {
+	case <-self.exit:
+		return true
+	default:
+		return false
+	}
+}
+
+// store local endpoint
+func (self *router) store(services []*registry.Service) {
+	// services
+	//names := map[string]bool{}
+
+	var method string
+	var path string
+	var r route
+	var err error
+	// create a new endpoint mapping
+	for _, service := range services {
+		// set names we need later
+		//names[service.Name] = true
+
+		// map per endpoint
+		for _, sep := range service.Endpoints {
+			method = sep.Metadata["method"]
+			path = sep.Metadata["path"]
+			r = *EndpiontToRoute(sep)
+			r.handlers = append(r.handlers, newHandler(nil, ProxyHandler, []*registry.Service{service}))
+			err = self.tree.AddRoute(method, path, r)
+			if err != nil {
+				logger.Err(err)
+			}
+		}
+	}
+}
+
+// watch for endpoint changes
+func (self *router) watch() {
+	var attempts int
+
+	for {
+		if self.isClosed() {
+			return
+		}
+
+		// watch for changes
+		w, err := self.config.Registry.Watch()
+		if err != nil {
+			attempts++
+			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+			logger.Errf("error watching endpoints: %v", err)
+			//}
+			//time.Sleep(time.Duration(attempts) * time.Second)
+			continue
+		}
+
+		ch := make(chan bool)
+
+		go func() {
+			select {
+			case <-ch:
+				w.Stop()
+			case <-self.exit:
+				w.Stop()
+			}
+		}()
+
+		// reset if we get here
+		attempts = 0
+
+		for {
+			// process next event
+			res, err := w.Next()
+			if err != nil {
+				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+				logger.Errf("error getting next endoint: %v", err)
+				//}
+				close(ch)
+				break
+			}
+
+			// skip these things
+			if res == nil || res.Service == nil {
+				return
+			}
+
+			// get entry from cache
+			service, err := self.rc.GetService(res.Service.Name)
+			if err != nil {
+				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+				logger.Errf("unable to get service: %v", err)
+				//}
+				return
+			}
+
+			// update our local endpoints
+			self.store(service)
+		}
+	}
+}
+
+// refresh list of api services
+func (r *router) refresh() {
+	var attempts int
+
+	for {
+		services, err := r.config.Registry.ListServices()
+		if err != nil {
+			attempts++
+			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+			logger.Errf("unable to list services: %v", err)
+			//}
+			time.Sleep(time.Duration(attempts) * time.Second)
+			continue
+		}
+
+		attempts = 0
+
+		// for each service, get service and store endpoints
+		for _, s := range services {
+			service, err := r.rc.GetService(s.Name)
+			if err != nil {
+				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+				logger.Errf("unable to get service: %v", err)
+				//}
+				continue
+			}
+			r.store(service)
+		}
+
+		// refresh list in 10 minutes... cruft
+		// use registry watching
+		select {
+		case <-time.After(time.Minute * 10):
+		case <-r.exit:
+			return
+		}
+	}
+}
+
+func (self *router) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self.config)
+	}
+}
+
+func (self *router) Config() *Config {
+	return self.config
 }
 
 func (self *router) String() string {
@@ -88,6 +306,26 @@ func (self *router) String() string {
 
 func (self *router) Handler() interface{} {
 	return self
+}
+
+func (self *router) Register(ep *registry.Endpoint) error {
+	if err := Validate(ep); err != nil {
+		return err
+	}
+
+	method := ep.Metadata["method"]
+	path := ep.Metadata["path"]
+	return self.tree.AddRoute(method, path, *EndpiontToRoute(ep))
+}
+
+func (self *router) Deregister(ep *registry.Endpoint) error {
+	method := ep.Metadata["method"]
+	path := ep.Metadata["path"]
+	return self.tree.DelRoute(method, path, *EndpiontToRoute(ep))
+}
+
+func (self *router) Endpoints() []*registry.Endpoint {
+	return self.tree.Endpoints()
 }
 
 // 注册中间件
@@ -155,8 +393,8 @@ func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		defer func() {
-			if self.server.config.PrintRequest {
-				self.server.config.Logger.Infof("[Path]%v [Route]%v", path, route.FilePath)
+			if self.config.PrintRequest {
+				logger.Infof("[Path]%v [Route]%v", path, route.FilePath)
 			}
 		}()
 		/*
@@ -176,7 +414,7 @@ func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx := p.Get().(*THttpContext)
 		if !ctx.inited {
 			ctx.Router = self
-			ctx.Route = *route
+			ctx.route = *route
 			ctx.inited = true
 			ctx.Template = template.DefaultTemplateSet
 		}
@@ -240,7 +478,7 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 		} else {
 			// 获取RPC参数
 			// 获取控制器参数类型
-			var argv = self.objectPool.Get(route.MainCtrl.ArgType)
+			var argv = self.objectPool.Get(route.handlers[0].ArgType)
 			err = coder.Decode(reqMessage.Payload, argv.Interface()) //反序列化获得参数值
 
 			if err != nil {
@@ -256,13 +494,13 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 				ctx = p.Get().(*TRpcContext)
 				if !ctx.inited {
 					ctx.Router = self
-					ctx.Route = *route
+					ctx.route = *route
 					ctx.inited = true
 				}
 
 				ctx.reset(w, r, self, route)
 				ctx.argv = argv
-				ctx.replyv = self.objectPool.Get(route.MainCtrl.ReplyType)
+				ctx.replyv = self.objectPool.Get(route.handlers[0].ReplyType)
 
 				// 执行控制器
 				self.route(route, ctx)
@@ -410,8 +648,8 @@ func (self *router) route(route *route, ctx IContext) {
 	)
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	//logger.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, lRoute.MainCtrl, len(lRoute.Ctrls), lRoute.Ctrls)
-	for idx, ctrl := range route.Ctrls {
+	//logger.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, len(lRoute.handlers), lRoute.handlers)
+	for idx, handler := range route.handlers {
 		ctx.setControllerIndex(idx)
 		// stop runing ctrl
 		if ctx.IsDone() {
@@ -419,10 +657,10 @@ func (self *router) route(route *route, ctx IContext) {
 		}
 
 		var args []reflect.Value
-		//handler.ControllerIndex = index //index
+		//handler.HandlerIndex = index //index
 		// STEP#: 获取<Ctrl.Func()>方法的参数
-		for i := 0; i < ctrl.FuncType.NumIn(); i++ {
-			parm = ctrl.FuncType.In(i) // 获得参数
+		for i := 0; i < handler.FuncType.NumIn(); i++ {
+			parm = handler.FuncType.In(i) // 获得参数
 
 			switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
 			case ctx.TypeModel(): // TODO 优化调用 // if is a pointer of TWebHandler
@@ -455,7 +693,7 @@ func (self *router) route(route *route, ctx IContext) {
 
 		if !ctx.IsDone() {
 			// execute Handler or Panic Event
-			self.safelyCall(ctrl.Func, args, route, ctx, ctrl_val) //传递参数给函数.<<<
+			self.safelyCall(handler.Func, args, route, ctx, ctrl_val) //传递参数给函数.<<<
 		}
 
 		if !ctx.IsDone() && CtrlValidable {
@@ -469,28 +707,19 @@ func (self *router) route(route *route, ctx IContext) {
 	}
 }
 
-func (self *router) safelyCall(function reflect.Value, args []reflect.Value, route *route, handler IContext, ctrl reflect.Value) {
+func (self *router) safelyCall(function reflect.Value, args []reflect.Value, route *route, ctx IContext, handler reflect.Value) {
 	defer func() {
 		if err := recover(); err != nil {
-			if self.server.config.RecoverPanic { //是否绕过错误处理直接关闭程序
-				// handle middleware
-				if ctrl.IsValid() {
-					self.routeMiddleware("panic", route, handler, ctrl)
-				}
-
-				// report error information
-				logger.Errf("r:%s err:%v", route.Path, err)
-				for i := 1; ; i++ {
-					_, file, line, ok := runtime.Caller(i)
-					if !ok {
-						break
-					}
-					logger.Errf("file: %s %d", file, line)
-				}
-			} else {
+			if !self.config.RecoverPanic { //是否绕过错误处理直接关闭程序
 				panic(err)
 			}
 
+			// handle middleware
+			if handler.IsValid() {
+				self.routeMiddleware("panic", route, ctx, handler)
+			}
+			logger.Errf("r:%s err:%v", ctx.Route().Path, err)
+			self.config.RecoverHandler(ctx)
 		}
 	}()
 

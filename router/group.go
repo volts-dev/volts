@@ -1,4 +1,4 @@
-package server
+package router
 
 import (
 	"fmt"
@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/config"
 )
 
 type (
@@ -118,15 +119,14 @@ func curFilePath() (string, string) {
 	_, file, _, _ := runtime.Caller(2)
 	filePath, _ := gpath.Split(file)
 	dirName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
-	logger.Dbg(AppPath, " ", filePath)
-
+	logger.Dbg(config.AppPath, " ", filePath)
 	// 过滤由router创建的组群
-	if dirName == "server" {
-		return AppPath, "" // filepath.Base(AppPath)
+	if dirName == "router" {
+		return config.AppPath, "" // filepath.Base(AppPath)
 	}
 
 	// 确保路径在APP内
-	if !strings.HasPrefix(filePath, AppPath) {
+	if !strings.HasPrefix(filePath, config.AppPath) {
 		logger.Panicf("Get current group path failed!")
 		return "", ""
 	}
@@ -215,7 +215,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		// Check if file exists and/or if we have permission to access it
 		if _, err := fs.Open(file); err != nil {
 			// 对最后一个控制器返回404
-			if c.controllerIndex == len(c.Route.Ctrls)-1 {
+			if c.handlerIndex == len(c.route.handlers)-1 {
 				c.response.WriteHeader(http.StatusNotFound)
 			}
 			return
@@ -226,7 +226,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 	}
 
 	urlPattern := gpath.Join(self.config.PrefixPath, relativePath, "/(*filepath)")
-	self.url(HookBeforeRoute, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, handler)
+	self.url(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, handler)
 }
 
 // StaticFile registers a single route in order to serve a single file of the local filesystem.
@@ -266,13 +266,13 @@ func (self *TGroup) Url(method string, path string, controller interface{}) *rou
 	method = strings.ToUpper(method)
 	switch method {
 	case "GET":
-		return self.url(CommomRoute, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
+		return self.url(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
 
 	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE", "REST":
-		return self.url(CommomRoute, []string{method}, &TUrl{Path: path}, controller)
+		return self.url(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
 
 	case "CONNECT": // RPC WS
-		return self.url(CommomRoute, []string{method}, &TUrl{Path: path}, controller)
+		return self.url(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
 
 	default:
 		panic(fmt.Sprintf("the params in Module.Url() %v:%v is invaild", method, path))
@@ -282,9 +282,9 @@ func (self *TGroup) Url(method string, path string, controller interface{}) *rou
 /*
 pos: true 为插入Before 反之After
 */
-func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, controller interface{}) *route {
+func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, controller interface{}) *route {
 	// check vaild
-	if routeType != ProxyRoute && controller == nil {
+	if hanadlerType != ProxyHandler && controller == nil {
 		panic("the route must binding a controller!")
 	}
 
@@ -321,7 +321,7 @@ func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, contro
 				// 添加注册方法
 				if isREST {
 					// 方法为对象方法名称 url 只注册对象名称
-					self.url(routeType, []string{name}, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
+					self.url(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
 				} else {
 					// the rpc method needs one output.
 					if typ.NumOut() != 1 {
@@ -329,7 +329,7 @@ func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, contro
 						continue
 					}
 
-					self.url(routeType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: object_name, Action: name}, method)
+					self.url(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: object_name, Action: name}, method)
 				}
 			}
 		}
@@ -347,7 +347,7 @@ func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, contro
 		url.Path = "/" + url.Path
 	}
 
-	route := newRoute(self, url, url.Path, self.filePath, self.config.Name, url.Action, routeType)
+	route := newRoute(self, url, url.Path, self.filePath, self.config.Name, url.Action)
 
 	/*// # is it proxy route
 	if scheme != "" && host != "" {
@@ -358,9 +358,7 @@ func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, contro
 		route.isReverseProxy = true
 	}
 	*/
-	mt := TMethodType{
-		Func:     ctrl_value,
-		FuncType: ctrl_type}
+	mt := newHandler(ctrl_value, hanadlerType, nil)
 
 	// RPC route validate
 	if utils.InStrings("CONNECT", methods...) > -1 {
@@ -411,9 +409,7 @@ func (self *TGroup) url(routeType RouteType, methods []string, url *TUrl, contro
 		mt.ReplyType = replyType
 	}
 
-	route.MainCtrl = mt
-	route.Ctrls = append(route.Ctrls, route.MainCtrl)
-
+	route.handlers = append(route.handlers, mt)
 	// register route
 	for _, m := range methods {
 		self.tree.AddRoute(strings.ToUpper(m), url.Path, *route)

@@ -109,6 +109,11 @@ func (c *cache) del(service string) {
 	delete(c.ttls, service)
 }
 
+func (c *cache) Contain(service string) bool {
+	_, has := c.cache[service]
+	return has
+}
+
 func (c *cache) get(service string) ([]*registry.Service, error) {
 	// read lock
 	c.RLock()
@@ -239,7 +244,7 @@ func (c *cache) update(res *registry.Result) {
 		for _, cur := range service.Nodes {
 			var seen bool
 			for _, node := range res.Service.Nodes {
-				if cur.Id == node.Id {
+				if cur.Uid == node.Uid {
 					seen = true
 					break
 				}
@@ -262,7 +267,7 @@ func (c *cache) update(res *registry.Result) {
 		for _, cur := range service.Nodes {
 			var seen bool
 			for _, del := range res.Service.Nodes {
-				if del.Id == cur.Id {
+				if del.Uid == cur.Uid {
 					seen = true
 					break
 				}

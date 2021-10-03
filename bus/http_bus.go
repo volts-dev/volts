@@ -276,7 +276,7 @@ func (self *httpBus) Subscribe(topic string, handler Handler, opts ...SubscribeO
 
 	// register service
 	node := &registry.Node{
-		Id:      topic + "-" + self.id,
+		Uid:     topic + "-" + self.id,
 		Address: vnet.HostPort(addr, port),
 		Metadata: map[string]string{
 			"secure": fmt.Sprintf("%t", secure),
@@ -301,7 +301,7 @@ func (self *httpBus) Subscribe(topic string, handler Handler, opts ...SubscribeO
 	subscriber := &httpSubscriber{
 		opts:  scfg,
 		hb:    self,
-		id:    node.Id,
+		id:    node.Uid,
 		topic: topic,
 		fn:    handler,
 		svc:   service,

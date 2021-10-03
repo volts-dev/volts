@@ -7,6 +7,7 @@ import (
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
 	test "github.com/volts-dev/volts/demo"
+	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 	"github.com/volts-dev/volts/transport"
 )
@@ -16,11 +17,11 @@ type (
 	}
 
 	Arith interface {
-		Mul(hd *server.TRpcContext, args *test.Args, reply *test.Reply) error
+		Mul(hd *router.TRpcContext, args *test.Args, reply *test.Reply) error
 	}
 )
 
-func (t arith) Mul(hd *server.TRpcContext, args *test.Args, reply *test.Reply) error {
+func (t arith) Mul(hd *router.TRpcContext, args *test.Args, reply *test.Reply) error {
 	hd.Info("IP:")
 	reply.Flt = 0.01001
 	reply.Str = "Mul"
@@ -31,8 +32,12 @@ func (t arith) Mul(hd *server.TRpcContext, args *test.Args, reply *test.Reply) e
 }
 
 func main() {
-	srv := server.NewServer()
-	srv.Url("CONNECT", "Arith", new(arith))
+	r := router.DefaultRouter
+	r.Url("CONNECT", "Arith", new(arith))
+
+	srv := server.NewServer(
+		server.Router(r),
+	)
 
 	app := volts.NewService(
 		volts.Server(srv),

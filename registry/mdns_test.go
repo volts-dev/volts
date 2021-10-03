@@ -18,7 +18,7 @@ func TestMDNS(t *testing.T) {
 			Version: "1.0.1",
 			Nodes: []*Node{
 				{
-					Id:      "test1-1",
+					Uid:     "test1-1",
 					Address: "10.0.0.1:10001",
 					Metadata: map[string]string{
 						"foo": "bar",
@@ -31,7 +31,7 @@ func TestMDNS(t *testing.T) {
 			Version: "1.0.2",
 			Nodes: []*Node{
 				{
-					Id:      "test2-1",
+					Uid:     "test2-1",
 					Address: "10.0.0.2:10002",
 					Metadata: map[string]string{
 						"foo2": "bar2",
@@ -44,7 +44,7 @@ func TestMDNS(t *testing.T) {
 			Version: "1.0.3",
 			Nodes: []*Node{
 				{
-					Id:      "test3-1",
+					Uid:     "test3-1",
 					Address: "10.0.0.3:10003",
 					Metadata: map[string]string{
 						"foo3": "bar3",
@@ -96,8 +96,8 @@ func TestMDNS(t *testing.T) {
 
 		node := s[0].Nodes[0]
 
-		if node.Id != service.Nodes[0].Id {
-			t.Fatalf("Expected node id %s got %s", service.Nodes[0].Id, node.Id)
+		if node.Uid != service.Nodes[0].Uid {
+			t.Fatalf("Expected node id %s got %s", service.Nodes[0].Uid, node.Uid)
 		}
 
 		if node.Address != service.Nodes[0].Address {
@@ -209,7 +209,7 @@ func TestWatcher(t *testing.T) {
 			Version: "1.0.1",
 			Nodes: []*Node{
 				{
-					Id:      "test1-1",
+					Uid:     "test1-1",
 					Address: "10.0.0.1:10001",
 					Metadata: map[string]string{
 						"foo": "bar",
@@ -222,7 +222,7 @@ func TestWatcher(t *testing.T) {
 			Version: "1.0.2",
 			Nodes: []*Node{
 				{
-					Id:      "test2-1",
+					Uid:     "test2-1",
 					Address: "10.0.0.2:10002",
 					Metadata: map[string]string{
 						"foo2": "bar2",
@@ -235,7 +235,7 @@ func TestWatcher(t *testing.T) {
 			Version: "1.0.3",
 			Nodes: []*Node{
 				{
-					Id:      "test3-1",
+					Uid:     "test3-1",
 					Address: "10.0.0.3:10003",
 					Metadata: map[string]string{
 						"foo3": "bar3",
@@ -265,8 +265,8 @@ func TestWatcher(t *testing.T) {
 
 		node := s.Nodes[0]
 
-		if node.Id != service.Nodes[0].Id {
-			t.Fatalf("Expected node id %s got %s", service.Nodes[0].Id, node.Id)
+		if node.Uid != service.Nodes[0].Uid {
+			t.Fatalf("Expected node id %s got %s", service.Nodes[0].Uid, node.Uid)
 		}
 
 		if node.Address != service.Nodes[0].Address {

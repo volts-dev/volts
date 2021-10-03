@@ -1,12 +1,12 @@
 package base
 
 import (
-	"github.com/volts-dev/volts/server"
+	"github.com/volts-dev/volts/router"
 )
 
-var Base *server.TGroup
+var Base *router.TGroup
 
 func init() {
-	Base = server.NewGroup(server.GroupPrefixPath("/base"))
+	Base = router.NewGroup(router.GroupPrefixPath("/base"))
 	Base.Url("GET", "/", ctrl.index)
 }
