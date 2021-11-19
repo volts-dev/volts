@@ -40,10 +40,30 @@ type (
 	}
 
 	Endpoint struct {
-		Name     string            `json:"name"`
+		// RPC Method e.g. Greeter.Hello
+		Name string `json:"name"`
+		// HTTP Host e.g example.com
+		Host []string `json:"host"`
+		// HTTP Methods e.g GET, POST
+		Method []string `json:"method"`
+		// HTTP Path e.g /greeter. Expect POSIX regex
+		Path string `json:"path"`
+		// Description e.g what's this endpoint for
+		Description string `json:"description"`
+		// Stream flag
+		Stream bool `json:"stream"`
+
+		// 以下待确认
 		Request  *Value            `json:"request"`
 		Response *Value            `json:"response"`
 		Metadata map[string]string `json:"metadata"`
+
+		// API Handler e.g rpc, proxy
+		Handler string
+		// Body destination
+		// "*" or "" - top level message value
+		// "string" - inner message value
+		Body string
 	}
 
 	Value struct {

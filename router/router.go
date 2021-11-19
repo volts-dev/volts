@@ -163,9 +163,9 @@ func (self *router) store(services []*registry.Service) {
 	// services
 	//names := map[string]bool{}
 
-	var method string
-	var path string
-	var r route
+	//var method string
+	//var path string
+	var r *route
 	var err error
 	// create a new endpoint mapping
 	for _, service := range services {
@@ -174,11 +174,11 @@ func (self *router) store(services []*registry.Service) {
 
 		// map per endpoint
 		for _, sep := range service.Endpoints {
-			method = sep.Metadata["method"]
-			path = sep.Metadata["path"]
-			r = *EndpiontToRoute(sep)
-			r.handlers = append(r.handlers, newHandler(nil, ProxyHandler, []*registry.Service{service}))
-			err = self.tree.AddRoute(method, path, r)
+			//method = sep.Metadata["method"]
+			//path = sep.Metadata["path"]
+			r = EndpiontToRoute(sep)
+			r.handlers = append(r.handlers, newHandler(ProxyHandler, nil, []*registry.Service{service}))
+			err = self.tree.AddRoute(r)
 			if err != nil {
 				logger.Err(err)
 			}
@@ -313,15 +313,14 @@ func (self *router) Register(ep *registry.Endpoint) error {
 		return err
 	}
 
-	method := ep.Metadata["method"]
-	path := ep.Metadata["path"]
-	return self.tree.AddRoute(method, path, *EndpiontToRoute(ep))
+	//path := ep.Metadata["path"]
+	return self.tree.AddRoute(EndpiontToRoute(ep))
 }
 
 func (self *router) Deregister(ep *registry.Endpoint) error {
-	method := ep.Metadata["method"]
+	//method := ep.Metadata["method"]
 	path := ep.Metadata["path"]
-	return self.tree.DelRoute(method, path, *EndpiontToRoute(ep))
+	return self.tree.DelRoute(path, EndpiontToRoute(ep))
 }
 
 func (self *router) Endpoints() []*registry.Endpoint {

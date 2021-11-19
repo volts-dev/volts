@@ -5,7 +5,6 @@ import (
 
 	"github.com/volts-dev/volts"
 
-	"github.com/volts-dev/volts/registry/consul"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 )
@@ -23,7 +22,7 @@ func (self ctrls) hello_world(hd *router.THttpContext) {
 
 func (self ctrls) macth_all(hd *router.THttpContext) {
 	p := hd.PathParams()
-	c := fmt.Sprintf(`Hello World (Controler/Router Matching "%v":"%v" %v)!`, hd.Route().Url.Path, p.FieldByName("all").AsString(), p.FieldByName("all2").AsString())
+	c := fmt.Sprintf(`Hello World (Controler/Router Matching "%v":"%v" %v)!`, hd.Route().Path, p.FieldByName("all").AsString(), p.FieldByName("all2").AsString())
 	hd.Respond([]byte(c))
 }
 
@@ -48,7 +47,7 @@ func main() {
 
 	app := volts.NewService(
 		volts.Server(srv),
-		volts.Registry(consul.NewRegistry()),
+		//volts.Registry(consul.NewRegistry()),
 	)
 	app.Run()
 }

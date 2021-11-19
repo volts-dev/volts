@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"net/http"
+	"os"
 	gpath "path"
 	"path/filepath"
 	"reflect"
@@ -78,6 +79,67 @@ func GroupPrefixPath(prefixPath string) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.PrefixPath = prefixPath
 	}
+}
+
+/*    """Return the path of the given module.
+
+Search the addons paths and return the first path where the given
+module is found. If downloaded is True, return the default addons
+path if nothing else is found.
+
+"""*/
+func GetModulePath(module string, downloaded bool, display_warning bool) (res string) {
+
+	// initialize_sys_path()
+	// for adp in ad_paths:
+	//      if os.path.exists(opj(adp, module)) or os.path.exists(opj(adp, '%s.zip' % module)):
+	//         return opj(adp, module)
+	res = filepath.Join(config.AppPath, MODULE_DIR)
+	//if _, err := os.Stat(res); err == nil {
+	//	return res
+	//}
+	return
+
+	// if downloaded:
+	//    return opj(tools.config.addons_data_dir, module)
+	//if display_warning {
+	//	logger.Warnf(`module %s: module not found`, module)
+	//}
+
+	//return ""
+}
+
+/*
+   """Return the full path of a resource of the given module.
+
+   :param module: module name
+   :param list(str) args: resource path components within module
+
+   :rtype: str
+   :return: absolute path to the resource
+
+   TODO make it available inside on osv object (self.get_resource_path)
+   """*/
+
+func GetResourcePath(module_src_path string) (res string) {
+	//filepath.SplitList(module_src_path)
+	mod_path := GetModulePath("", false, true)
+
+	res = filepath.Join(mod_path, module_src_path)
+
+	if _, err := os.Stat(res); err == nil {
+		return
+	}
+
+	/*
+	   if  res!=="" return False
+	   resource_path = opj(mod_path, *args)
+	   if os.path.isdir(mod_path):
+	       # the module is a directory - ignore zip behavior
+	       if os.path.exists(resource_path):
+	           return resource_path
+	*/
+	return ""
 }
 
 func newTemplateVar() *TemplateVar {
@@ -347,7 +409,7 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 		url.Path = "/" + url.Path
 	}
 
-	route := newRoute(self, url, url.Path, self.filePath, self.config.Name, url.Action)
+	route := newRoute(self, methods, url, url.Path, self.filePath, self.config.Name, url.Action)
 
 	/*// # is it proxy route
 	if scheme != "" && host != "" {
@@ -358,7 +420,7 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 		route.isReverseProxy = true
 	}
 	*/
-	mt := newHandler(ctrl_value, hanadlerType, nil)
+	mt := newHandler(hanadlerType, ctrl_value, nil)
 
 	// RPC route validate
 	if utils.InStrings("CONNECT", methods...) > -1 {
@@ -411,9 +473,6 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 
 	route.handlers = append(route.handlers, mt)
 	// register route
-	for _, m := range methods {
-		self.tree.AddRoute(strings.ToUpper(m), url.Path, *route)
-	}
-
+	self.tree.AddRoute(route)
 	return route
 }

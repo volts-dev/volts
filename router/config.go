@@ -8,6 +8,7 @@ import (
 var logger log.ILogger = log.NewLogger(log.WithPrefix("Router"))
 
 const (
+	MODULE_DIR   = "module" // # 模块文件夹名称
 	STATIC_DIR   = "static"
 	TEMPLATE_DIR = "template"
 )

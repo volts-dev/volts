@@ -1,7 +1,6 @@
 package router
 
 import (
-	"net/url"
 	"reflect"
 
 	"github.com/volts-dev/volts/registry"
@@ -66,12 +65,13 @@ type (
 		FilePath string // 短存储路径
 		Position RoutePosition
 		handlers []handler // 最终控制器 合并主控制器+次控制器
-
+		Methods  []string  // 方法
+		Host     []string
+		Url      *TUrl // 提供Restful 等Controller.Action
 		// 废弃
 		//HookCtrl map[string][]handler // 次控制器 map[*][]handler 匹配所有  Hook的Ctrl会在主的Ctrl执行完后执行
 		//handlers    map[string][]handler // 最终控制器 合并主控制器+次控制器
-		Host           *url.URL
-		Url            *TUrl
+
 		isReverseProxy bool    //# 是反向代理
 		___Model       string  // 模型/对象/模块名称 Tmodule/Tmodel, "Model.Action", "404"
 		Action         string  // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
@@ -86,10 +86,14 @@ var idQueue int = 0 //id 自动递增值
 
 func RouteToEndpiont(r *route) *registry.Endpoint {
 	ep := &registry.Endpoint{
-		Metadata: make(map[string]string),
+		//Name: r.
+		Method: r.Methods,
+		Path:   r.Path,
+		Host:   r.Host,
+		//Metadata: make(map[string]string),
 	}
-	ep.Metadata["Path"] = r.Path
-	ep.Metadata["FilePath"] = r.FilePath
+	//ep.Metadata["Path"] = r.Path
+	//ep.Metadata["FilePath"] = r.FilePath
 	//ep.Metadata["Type"] = r.Type.String()
 
 	return ep
@@ -98,9 +102,10 @@ func RouteToEndpiont(r *route) *registry.Endpoint {
 func EndpiontToRoute(ep *registry.Endpoint) *route {
 	r := newRoute(
 		nil,
+		ep.Method,
 		nil,
-		ep.Metadata["Path"],
-		ep.Metadata["FilePath"],
+		ep.Path,
+		"",
 		"",
 		"",
 	)
@@ -108,36 +113,49 @@ func EndpiontToRoute(ep *registry.Endpoint) *route {
 	return r
 }
 
-func newHandler(controller interface{}, hanadlerType HandlerType, services []*registry.Service) handler {
-	// init Value and Type
-	ctrl_value, ok := controller.(reflect.Value)
-	if !ok {
-		ctrl_value = reflect.ValueOf(controller)
-	}
-
-	return handler{
-		Func:     ctrl_value,
-		FuncType: ctrl_value.Type(),
+/*
+@controller:本地服务会自行本地控制程序 其他代理远程服务为nil
+*/
+func newHandler(hanadlerType HandlerType, controller interface{}, services []*registry.Service) handler {
+	h := handler{
 		Type:     hanadlerType,
 		Services: services,
 	}
+
+	// init Value and Type
+	if controller != nil {
+		ctrl_value, ok := controller.(reflect.Value)
+		if !ok {
+			ctrl_value = reflect.ValueOf(controller)
+		}
+		h.Func = ctrl_value
+		h.FuncType = ctrl_value.Type()
+	}
+
+	return h
 }
 
-func newRoute(group *TGroup, url *TUrl, path, filePath, name, action string) *route {
-	return &route{
+func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, action string) *route {
+	r := &route{
 		group:    group,
 		Id:       idQueue + 1,
 		Url:      url,
-		Path:     url.Path,
 		FilePath: filePath,
 		___Model: name,
 		Action:   action, //
+		Methods:  methods,
 		//Type:     rt,
 		handlers: make([]handler, 0),
 		//HookCtrl: make([]handler, 0),
 		//Host:     host,
 		//Scheme:   scheme,
 	}
+
+	if url != nil {
+		r.Path = url.Path
+	}
+
+	return r
 }
 
 func (self *route) Group() *TGroup {

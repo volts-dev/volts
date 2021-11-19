@@ -487,12 +487,15 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 //
 func (self *TTree) Endpoints() []*registry.Endpoint {
 	eps := make([]*registry.Endpoint, 0)
-
+	checker := make(map[string]*route)
 	var match func(method string, i int, node *TNode)
 	match = func(method string, i int, node *TNode) {
 		for _, c := range node.Children {
 			if c.Route != nil {
-				eps = append(eps, RouteToEndpiont(c.Route))
+				// TODO 检测
+				if _, ok := checker[c.Route.Path]; !ok {
+					eps = append(eps, RouteToEndpiont(c.Route))
+				}
 			}
 			match(method, i+1, c)
 		}
@@ -571,57 +574,69 @@ func validNodes(nodes []*TNode) bool {
 }
 
 // 添加路由到Tree
-func (self *TTree) AddRoute(method, path string, route route) error {
-	delimitChar := self.DelimitChar
-	if delimitChar == 0 {
-		delimitChar = '/'
+func (self *TTree) AddRoute(route *route) error {
+	if route == nil {
+		return nil
 	}
 
-	// to parse path as a List node
-	nodes, is_dyn := self.parsePath(path, delimitChar)
+	for _, method := range route.Methods {
+		method = strings.ToUpper(method)
 
-	// marked as a dynamic route
-	route.___isDynRoute = is_dyn // 即将Hook的新Route是动态地址
+		delimitChar := self.DelimitChar
+		if delimitChar == 0 {
+			delimitChar = '/'
+		}
 
-	// 绑定Route到最后一个Node
-	node := nodes[len(nodes)-1]
-	route.Action = node.Text // 赋值Action
-	route.Path = path        // 存储路由绑定的URL
-	node.Route = &route
-	node.Path = path
+		// to parse path as a List node
+		nodes, is_dyn := self.parsePath(route.Path, delimitChar)
 
-	// 验证合法性
-	if !validNodes(nodes) {
-		logger.Panicf("express %s is not supported", path)
+		// marked as a dynamic route
+		route.___isDynRoute = is_dyn // 即将Hook的新Route是动态地址
+
+		// 绑定Route到最后一个Node
+		node := nodes[len(nodes)-1]
+		route.Action = node.Text // 赋值Action
+		node.Route = route
+		node.Path = route.Path // 存储路由绑定的URL
+
+		// 验证合法性
+		if !validNodes(nodes) {
+			logger.Panicf("express %s is not supported", route.Path)
+		}
+
+		// insert the node to tree
+		self.addNodes(method, nodes, false)
 	}
 
-	// insert the node to tree
-	self.addNodes(method, nodes, false)
 	return nil
 }
 
 // delete the route
-func (self *TTree) DelRoute(method, path string, route route) error {
-	n := self.root[method]
-	if n == nil {
+func (self *TTree) DelRoute(path string, route *route) error {
+	if route == nil {
 		return nil
 	}
+	for _, method := range route.Methods {
+		n := self.root[method]
+		if n == nil {
+			return nil
+		}
 
-	delimitChar := self.DelimitChar
-	if delimitChar == 0 {
-		delimitChar = '/'
+		delimitChar := self.DelimitChar
+		if delimitChar == 0 {
+			delimitChar = '/'
+		}
+
+		// to parse path as a List node
+		nodes, _ := self.parsePath(path, delimitChar)
+
+		var p *TNode = n // 复制方法对应的Root
+
+		// 层级插入Nodes的Node到Root
+		for idx := range nodes {
+			p = n.delNode(p, nodes, idx)
+		}
 	}
-
-	// to parse path as a List node
-	nodes, _ := self.parsePath(path, delimitChar)
-
-	var p *TNode = n // 复制方法对应的Root
-
-	// 层级插入Nodes的Node到Root
-	for idx := range nodes {
-		p = n.delNode(p, nodes, idx)
-	}
-
 	return nil
 }
 

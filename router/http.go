@@ -3,13 +3,11 @@ package router
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -119,42 +117,6 @@ type (
 		val reflect.Value
 		typ reflect.Type
 	}
-
-	// 反向代理
-	TProxyHandler struct {
-		http.ResponseWriter
-		Response http.ResponseWriter //http.ResponseWriter
-		Request  *http.Request       //
-
-		Router *router
-		route  *route //执行本次Handle的Route
-
-		//Logger *logger.TLogger
-
-		// Director must be a function which modifies
-		// the request into a new request to be sent
-		// using Transport. Its response is then copied
-		// back to the original client unmodified.
-		Director func(*http.Request)
-
-		// The transport used to perform proxy requests.
-		// If nil, http.DefaultTransport is used.
-		Transport http.RoundTripper
-
-		// FlushInterval specifies the flush interval
-		// to flush to the client while copying the
-		// response body.
-		// If zero, no periodic flushing is done.
-		FlushInterval time.Duration
-		// BufferPool optionally specifies a buffer pool to
-		// get byte slices for use by io.CopyBuffer when
-		// copying HTTP response bodies.
-		BufferPool BufferPool
-		// ModifyResponse is an optional function that
-		// modifies the Response from the backend.
-		// If it returns an error, the proxy returns a StatusBadGateway error.
-		ModifyResponse func(*http.Response) error
-	}
 )
 
 // 100%返回TContentBody
@@ -198,11 +160,6 @@ func NewHttpContext(router *router) *THttpContext {
 	hd.data = NewParamsSet(hd)
 	hd.val = reflect.ValueOf(hd)
 	hd.typ = hd.val.Type()
-	return hd
-}
-
-func NewProxyHandler() *TProxyHandler {
-	hd := &TProxyHandler{}
 	return hd
 }
 
@@ -736,145 +693,6 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
-func (self *TProxyHandler) connect(rw *transport.THttpResponse, req *http.Request, Router *router, Route *route) {
-	self.Request = req
-	self.Response = rw
-	self.ResponseWriter = rw
-	self.Router = Router
-	self.route = Route
-	//self.Logger = Router.Server.Logger
-
-	director := func(req *http.Request) {
-		target := self.route.Host
-		targetQuery := target.RawQuery
-		req.URL.Scheme = self.route.Host.Scheme
-		req.URL.Host = self.route.Host.Host
-		req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
-		if targetQuery == "" || req.URL.RawQuery == "" {
-			req.URL.RawQuery = targetQuery + req.URL.RawQuery
-		} else {
-			req.URL.RawQuery = targetQuery + "&" + req.URL.RawQuery
-		}
-		if _, ok := req.Header["User-Agent"]; !ok {
-			// explicitly disable User-Agent so it's not set to default value
-			req.Header.Set("User-Agent", "")
-		}
-	}
-
-	if Route.Host.Scheme == "http" {
-		self.Director = director
-		self.Transport = http.DefaultTransport
-
-	} else {
-		self.Director = func(req *http.Request) {
-			director(req)
-			req.Host = req.URL.Host
-		}
-
-		// Set a custom DialTLS to access the TLS connection state
-		self.Transport = &http.Transport{
-			DialTLS: func(network, addr string) (net.Conn, error) {
-				conn, err := net.Dial(network, addr)
-				if err != nil {
-					return nil, err
-				}
-
-				host, _, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, err
-				}
-				cfg := &tls.Config{ServerName: host}
-
-				tlsConn := tls.Client(conn, cfg)
-				if err := tlsConn.Handshake(); err != nil {
-					conn.Close()
-					return nil, err
-				}
-
-				cs := tlsConn.ConnectionState()
-				cert := cs.PeerCertificates[0]
-
-				// Verify here
-				cert.VerifyHostname(host)
-				//self.Logger.Dbg(cert.Subject)
-
-				return tlsConn, nil
-			}}
-	}
-}
-
-func (p *TProxyHandler) copyBuffer(dst io.Writer, src io.Reader, buf []byte) (int64, error) {
-	if len(buf) == 0 {
-		buf = make([]byte, 32*1024)
-	}
-	var written int64
-	for {
-		nr, rerr := src.Read(buf)
-		if rerr != nil && rerr != io.EOF {
-			logger.Errf("httputil: ReverseProxy read error during body copy: %v", rerr)
-		}
-		if nr > 0 {
-			nw, werr := dst.Write(buf[:nr])
-			if nw > 0 {
-				written += int64(nw)
-			}
-			if werr != nil {
-				return written, werr
-			}
-			if nr != nw {
-				return written, io.ErrShortWrite
-			}
-		}
-		if rerr != nil {
-			return written, rerr
-		}
-	}
-}
-
-func (p *TProxyHandler) copyResponse(dst io.Writer, src io.Reader) {
-	if p.FlushInterval != 0 {
-		if wf, ok := dst.(writeFlusher); ok {
-			mlw := &maxLatencyWriter{
-				dst:     wf,
-				latency: p.FlushInterval,
-				done:    make(chan bool),
-			}
-			go mlw.flushLoop()
-			defer mlw.stop()
-			dst = mlw
-		}
-	}
-
-	var buf []byte
-	if p.BufferPool != nil {
-		buf = p.BufferPool.Get()
-	}
-	p.copyBuffer(dst, src, buf)
-	if p.BufferPool != nil {
-		p.BufferPool.Put(buf)
-	}
-}
-
-/*
-func (self *TRestHandle) RespondByJson(src interface{}) {
-	//var s []map[string]string
-	//rawValue := reflect.Indirect(reflect.ValueOf(src))
-	//s = rawValue.Interface().([]map[string]string)
-	runtime.ReadMemStats(memstats)
-	fmt.Printf("MemStats=%d|%d|%d|%d|RespondByJson", memstats.Mallocs, memstats.Sys, memstats.Frees, memstats.HeapObjects)
-
-	s1, _ := json.Marshal(src)
-	//str := string(s)
-	//fmt.Println(s1)
-	runtime.ReadMemStats(memstats)
-	fmt.Printf("MemStats=%d|%d|%d|%d|RespondByJson", memstats.Mallocs, memstats.Sys, memstats.Frees, memstats.HeapObjects)
-
-	self.Write(s1)
-	runtime.ReadMemStats(memstats)
-	fmt.Printf("MemStats=%d|%d|%d|%d|RespondByJson", memstats.Mallocs, memstats.Sys, memstats.Frees, memstats.HeapObjects)
-
-}
-*/
 func sanitizeCookieName(n string) string {
 	return cookieNameSanitizer.Replace(n)
 }

@@ -86,25 +86,14 @@ func NewServer(opts ...Option) *TServer {
 	//router.hdlrWrappers = options.HdlrWrappers
 	//router.subWrappers = options.SubWrappers
 	// inite HandlerPool New function
-
-	srv := &TServer{
-		config: cfg,
-		//router:  cfg.Router.(*router),
-		RWMutex: sync.RWMutex{},
-		//handlers:   map[string]Handler{},
+	return &TServer{
+		config:     cfg,
+		RWMutex:    sync.RWMutex{},
 		started:    false,
 		registered: false,
 		exit:       make(chan chan error),
 		wg:         &sync.WaitGroup{},
 	}
-
-	//cfg.Router.(*router).server = srv // 传递服务器指针
-
-	//srv.httpRspPool.New = func() interface{} {
-	//	return &httpResponse{}
-	//}
-
-	return srv
 }
 
 func (self *TServer) Init(opts ...Option) error {
@@ -121,19 +110,19 @@ func (self *TServer) Init(opts ...Option) error {
 // 注册到服务发现
 func (self *TServer) Register() error {
 	self.RLock()
-	rsvc := self.rsvc
+	regSrv := self.rsvc
 	config := self.config
 	self.RUnlock()
 
 	regFunc := func(service *registry.Service) error {
 		// create registry options
-		rOpts := []registry.Option{registry.RegisterTTL(config.RegisterTTL)}
+		regOpts := []registry.Option{registry.RegisterTTL(config.RegisterTTL)}
 
 		var regErr error
 
 		for i := 0; i < 3; i++ {
 			// attempt to register
-			if err := config.Registry.Register(service, rOpts...); err != nil {
+			if err := config.Registry.Register(service, regOpts...); err != nil {
 				// set the error
 				regErr = err
 				// backoff then retry
@@ -149,8 +138,8 @@ func (self *TServer) Register() error {
 	}
 
 	// have we registered before?
-	if rsvc != nil {
-		if err := regFunc(rsvc); err != nil {
+	if regSrv != nil {
+		if err := regFunc(regSrv); err != nil {
 			return err
 		}
 		return nil
