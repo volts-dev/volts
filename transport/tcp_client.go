@@ -16,6 +16,10 @@ type tcpTransportClient struct {
 	//timeout time.Duration
 }
 
+func (t *tcpTransportClient) Conn() net.Conn {
+	return t.conn
+}
+
 func (t *tcpTransportClient) Local() string {
 	return t.conn.LocalAddr().String()
 }

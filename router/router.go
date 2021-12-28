@@ -34,7 +34,7 @@ type (
 	}
 
 	// router represents an RPC router.
-	router struct {
+	TRouter struct {
 		sync.RWMutex
 		TGroup           // router is a group set
 		config           *Config
@@ -126,9 +126,9 @@ func slice(s string) []string {
 	return sl
 }
 
-func NewRouter() *router {
+func NewRouter() *TRouter {
 	cfg := newConfig()
-	r := &router{
+	r := &TRouter{
 		TGroup:     *NewGroup(),
 		config:     cfg,
 		objectPool: newPool(),
@@ -145,11 +145,11 @@ func NewRouter() *router {
 	return r
 }
 
-func (self *router) PrintRoutes() {
+func (self *TRouter) PrintRoutes() {
 	self.tree.PrintTrees()
 }
 
-func (self *router) isClosed() bool {
+func (self *TRouter) isClosed() bool {
 	select {
 	case <-self.exit:
 		return true
@@ -159,7 +159,7 @@ func (self *router) isClosed() bool {
 }
 
 // store local endpoint
-func (self *router) store(services []*registry.Service) {
+func (self *TRouter) store(services []*registry.Service) {
 	// services
 	//names := map[string]bool{}
 
@@ -187,7 +187,7 @@ func (self *router) store(services []*registry.Service) {
 }
 
 // watch for endpoint changes
-func (self *router) watch() {
+func (self *TRouter) watch() {
 	var attempts int
 
 	for {
@@ -252,7 +252,7 @@ func (self *router) watch() {
 }
 
 // refresh list of api services
-func (r *router) refresh() {
+func (r *TRouter) refresh() {
 	var attempts int
 
 	for {
@@ -290,25 +290,25 @@ func (r *router) refresh() {
 	}
 }
 
-func (self *router) Init(opts ...Option) {
+func (self *TRouter) Init(opts ...Option) {
 	for _, opt := range opts {
 		opt(self.config)
 	}
 }
 
-func (self *router) Config() *Config {
+func (self *TRouter) Config() *Config {
 	return self.config
 }
 
-func (self *router) String() string {
+func (self *TRouter) String() string {
 	return "volts-router"
 }
 
-func (self *router) Handler() interface{} {
+func (self *TRouter) Handler() interface{} {
 	return self
 }
 
-func (self *router) Register(ep *registry.Endpoint) error {
+func (self *TRouter) Register(ep *registry.Endpoint) error {
 	if err := Validate(ep); err != nil {
 		return err
 	}
@@ -317,18 +317,18 @@ func (self *router) Register(ep *registry.Endpoint) error {
 	return self.tree.AddRoute(EndpiontToRoute(ep))
 }
 
-func (self *router) Deregister(ep *registry.Endpoint) error {
+func (self *TRouter) Deregister(ep *registry.Endpoint) error {
 	//method := ep.Metadata["method"]
 	path := ep.Metadata["path"]
 	return self.tree.DelRoute(path, EndpiontToRoute(ep))
 }
 
-func (self *router) Endpoints() []*registry.Endpoint {
+func (self *TRouter) Endpoints() []*registry.Endpoint {
 	return self.tree.Endpoints()
 }
 
 // 注册中间件
-func (self *router) RegisterMiddleware(middlewares ...IMiddleware) {
+func (self *TRouter) RegisterMiddleware(middlewares ...IMiddleware) {
 	for _, m := range middlewares {
 		if mm, ok := m.(IMiddlewareName); ok {
 			self.middleware.Add(mm.Name(), m)
@@ -344,7 +344,7 @@ func (self *router) RegisterMiddleware(middlewares ...IMiddleware) {
 }
 
 // register module
-func (self *router) RegisterGroup(grp IGroup, build_path ...bool) {
+func (self *TRouter) RegisterGroup(grp IGroup, build_path ...bool) {
 	if grp == nil {
 		logger.Warn("RegisterModule is nil")
 		return
@@ -353,7 +353,7 @@ func (self *router) RegisterGroup(grp IGroup, build_path ...bool) {
 	self.tree.Conbine(grp.GetRoutes())
 }
 
-func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
@@ -433,7 +433,7 @@ func (self *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
+func (self *TRouter) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 	reqMessage := r.Message // return the packet struct
 
 	// 心跳包 直接返回
@@ -543,7 +543,7 @@ func (self *router) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 // the order is according by controller for modular register middleware.
 // TODO 优化遍历 缓存中间件列表
 // TODO 优化 route the midware request,response,panic
-func (self *router) routeMiddleware(method string, route *route, ctx IContext, ctrl reflect.Value) {
+func (self *TRouter) routeMiddleware(method string, route *route, ctx IContext, ctrl reflect.Value) {
 	var (
 		mid_val, mid_ptr_val reflect.Value
 		mid_typ              reflect.Type
@@ -639,7 +639,7 @@ func (self *router) routeMiddleware(method string, route *route, ctx IContext, c
 	}
 }
 
-func (self *router) route(route *route, ctx IContext) {
+func (self *TRouter) route(route *route, ctx IContext) {
 	var (
 		ctrl_val reflect.Value
 		ctrl_typ reflect.Type
@@ -706,7 +706,7 @@ func (self *router) route(route *route, ctx IContext) {
 	}
 }
 
-func (self *router) safelyCall(function reflect.Value, args []reflect.Value, route *route, ctx IContext, handler reflect.Value) {
+func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *route, ctx IContext, handler reflect.Value) {
 	defer func() {
 		if err := recover(); err != nil {
 			if !self.config.RecoverPanic { //是否绕过错误处理直接关闭程序

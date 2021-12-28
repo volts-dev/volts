@@ -36,6 +36,10 @@ type (
 	}
 )
 
+func (t *httpTransportClient) Conn() net.Conn {
+	return t.conn
+}
+
 func (h *httpTransportClient) Local() string {
 	return h.local
 }

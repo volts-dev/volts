@@ -25,6 +25,16 @@ func (self *Error) Error() string {
 	return self.Detail
 }
 
+// New generates a custom error.
+func New(id, detail string, code int32) error {
+	return &Error{
+		Id:     id,
+		Code:   code,
+		Detail: detail,
+		Status: http.StatusText(int(code)),
+	}
+}
+
 // InternalServerError generates a 500 error.
 func InternalServerError(id, format string, a ...interface{}) error {
 	return &Error{
@@ -51,5 +61,15 @@ func Timeout(id, format string, a ...interface{}) error {
 		Code:   408,
 		Detail: fmt.Sprintf(format, a...),
 		Status: http.StatusText(408),
+	}
+}
+
+// NotFound generates a 404 error.
+func NotFound(id, format string, a ...interface{}) error {
+	return &Error{
+		Id:     id,
+		Code:   404,
+		Detail: fmt.Sprintf(format, a...),
+		Status: http.StatusText(404),
 	}
 }

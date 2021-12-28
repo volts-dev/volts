@@ -19,7 +19,7 @@ type (
 		context      context.Context
 		response     transport.IResponse   //http.ResponseWriter
 		request      *transport.RpcRequest //
-		Router       *router
+		Router       *TRouter
 		route        route //执行本次Handle的Route
 		inited       bool
 		handlerIndex int
@@ -44,7 +44,7 @@ func handleError(res *transport.Message, err error) (*transport.Message, error) 
 	return res, err
 }
 
-func NewRpcHandler(router *router) *TRpcContext {
+func NewRpcHandler(router *TRouter) *TRpcContext {
 	handler := &TRpcContext{
 		ILogger: logger,
 		Router:  router,

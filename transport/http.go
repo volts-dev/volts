@@ -2,18 +2,23 @@ package transport
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 
+	utls "github.com/refraction-networking/utls"
 	vaddr "github.com/volts-dev/volts/util/addr"
 	vnet "github.com/volts-dev/volts/util/net"
 	mls "github.com/volts-dev/volts/util/tls"
+	"golang.org/x/net/proxy"
 )
 
 type (
 	httpTransport struct {
 		config *Config
+		dialer proxy.ContextDialer
 	}
 )
 
@@ -25,6 +30,19 @@ func NewHTTPTransport(opts ...Option) *httpTransport {
 	}
 
 	return &httpTransport{config: cfg}
+}
+
+func (self *httpTransport) Init(opts ...Option) error {
+	for _, o := range opts {
+		o(self.config)
+	}
+
+	return nil
+}
+
+func (rt *httpTransport) dialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
+
+	return nil, nil
 }
 
 // to make a Dial with server
@@ -48,10 +66,63 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 				InsecureSkipVerify: true,
 			}
 		}
-		config.NextProtos = []string{"http/1.1"}
-		conn, err = newConn(func(addr string) (net.Conn, error) {
-			return tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
-		})(addr)
+
+		// 代理
+		var dialer proxy.ContextDialer
+		if cfg.ProxyURL != "" {
+			dialer, err = newConnectDialer(cfg.ProxyURL, "")
+			if err != nil {
+
+			}
+		} else {
+			dialer = proxy.Direct
+		}
+
+		if cfg.Ja3.Ja3 != "" {
+
+			rawConn, err := dialer.DialContext(context.Background(), "tcp", addr)
+			if err != nil {
+				return nil, err
+			}
+
+			var host string
+			if host, _, err = net.SplitHostPort(addr); err != nil {
+				host = addr
+			}
+			//////////////////
+
+			spec, err := stringToSpec(cfg.Ja3.Ja3)
+			if err != nil {
+				return nil, err
+			}
+
+			conn := utls.UClient(rawConn, &utls.Config{
+				ServerName: host,
+				MinVersion: tls.VersionTLS12,
+				MaxVersion: tls.VersionTLS12,
+			}, // Default is TLS13
+				utls.HelloCustom)
+			if err := conn.ApplyPreset(spec); err != nil {
+				return nil, err
+			}
+
+			if err = conn.Handshake(); err != nil {
+				_ = conn.Close()
+
+				if err.Error() == "tls: CurvePreferences includes unsupported curve" {
+					//fix this
+					return nil, fmt.Errorf("conn.Handshake() error for tls 1.3 (please retry request): %+v", err)
+				}
+				return nil, fmt.Errorf("uTlsConn.Handshake() error: %+v", err)
+			}
+
+		} else {
+			config.NextProtos = []string{"http/1.1"}
+			conn, err = newConn(func(addr string) (net.Conn, error) {
+				return tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
+			})(addr)
+		}
+
 	} else {
 		conn, err = newConn(func(addr string) (net.Conn, error) {
 			return net.DialTimeout("tcp", addr, self.config.ConnectTimeout)
@@ -129,14 +200,6 @@ func (self *httpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 	}
 
 	return self.config.Listener, nil
-}
-
-func (self *httpTransport) Init(opts ...Option) error {
-	for _, o := range opts {
-		o(self.config)
-	}
-
-	return nil
 }
 
 /*

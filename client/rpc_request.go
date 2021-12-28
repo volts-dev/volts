@@ -11,7 +11,7 @@ type (
 	}
 )
 
-func newRpcRequest(service, endpoint string, request interface{}, contentType string, reqOpts ...RequestOption) IRequest {
+func NewRpcRequest(service, endpoint string, request interface{}, contentType string, reqOpts ...RequestOption) *rpcRequest {
 	var opts RequestOptions
 
 	for _, o := range reqOpts {

@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/consul/api v1.9.1
 	github.com/mitchellh/hashstructure v1.1.0
+	github.com/refraction-networking/utls v1.0.0
 	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	github.com/volts-dev/dataset v0.0.0-20210303044526-4e29c6250cdc
 	github.com/volts-dev/logger v0.0.0-20210803162057-18754d780c31

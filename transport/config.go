@@ -49,7 +49,8 @@ type (
 
 		// TODO: add tls options when dialling
 		// Currently set in global options
-
+		Ja3      Ja3
+		ProxyURL string
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context
@@ -137,5 +138,18 @@ func TLSConfig(t *tls.Config) Option {
 func WithStream() DialOption {
 	return func(o *DialConfig) {
 		o.Stream = true
+	}
+}
+
+func WithJa3(ja3, userAgent string) DialOption {
+	return func(o *DialConfig) {
+		o.Ja3.Ja3 = ja3
+		o.Ja3.UserAgent = userAgent
+	}
+}
+
+func WithProxyURL(proxyURL string) DialOption {
+	return func(o *DialConfig) {
+		o.ProxyURL = proxyURL
 	}
 }

@@ -19,7 +19,7 @@ type (
 		//Stream(ctx context.Context, req Request, opts ...CallOption) (Stream, error)
 		//Publish(ctx context.Context, msg Message, opts ...PublishOption) error
 		//String() string
-		NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) IRequest
+		//NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) IRequest
 	}
 
 	// Request is the interface for a synchronous request used by Call or Stream
@@ -67,9 +67,9 @@ var (
 
 // Creates a new request using the default client. Content Type will
 // be set to the default within options and use the appropriate codec
-func NewRequest(service, endpoint string, request interface{}, reqOpts ...RequestOption) IRequest {
-	return DefaultClient.NewRequest(service, endpoint, request, reqOpts...)
-}
+//func NewRequest(service, endpoint string, request interface{}, reqOpts ...RequestOption) IRequest {
+//	return DefaultClient.NewRequest(service, endpoint, request, reqOpts...)
+//}
 
 // Makes a synchronous call to a service using the default client
 func Call(ctx context.Context, request IRequest, response interface{}, opts ...CallOption) error {

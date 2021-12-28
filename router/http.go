@@ -91,7 +91,7 @@ type (
 		context  context.Context
 		response *transport.THttpResponse //http.ResponseWriter
 		request  *http.Request            //
-		Router   *router
+		Router   *TRouter
 		route    route //执行本次Handle的Route
 
 		// data set
@@ -141,7 +141,7 @@ func NewParamsSet(hd *THttpContext) *TParamsSet {
 	}
 }
 
-func NewHttpContext(router *router) *THttpContext {
+func NewHttpContext(router *TRouter) *THttpContext {
 	hd := &THttpContext{
 		ILogger: logger,
 		Router:  router,

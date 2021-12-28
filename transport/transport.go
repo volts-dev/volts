@@ -20,6 +20,7 @@ type (
 		Close() error
 		Local() string  // Local IP
 		Remote() string // Remote IP
+		Conn() net.Conn // 接口提供更灵活扩展
 	}
 
 	IClient interface {

@@ -37,3 +37,11 @@ func Registry(r registry.IRegistry) Option {
 		return nil
 	}
 }
+
+// WithFilter adds a filter function to the list of filters
+// used during the Select call.
+func WithFilter(fn ...Filter) SelectOption {
+	return func(cfg *SelectConfig) {
+		cfg.Filters = append(cfg.Filters, fn...)
+	}
+}

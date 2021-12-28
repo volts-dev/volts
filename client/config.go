@@ -69,6 +69,8 @@ type (
 		PoolTTL     time.Duration
 		Retries     int         // Retries retries to send
 		CallOptions CallOptions // Default Call Options
+		// 提供实时变化
+		DialOptions []transport.DialOption // TODO sturct
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -89,6 +91,10 @@ type (
 
 		// TLSConfig for tcp and quic
 		TLSConfig *tls.Config
+
+		Ja3      transport.Ja3
+		ProxyURL string
+
 		// kcp.BlockCrypt
 		Block interface{}
 		// RPCPath for http connection
@@ -137,19 +143,21 @@ func newConfig(opts ...Option) *Config {
 		PoolSize: DefaultPoolSize,
 		PoolTTL:  DefaultPoolTTL,
 		//	Broker:    broker.DefaultBroker,
-		Selector:  selector.DefaultSelector,
-		Registry:  registry.DefaultRegistry,
-		Transport: transport.NewTCPTransport(),
+		Selector: selector.DefaultSelector,
+		Registry: registry.DefaultRegistry,
 	}
 
-	// init options
+	cfg.Init(opts...)
+	return cfg
+}
+
+// init options
+func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		if opt != nil {
-			opt(cfg)
+			opt(self)
 		}
 	}
-
-	return cfg
 }
 
 // WithRequestTimeout is a CallOption which overrides that which
@@ -180,5 +188,19 @@ func Registry(r registry.IRegistry) Option {
 func Transport(t transport.ITransport) Option {
 	return func(cfg *Config) {
 		cfg.Transport = t
+	}
+}
+func Ja3(ja3, userAgent string) Option {
+	return func(cfg *Config) {
+		cfg.Ja3.Ja3 = ja3
+		cfg.Ja3.UserAgent = userAgent
+		//	cfg.DialOptions = append(cfg.DialOptions, transport.WithJa3(cfg.Ja3.Ja3, cfg.Ja3.UserAgent))
+	}
+}
+
+func ProxyURL(proxyURL string) Option {
+	return func(cfg *Config) {
+		cfg.ProxyURL = proxyURL
+		//cfg.DialOptions = append(cfg.DialOptions, transport.WithProxyURL(cfg.ProxyURL))
 	}
 }

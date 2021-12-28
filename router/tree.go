@@ -35,17 +35,6 @@ const (
 )
 
 var (
-	___HttpMethods = []string{
-		"GET",
-		"POST",
-		"HEAD",
-		"DELETE",
-		"PUT",
-		"OPTIONS",
-		"TRACE",
-		"PATCH",
-	}
-
 	nodeType = map[NodeType]string{
 		StaticNode:  "Static", // static, should equal
 		VariantNode: "Var",    // named node, match a non-/ is ok

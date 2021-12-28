@@ -26,6 +26,9 @@ type (
 
 func NewRpcClient(opts ...Option) IClient {
 	cfg := newConfig(opts...)
+	cfg.Init(
+		Transport(transport.NewTCPTransport()),
+	)
 
 	p := pool.NewPool(
 		pool.Size(cfg.PoolSize),
@@ -54,7 +57,7 @@ func (self *rpcClient) Config() *Config {
 
 // 新建请求
 func (self *rpcClient) NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) IRequest {
-	return newRpcRequest(service, method, request, self.config.ContentType, reqOpts...)
+	return NewRpcRequest(service, method, request, self.config.ContentType, reqOpts...)
 }
 
 func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IRequest, resp interface{}, opts CallOptions) error {

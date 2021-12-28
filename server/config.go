@@ -11,7 +11,7 @@ import (
 	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/router"
+	vrouter "github.com/volts-dev/volts/router"
 
 	"github.com/volts-dev/volts/transport"
 )
@@ -27,9 +27,9 @@ type (
 		//Tracer    trace.Tracer
 		Registry  registry.IRegistry
 		Transport transport.ITransport
-		Router    router.IRouter // The router for requests
-		Logger    log.ILogger    //
-		TLSConfig *tls.Config    // TLSConfig specifies tls.Config for secure serving
+		Router    vrouter.IRouter // The router for requests
+		Logger    log.ILogger     //
+		TLSConfig *tls.Config     // TLSConfig specifies tls.Config for secure serving
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -73,7 +73,7 @@ func newConfig(opts ...Option) *Config {
 		Uid:              DefaultUid,
 		Name:             DefaultName,
 		Logger:           logger,
-		Router:           router.DefaultRouter,
+		Router:           vrouter.DefaultRouter,
 		Bus:              bus.DefaultBus,
 		Registry:         registry.DefaultRegistry,
 		Transport:        transport.DefaultTransport,
@@ -115,10 +115,12 @@ func Transport(t transport.ITransport) Option {
 	}
 }
 
-// Server name
-func Router(router router.IRouter) Option {
+// not accept other router
+func Router(router vrouter.IRouter) Option {
 	return func(cfg *Config) {
-		// not accept other router
+		if _, ok := router.(*vrouter.TRouter); ok {
+			cfg.Router = router
+		}
 	}
 }
 
