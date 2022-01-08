@@ -140,6 +140,7 @@ func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, 
 		group:    group,
 		Id:       idQueue + 1,
 		Url:      url,
+		Path:     path,
 		FilePath: filePath,
 		___Model: name,
 		Action:   action, //

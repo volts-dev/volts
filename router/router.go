@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/volts-dev/template"
+	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	handler "github.com/volts-dev/volts/handler/http"
+	rpchandler "github.com/volts-dev/volts/handler/rpc"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 	"github.com/volts-dev/volts/transport"
@@ -177,7 +180,12 @@ func (self *TRouter) store(services []*registry.Service) {
 			//method = sep.Metadata["method"]
 			//path = sep.Metadata["path"]
 			r = EndpiontToRoute(sep)
-			r.handlers = append(r.handlers, newHandler(ProxyHandler, nil, []*registry.Service{service}))
+			if utils.InStrings("CONNECT", sep.Method...) > 0 {
+				r.handlers = append(r.handlers, newHandler(ProxyHandler, rpchandler.ReverseProxy, []*registry.Service{service}))
+			} else {
+				r.handlers = append(r.handlers, newHandler(ProxyHandler, handler.ReverseProxy, []*registry.Service{service}))
+			}
+
 			err = self.tree.AddRoute(r)
 			if err != nil {
 				logger.Err(err)
@@ -656,6 +664,9 @@ func (self *TRouter) route(route *route, ctx IContext) {
 		}
 
 		var args []reflect.Value
+		if handler.Type == LocalHandler {
+		}
+
 		//handler.HandlerIndex = index //index
 		// STEP#: 获取<Ctrl.Func()>方法的参数
 		for i := 0; i < handler.FuncType.NumIn(); i++ {

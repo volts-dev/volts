@@ -37,6 +37,10 @@ type (
 	}
 )
 
+func (t *HttpConn) Conn() net.Conn {
+	return t.conn
+}
+
 func (h *HttpConn) Local() string {
 	return h.local
 }
