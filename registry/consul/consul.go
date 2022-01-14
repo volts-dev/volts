@@ -305,8 +305,13 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 		return nil
 	}
 
+	c.opts.Service = s
 	// pass the healthcheck
 	return c.Client().Agent().PassTTL("service:"+node.Uid, "")
+}
+
+func (m *consulRegistry) CurrentService() *registry.Service {
+	return m.opts.Service
 }
 
 func (c *consulRegistry) GetService(name string) ([]*registry.Service, error) {

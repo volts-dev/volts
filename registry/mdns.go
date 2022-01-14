@@ -250,6 +250,7 @@ func (m *mdnsRegistry) Register(service *Service, opts ...Option) error {
 
 	// save
 	m.services[service.Name] = entries
+	m.config.Service = service
 
 	return gerr
 }
@@ -288,7 +289,9 @@ func (m *mdnsRegistry) Deregister(service *Service, opts ...Option) error {
 
 	return nil
 }
-
+func (m *mdnsRegistry) CurrentService() *Service {
+	return m.config.Service
+}
 func (m *mdnsRegistry) GetService(service string) ([]*Service, error) {
 	serviceMap := make(map[string]*Service)
 	entries := make(chan *mdns.ServiceEntry, 10)

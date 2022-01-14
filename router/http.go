@@ -163,6 +163,12 @@ func NewHttpContext(router *TRouter) *THttpContext {
 	return hd
 }
 
+func (self *TContentBody) Read(p []byte) (n int, err error) {
+	p = self.data
+
+	return len(p), nil
+}
+
 func (self *TContentBody) AsBytes() []byte {
 	return self.data
 }

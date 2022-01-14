@@ -13,10 +13,7 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
-	handler "github.com/volts-dev/volts/handler/http"
-	rpchandler "github.com/volts-dev/volts/handler/rpc"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/cacher"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -39,9 +36,9 @@ type (
 	// router represents an RPC router.
 	TRouter struct {
 		sync.RWMutex
-		TGroup           // router is a group set
-		config           *Config
-		rc               cacher.ICacher      // registry cache
+		TGroup // router is a group set
+		config *Config
+
 		middleware       *TMiddlewareManager // 中间件
 		template         *template.TTemplateSet
 		objectPool       *pool
@@ -53,8 +50,6 @@ type (
 		exit chan bool
 	}
 )
-
-var DefaultRouter = NewRouter()
 
 // clone the middleware object
 // 克隆interface 并复制里面的指针
@@ -131,21 +126,20 @@ func slice(s string) []string {
 
 func NewRouter() *TRouter {
 	cfg := newConfig()
-	r := &TRouter{
+	router := &TRouter{
 		TGroup:     *NewGroup(),
 		config:     cfg,
 		objectPool: newPool(),
-		rc:         cacher.New(cfg.Registry),
 		exit:       make(chan bool),
 	}
 
-	r.respPool.New = func() interface{} {
+	router.respPool.New = func() interface{} {
 		return &transport.THttpResponse{}
 	}
 
-	go r.watch()
-	go r.refresh()
-	return r
+	go router.watch()   // 实时订阅
+	go router.refresh() // 定时刷新
+	return router
 }
 
 func (self *TRouter) PrintRoutes() {
@@ -161,6 +155,24 @@ func (self *TRouter) isClosed() bool {
 	}
 }
 
+// 过滤自己
+func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
+	if service.Name == self.config.Registry.CurrentService().Name {
+		node := self.config.Registry.CurrentService().Nodes[0]
+		nodes := make([]*registry.Node, 0)
+		for _, n := range service.Nodes {
+			if n.Uid == node.Uid {
+				continue
+			}
+
+			nodes = append(nodes, n)
+		}
+		service.Nodes = nodes
+	}
+
+	return service
+}
+
 // store local endpoint
 func (self *TRouter) store(services []*registry.Service) {
 	// services
@@ -174,21 +186,23 @@ func (self *TRouter) store(services []*registry.Service) {
 	for _, service := range services {
 		// set names we need later
 		//names[service.Name] = true
+		service = self.filteSelf(service)
+		if len(service.Nodes) > 0 {
+			// map per endpoint
+			for _, sep := range service.Endpoints {
+				//method = sep.Metadata["method"]
+				//path = sep.Metadata["path"]
+				r = EndpiontToRoute(sep)
+				if utils.InStrings("CONNECT", sep.Method...) > 0 {
+					r.handlers = append(r.handlers, newHandler(ProxyHandler, RpcReverseProxy, []*registry.Service{service}))
+				} else {
+					r.handlers = append(r.handlers, newHandler(ProxyHandler, HttpReverseProxy, []*registry.Service{service}))
+				}
 
-		// map per endpoint
-		for _, sep := range service.Endpoints {
-			//method = sep.Metadata["method"]
-			//path = sep.Metadata["path"]
-			r = EndpiontToRoute(sep)
-			if utils.InStrings("CONNECT", sep.Method...) > 0 {
-				r.handlers = append(r.handlers, newHandler(ProxyHandler, rpchandler.ReverseProxy, []*registry.Service{service}))
-			} else {
-				r.handlers = append(r.handlers, newHandler(ProxyHandler, handler.ReverseProxy, []*registry.Service{service}))
-			}
-
-			err = self.tree.AddRoute(r)
-			if err != nil {
-				logger.Err(err)
+				err = self.tree.AddRoute(r)
+				if err != nil {
+					logger.Err(err)
+				}
 			}
 		}
 	}
@@ -200,7 +214,7 @@ func (self *TRouter) watch() {
 
 	for {
 		if self.isClosed() {
-			return
+			break
 		}
 
 		// watch for changes
@@ -241,30 +255,30 @@ func (self *TRouter) watch() {
 
 			// skip these things
 			if res == nil || res.Service == nil {
-				return
+				break
 			}
 
 			// get entry from cache
-			service, err := self.rc.GetService(res.Service.Name)
+			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
 			if err != nil {
 				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
 				logger.Errf("unable to get service: %v", err)
 				//}
-				return
+				break
 			}
 
 			// update our local endpoints
-			self.store(service)
+			self.store(services)
 		}
 	}
 }
 
 // refresh list of api services
-func (r *TRouter) refresh() {
+func (self *TRouter) refresh() {
 	var attempts int
 
 	for {
-		services, err := r.config.Registry.ListServices()
+		services, err := self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
 			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
@@ -278,21 +292,21 @@ func (r *TRouter) refresh() {
 
 		// for each service, get service and store endpoints
 		for _, s := range services {
-			service, err := r.rc.GetService(s.Name)
+			service, err := self.config.RegistryCacher.GetService(s.Name)
 			if err != nil {
 				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
 				logger.Errf("unable to get service: %v", err)
 				//}
 				continue
 			}
-			r.store(service)
+			self.store(service)
 		}
 
 		// refresh list in 10 minutes... cruft
 		// use registry watching
 		select {
 		case <-time.After(time.Minute * 10):
-		case <-r.exit:
+		case <-self.exit:
 			return
 		}
 	}

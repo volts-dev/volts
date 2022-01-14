@@ -36,6 +36,7 @@ type (
 	}
 
 	Config struct {
+		Service   *Service // current service information
 		Addrs     []string
 		Timeout   time.Duration
 		Secure    bool

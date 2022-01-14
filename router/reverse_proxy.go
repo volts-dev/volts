@@ -1,4 +1,4 @@
-package http
+package router
 
 import (
 	"fmt"
@@ -9,11 +9,14 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/selector"
 )
 
-func ReverseProxy(ctx *router.THttpContext) {
+// TODO 改名称
+func RpcReverseProxy(ctx *TRpcContext) {}
+
+// TODO 改名称
+func HttpReverseProxy(ctx *THttpContext) {
 	service, err := getService(ctx)
 	if err != nil {
 		ctx.WriteHeader(500)
@@ -40,7 +43,7 @@ func ReverseProxy(ctx *router.THttpContext) {
 }
 
 // getService returns the service for this request from the selector
-func getService(ctx *router.THttpContext) (string, error) {
+func getService(ctx *THttpContext) (string, error) {
 	// create a random selector
 	next := selector.Random(ctx.Handler().Services)
 
@@ -50,6 +53,7 @@ func getService(ctx *router.THttpContext) (string, error) {
 		return "", nil
 	}
 
+	// FIXME http/https
 	return fmt.Sprintf("http://%s", s.Address), nil
 }
 
@@ -110,7 +114,7 @@ func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
 	<-errCh
 }
 
-func isWebSocket(ctx *router.THttpContext) bool {
+func isWebSocket(ctx *THttpContext) bool {
 	contains := func(key, val string) bool {
 		vv := strings.Split(ctx.Request().Header.Get(key), ",")
 		for _, v := range vv {

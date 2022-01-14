@@ -49,6 +49,5 @@ type (
 )
 
 var (
-	DefaultTransport ITransport = NewHTTPTransport()
-	DefaultTimeout              = time.Second * 5
+	DefaultTimeout = time.Second * 5
 )

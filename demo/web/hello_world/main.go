@@ -5,6 +5,7 @@ import (
 
 	"github.com/volts-dev/volts"
 
+	"github.com/volts-dev/volts/registry/etcd"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 )
@@ -27,7 +28,7 @@ func (self ctrls) macth_all(hd *router.THttpContext) {
 }
 
 func main() {
-	r := router.DefaultRouter
+	r := router.NewRouter()
 	r.Url("GET", "/", func(hd *router.THttpContext) {
 		hd.Respond([]byte("Hello World"))
 	})
@@ -47,7 +48,7 @@ func main() {
 
 	app := volts.NewService(
 		volts.Server(srv),
-		//volts.Registry(consul.NewRegistry()),
+		volts.Registry(etcd.NewRegistry()),
 	)
 	app.Run()
 }

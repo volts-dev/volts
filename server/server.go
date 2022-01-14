@@ -9,26 +9,21 @@ import (
 	"time"
 
 	"github.com/asim/go-micro/v3/metadata"
-	"github.com/google/uuid"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/util/addr"
 	"github.com/volts-dev/volts/util/backoff"
 	vnet "github.com/volts-dev/volts/util/net"
 )
 
 var (
-	DefaultAddress         = ":0"
-	DefaultName            = "volts.server"
-	DefaultVersion         = "latest"
-	DefaultUid             = uuid.New().String()
-	DefaultServer  IServer = NewServer()
-
+	DefaultAddress          = ":0"
+	DefaultName             = "volts.server"
+	DefaultVersion          = "latest"
 	DefaultRegisterCheck    = func(context.Context) error { return nil }
 	DefaultRegisterInterval = time.Second * 30
 	DefaultRegisterTTL      = time.Second * 90
+	lastStreamResponseError = errors.New("EOS")
 )
-var lastStreamResponseError = errors.New("EOS")
 
 type (
 	// Server is a simple micro server abstraction
@@ -79,10 +74,6 @@ type (
 func NewServer(opts ...Option) *TServer {
 	cfg := newConfig(opts...)
 
-	// if not special router use the default
-	if cfg.Router == nil {
-		cfg.Router = router.DefaultRouter
-	}
 	//router.hdlrWrappers = options.HdlrWrappers
 	//router.subWrappers = options.SubWrappers
 	// inite HandlerPool New function
@@ -185,7 +176,7 @@ func (self *TServer) Register() error {
 		addr = vnet.HostPort(addr, port)
 	}
 
-	// register service
+	// register service node
 	node := &registry.Node{
 		Uid:      config.Name + "-" + config.Uid,
 		Address:  addr,

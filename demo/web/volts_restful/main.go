@@ -28,7 +28,7 @@ func (action ctrls) delete(hd *router.THttpContext) {
 }
 
 func main() {
-	r := router.DefaultRouter
+	r := router.NewRouter()
 	//r.RegisterMiddleware(event.NewEvent())
 	r.Url("REST", "/ctrls", new(ctrls))
 

@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	r := router.DefaultRouter
+	r := router.NewRouter()
 	r.RegisterGroup(base.Base)
 	r.RegisterGroup(web.Web)
 

@@ -3,6 +3,7 @@ package router
 import (
 	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/registry/cacher"
 )
 
 var logger log.ILogger = log.NewLogger(log.WithPrefix("Router"))
@@ -17,10 +18,10 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		Registry registry.IRegistry
-
-		StaticDir []string `ini:"-"` // the static dir allow to visit
-		StaticExt []string `ini:"-"` // the static file format allow to visit
+		Registry       registry.IRegistry
+		RegistryCacher cacher.ICacher // registry cache
+		StaticDir      []string       `ini:"-"` // the static dir allow to visit
+		StaticExt      []string       `ini:"-"` // the static file format allow to visit
 
 		RecoverPanic    bool
 		RecoverHandler  func(IContext)
@@ -31,15 +32,22 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Registry:     registry.DefaultRegistry,
 		RecoverPanic: true,
 	}
+	cfg.Init(opts...)
 
-	for _, opt := range opts {
-		opt(cfg)
+	if cfg.Registry == nil {
+		cfg.Registry = registry.DefaultRegistry
+		cfg.RegistryCacher = cacher.New(cfg.Registry)
 	}
 
 	return cfg
+}
+
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self)
+	}
 }
 
 // Register the service with a TTL

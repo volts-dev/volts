@@ -64,7 +64,7 @@ type (
 		Path     string // !NOTE! Path存储路由绑定的URL 网络路径
 		FilePath string // 短存储路径
 		Position RoutePosition
-		handlers []handler // 最终控制器 合并主控制器+次控制器
+		handlers []handler // 最终处理器 合并主处理器+次处理器 代理处理器
 		Methods  []string  // 方法
 		Host     []string
 		Url      *TUrl // 提供Restful 等Controller.Action

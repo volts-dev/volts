@@ -330,7 +330,8 @@ func (self *TGroup) Url(method string, path string, controller interface{}) *rou
 	case "GET":
 		return self.url(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
 
-	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE", "REST":
+	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE",
+		"REST":
 		return self.url(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
 
 	case "CONNECT": // RPC WS

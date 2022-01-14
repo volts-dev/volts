@@ -40,11 +40,9 @@ type (
 
 // NewService creates and returns a new Service based on the packages within.
 func NewService(opts ...Option) IService {
-	srv := new(service)
-	cfg := NewConfig(opts...)
-
-	srv.config = cfg
-	return srv
+	return &service{
+		config: NewConfig(opts...),
+	}
 }
 
 func (self *service) Name() string {

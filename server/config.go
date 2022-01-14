@@ -6,11 +6,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/registry/cacher"
 	vrouter "github.com/volts-dev/volts/router"
 
 	"github.com/volts-dev/volts/transport"
@@ -70,13 +72,11 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Uid:              DefaultUid,
+		Uid:              uuid.New().String(),
 		Name:             DefaultName,
 		Logger:           logger,
-		Router:           vrouter.DefaultRouter,
 		Bus:              bus.DefaultBus,
 		Registry:         registry.DefaultRegistry,
-		Transport:        transport.DefaultTransport,
 		Codecs:           make(map[string]codec.ICodec),
 		Metadata:         map[string]string{},
 		Address:          DefaultAddress,
@@ -88,6 +88,15 @@ func newConfig(opts ...Option) *Config {
 
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	// if not special router use the default
+	if cfg.Router == nil {
+		cfg.Router = vrouter.NewRouter()
+	}
+
+	if cfg.Transport == nil {
+		cfg.Transport = transport.NewHTTPTransport()
 	}
 
 	return cfg
@@ -105,6 +114,7 @@ func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
 		cfg.Router.Config().Registry = r
+		cfg.Router.Config().RegistryCacher = cacher.New(r)
 	}
 }
 
@@ -177,7 +187,7 @@ func TLSConfig(t *tls.Config) Option {
 		// set the default transport if one is not
 		// already set. Required for Init call below.
 		if cfg.Transport == nil {
-			cfg.Transport = transport.DefaultTransport
+			cfg.Transport = transport.NewHTTPTransport()
 		}
 
 		// set the transport tls

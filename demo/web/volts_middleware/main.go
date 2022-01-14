@@ -39,7 +39,7 @@ func (action ctrls) Panic(hd *router.THttpContext) {
 }
 
 func main() {
-	r := router.DefaultRouter
+	r := router.NewRouter()
 	r.RegisterMiddleware(event.NewEvent())
 	r.Url("GET", "/", ctrls.index)
 

@@ -22,6 +22,7 @@ type (
 		GetService(string) ([]*Service, error)
 		ListServices() ([]*Service, error)
 		Watch(...WatchOptions) (Watcher, error)
+		CurrentService() *Service
 		String() string
 	}
 

@@ -116,7 +116,10 @@ func encode(s *registry.Service) string {
 
 func decode(ds []byte) *registry.Service {
 	var s *registry.Service
-	json.Unmarshal(ds, &s)
+	err := json.Unmarshal(ds, &s)
+	if err != nil {
+		registry.Logger().Errf("decode service failed with error %s :%s", err.Error(), string(ds))
+	}
 	return s
 }
 
@@ -308,7 +311,6 @@ func (e *etcdRegistry) Register(s *registry.Service, opts ...registry.Option) er
 	if len(s.Nodes) == 0 {
 		return errors.New("Require at least one node")
 	}
-
 	var gerr error
 
 	// register each node individually
@@ -318,10 +320,13 @@ func (e *etcdRegistry) Register(s *registry.Service, opts ...registry.Option) er
 			gerr = err
 		}
 	}
+	e.config.Service = s
 
 	return gerr
 }
-
+func (m *etcdRegistry) CurrentService() *registry.Service {
+	return m.config.Service
+}
 func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()
