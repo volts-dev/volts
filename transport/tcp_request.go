@@ -8,7 +8,6 @@ import (
 )
 
 type RpcRequest struct {
-	//Transport  ITransport
 	Message    *Message
 	RemoteAddr string
 
@@ -39,7 +38,6 @@ func NewRpcRequest(ctx context.Context, msg *Message, socket ISocket) *RpcReques
 	body.Data.Write(msg.Payload)
 
 	return &RpcRequest{
-		//Transport: transport,
 		Message: msg,
 		Context: ctx,
 		socket:  socket,

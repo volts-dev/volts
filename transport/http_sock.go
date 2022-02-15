@@ -147,6 +147,7 @@ func (h *HttpConn) Send(m *Message) error {
 	if h.r.ProtoMajor == 1 {
 		// make copy of header
 		hdr := make(http.Header)
+
 		for k, v := range h.r.Header {
 			hdr[k] = v
 		}
