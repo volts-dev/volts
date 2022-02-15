@@ -9,6 +9,10 @@ type jsonCodec struct{}
 
 var JSON SerializeType = RegisterCodec("JSON", new(jsonCodec))
 
+func (c jsonCodec) String() string {
+	return "JSON"
+}
+
 // Encode encodes an object into slice of bytes.
 func (c jsonCodec) Encode(i interface{}) ([]byte, error) {
 	return json.Marshal(i)
@@ -17,8 +21,4 @@ func (c jsonCodec) Encode(i interface{}) ([]byte, error) {
 // Decode decodes an object from slice of bytes.
 func (c jsonCodec) Decode(data []byte, i interface{}) error {
 	return json.Unmarshal(data, i)
-}
-
-func (c jsonCodec) String() string {
-	return "JSON"
 }

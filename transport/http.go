@@ -134,14 +134,14 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 	}
 
 	return &httpTransportClient{
-		ht:     self,
-		config: cfg,
-		addr:   addr,
-		conn:   conn,
-		buff:   bufio.NewReader(conn),
-		r:      make(chan *http.Request, 1),
-		local:  conn.LocalAddr().String(),
-		remote: conn.RemoteAddr().String(),
+		transport: self,
+		config:    cfg,
+		addr:      addr,
+		conn:      conn,
+		buff:      bufio.NewReader(conn),
+		r:         make(chan *http.Request, 1),
+		local:     conn.LocalAddr().String(),
+		remote:    conn.RemoteAddr().String(),
 	}, nil
 }
 

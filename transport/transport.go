@@ -3,6 +3,8 @@ package transport
 import (
 	"net"
 	"time"
+
+	"github.com/volts-dev/volts/util/body"
 )
 
 type (
@@ -42,9 +44,21 @@ type (
 		Handler() interface{}
 	}
 
+	IRequest interface {
+		// The service to call
+		Service() string
+		// The action to take
+		Method() string
+		// The content type
+		ContentType() string
+		// write a response directly to the client
+		Body() *body.TBody
+	}
+
+	// 提供给服务器客户端最基本接口
 	IResponse interface {
 		// write a response directly to the client
-		Write([]byte) (int, error)
+		Write(interface{}) (int, error)
 	}
 )
 

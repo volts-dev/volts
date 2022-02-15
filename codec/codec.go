@@ -18,12 +18,23 @@ type (
 
 // Codecs are codecs supported by rpc.
 var codecs = make(map[SerializeType]ICodec)
+var names = make(map[string]SerializeType)
+
+func (self SerializeType) String() string {
+	return codecs[self].String()
+}
 
 // RegisterCodec register customized codec.
 func RegisterCodec(name string, codec ICodec) SerializeType {
 	h := hashName(name)
 	codecs[h] = codec
+	names[name] = h
 	return h
+}
+
+// 提供编码类型
+func CodecByName(name string) SerializeType {
+	return names[name]
 }
 
 func IdentifyCodec(st SerializeType) ICodec {

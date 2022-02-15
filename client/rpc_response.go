@@ -3,33 +3,26 @@ package client
 import (
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/transport"
+	"github.com/volts-dev/volts/util/body"
 )
 
 type rpcResponse struct {
-	header map[string]string
-	body   []byte
-	socket transport.Socket
-	codec  codec.ICodec
+	message     *transport.Message
+	header      map[string]string
+	body        *body.TBody // []byte
+	socket      transport.Socket
+	contentType codec.SerializeType
+	length      int
 }
 
-func (r *rpcResponse) Codec() codec.ICodec {
-	return r.codec
+func (self *rpcResponse) Body() *body.TBody {
+	return self.body
+}
+
+func (self *rpcResponse) ContentType() string {
+	return self.contentType.String()
 }
 
 func (r *rpcResponse) Header() map[string]string {
 	return r.header
-}
-
-func (r *rpcResponse) Read() ([]byte, error) {
-	var msg transport.Message
-
-	if err := r.socket.Recv(&msg); err != nil {
-		return nil, err
-	}
-
-	// set internals
-	r.header = msg.Header
-	r.body = msg.Body
-
-	return msg.Body, nil
 }

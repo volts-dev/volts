@@ -1,9 +1,7 @@
 package transport
 
 import (
-	"bufio"
 	"context"
-	"encoding/gob"
 	"fmt"
 	"net"
 	"time"
@@ -19,13 +17,13 @@ type (
 	}
 
 	rpcHandler interface {
-		ServeRPC(IResponse, *RpcRequest)
+		ServeRPC(*RpcResponse, *RpcRequest)
 	}
 
 	tcpTransportListener struct {
-		listener net.Listener
-		//timeout  time.Duration
-		sock *tcpTransportSocket
+		listener  net.Listener
+		transport *tcpTransport
+		sock      *tcpTransportSocket
 	}
 )
 
@@ -84,14 +82,7 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 			return err
 		}
 
-		encBuf := bufio.NewWriter(conn)
-		t.sock = &tcpTransportSocket{
-			//timeout: t.timeout,
-			conn:   conn,
-			encBuf: encBuf,
-			enc:    gob.NewEncoder(encBuf),
-			dec:    gob.NewDecoder(conn),
-		}
+		t.sock = NewTcpTransportSocket(conn, t.transport.config.ReadTimeout, t.transport.config.WriteTimeout)
 
 		go func() {
 			//@ 获取空白通讯包
@@ -114,15 +105,9 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 			}
 
 			ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-			req := &RpcRequest{
-				Message: msg,
-				Context: ctx,
-			}
 
-			rsp := &RpcResponse{
-				conn: conn,
-				req:  req,
-			}
+			req := NewRpcRequest(ctx, msg, t.sock)
+			rsp := NewRpcResponse(ctx, req, t.sock)
 
 			hd.ServeRPC(rsp, req)
 		}()

@@ -4,10 +4,11 @@ import (
 	"context"
 
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/util/body"
 )
 
 type RpcRequest struct {
-	//Header     protocol.Header
+	//Transport  ITransport
 	Message    *Message
 	RemoteAddr string
 
@@ -21,17 +22,34 @@ type RpcRequest struct {
 	method      string
 	endpoint    string
 	contentType string
-	socket      ISocket
-	codec       codec.ICodec
+	socket      ISocket //
+	Codec       codec.ICodec
 	header      map[string]string
-	body        []byte
+	body        *body.TBody //
 	rawBody     interface{}
 	stream      bool
 	first       bool
 }
 
-func (r *RpcRequest) Codec() codec.ICodec {
-	return r.codec
+func NewRpcRequest(ctx context.Context, msg *Message, socket ISocket) *RpcRequest {
+	// new a body
+	body := &body.TBody{
+		Codec: codec.IdentifyCodec(msg.SerializeType()),
+	}
+	body.Data.Write(msg.Payload)
+
+	return &RpcRequest{
+		//Transport: transport,
+		Message: msg,
+		Context: ctx,
+		socket:  socket,
+		body:    body,
+		Codec:   codec.IdentifyCodec(msg.SerializeType()), // TODO 判断合法
+	}
+}
+
+func (r *RpcRequest) Body() *body.TBody {
+	return r.body
 }
 
 func (r *RpcRequest) ContentType() string {
@@ -54,16 +72,12 @@ func (r *RpcRequest) Header() map[string]string {
 	return r.header
 }
 
-func (r *RpcRequest) Body() interface{} {
-	return r.rawBody
-}
-
-func (r *RpcRequest) Read() ([]byte, error) {
+func (r *RpcRequest) ___Read() ([]byte, error) {
 	// got a body
 	if r.first {
-		b := r.body
+		b := r.Body()
 		r.first = false
-		return b, nil
+		return b.Data.Bytes(), nil
 	}
 
 	var msg Message

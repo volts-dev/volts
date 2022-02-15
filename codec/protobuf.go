@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	proto "github.com/gogo/protobuf/proto"
-	pb "github.com/golang/protobuf/proto"
 )
 
 // pbCodec uses protobuf marshaler and unmarshaler.
@@ -18,8 +17,8 @@ func (c pbCodec) Encode(i interface{}) ([]byte, error) {
 		return m.Marshal()
 	}
 
-	if m, ok := i.(pb.Message); ok {
-		return pb.Marshal(m)
+	if m, ok := i.(proto.Message); ok {
+		return proto.Marshal(m)
 	}
 
 	return nil, fmt.Errorf("%T is not a proto.Marshaler", i)
@@ -31,8 +30,8 @@ func (c pbCodec) Decode(data []byte, i interface{}) error {
 		return m.Unmarshal(data)
 	}
 
-	if m, ok := i.(pb.Message); ok {
-		return pb.Unmarshal(data, m)
+	if m, ok := i.(proto.Message); ok {
+		return proto.Unmarshal(data, m)
 	}
 
 	return fmt.Errorf("%T is not a proto.Unmarshaler", i)

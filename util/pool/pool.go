@@ -18,12 +18,12 @@ type Pool interface {
 }
 
 type Conn interface {
+	// embedded connection
+	transport.IClient
 	// unique id of connection
 	Id() string
 	// time it was created
 	Created() time.Time
-	// embedded connection
-	transport.IClient
 }
 
 func NewPool(opts ...Option) Pool {

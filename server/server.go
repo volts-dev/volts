@@ -401,10 +401,7 @@ func (self *TServer) serve() error {
 	self.RUnlock()
 
 	config := self.config
-
-	if config.Router.Config().PrintRouterTree {
-		config.Router.PrintRoutes()
-	}
+	config.Router.PrintRoutes()
 
 	// start listening on the transport
 	ts, err := config.Transport.Listen(config.Address)

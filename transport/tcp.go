@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"bufio"
 	"crypto/tls"
 	"net"
 
@@ -53,11 +52,13 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 		return nil, err
 	}
 
-	encBuf := bufio.NewWriter(conn)
+	//encBuf := bufio.NewWriter(conn)
 	return &tcpTransportClient{
-		config: cfg,
-		conn:   conn,
-		encBuf: encBuf,
+		tcpTransportSocket: *NewTcpTransportSocket(conn, t.config.ReadTimeout, t.config.WriteTimeout),
+		transport:          t,
+		config:             cfg,
+		conn:               conn,
+		//encBuf:             encBuf,
 		//timeout: t.config.Timeout,
 	}, nil
 }
@@ -112,8 +113,8 @@ func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, err
 	}
 
 	t.config.Listener = &tcpTransportListener{
-		//timeout:  t.config.Timeout,
-		listener: l,
+		transport: t,
+		listener:  l,
 	}
 
 	return t.config.Listener, nil

@@ -6,9 +6,9 @@ import (
 	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
-	test "github.com/volts-dev/volts/demo"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
+	"github.com/volts-dev/volts/test"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -54,7 +54,7 @@ func main() {
 	req := client.NewHttpRequest(service, endpoint, nil)
 
 	// test calling remote address
-	if err := client.Call(context.Background(), req, nil, client.WithAddress(address)); err != nil {
+	if _, err := client.Call(context.Background(), req, client.WithAddress(address)); err != nil {
 		logger.Err("call with address error:", err)
 	}
 

@@ -369,7 +369,7 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 		var (
 			name   string
 			method reflect.Value
-			typ    reflect.Type
+			//typ    reflect.Type
 		)
 
 		isREST := utils.InStrings("REST", methods...) > -1
@@ -378,7 +378,7 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 			name = ctrl_type.Method(i).Name
 			//ctrl_type = ctrl_type.Elem()
 			method = ctrl_type.Method(i).Func
-			typ = method.Type()
+			//typ = method.Type()
 			if method.CanInterface() {
 				//log.Dbg("RegisterName", object_name, name, method)
 				// 添加注册方法
@@ -387,10 +387,10 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 					self.url(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
 				} else {
 					// the rpc method needs one output.
-					if typ.NumOut() != 1 {
-						//log.Info("method", name, "has wrong number of outs:", typ.NumOut())
-						continue
-					}
+					//if typ.NumOut() != 1 {
+					//log.Info("method", name, "has wrong number of outs:", typ.NumOut())
+					//	continue
+					//}
 
 					self.url(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: object_name, Action: name}, method)
 				}
@@ -437,16 +437,16 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 
 		logger.Dbg("NumIn", ctrl_type.NumIn(), ctrl_type.String())
 		// Method needs four ins: receiver, context.Context, *args, *reply.
-		if ctrl_type.NumIn() != 4 {
+		/*if ctrl_type.NumIn() != 4 {
 			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v %v`, url.Action, ctrl_type.In(0), ctrl_type.NumIn()))
 		}
-		/*if ctrl_type.NumIn() != 3 {
+		if ctrl_type.NumIn() != 3 {
 			panic(fmt.Sprintf(`registerFunction: has wrong number of ins: %s`, ctrl_type.NumIn()))
 			return route
-		}*/
+		}
 		if ctrl_type.NumOut() != 1 {
 			panic(fmt.Sprintf(`registerFunction: has wrong number of outs: %v`, ctrl_type.NumOut()))
-		}
+		}*/
 
 		// First arg must be context.Context
 		ctxType := ctrl_type.In(1)
@@ -454,22 +454,23 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 			//log.Info("method", url.Action, " must use context.Context as the first parameter")
 			return nil
 		}
+		/*
+			// Second arg need not be a pointer.
+			argType := ctrl_type.In(2)
+			if !isExportedOrBuiltinType(argType) {
+				//log.Info(url.Action, "parameter type not exported:", argType)
+				return nil
+			}
+			// Third arg must be a pointer.
+			replyType := ctrl_type.In(3)
+			if replyType.Kind() != reflect.Ptr {
+				//log.Info("method", url.Action, "reply type not a pointer:", replyType)
+				return nil
+			}
 
-		// Second arg need not be a pointer.
-		argType := ctrl_type.In(2)
-		if !isExportedOrBuiltinType(argType) {
-			//log.Info(url.Action, "parameter type not exported:", argType)
-			return nil
-		}
-		// Third arg must be a pointer.
-		replyType := ctrl_type.In(3)
-		if replyType.Kind() != reflect.Ptr {
-			//log.Info("method", url.Action, "reply type not a pointer:", replyType)
-			return nil
-		}
-
-		mt.ArgType = argType
-		mt.ReplyType = replyType
+			mt.ArgType = argType
+			mt.ReplyType = replyType
+		*/
 	}
 
 	route.handlers = append(route.handlers, mt)

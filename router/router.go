@@ -1,7 +1,6 @@
 package router
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -29,7 +28,8 @@ type (
 		Deregister(ep *registry.Endpoint) error
 		// list all endpiont from router
 		Endpoints() []*registry.Endpoint
-
+		RegisterMiddleware(middlewares ...IMiddleware)
+		RegisterGroup(grp ...IGroup)
 		PrintRoutes()
 	}
 
@@ -143,7 +143,9 @@ func NewRouter() *TRouter {
 }
 
 func (self *TRouter) PrintRoutes() {
-	self.tree.PrintTrees()
+	if self.Config().PrintRouterTree {
+		self.tree.PrintTrees()
+	}
 }
 
 func (self *TRouter) isClosed() bool {
@@ -366,13 +368,10 @@ func (self *TRouter) RegisterMiddleware(middlewares ...IMiddleware) {
 }
 
 // register module
-func (self *TRouter) RegisterGroup(grp IGroup, build_path ...bool) {
-	if grp == nil {
-		logger.Warn("RegisterModule is nil")
-		return
+func (self *TRouter) RegisterGroup(grp ...IGroup) {
+	for _, g := range grp {
+		self.tree.Conbine(g.GetRoutes())
 	}
-
-	self.tree.Conbine(grp.GetRoutes())
 }
 
 func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -387,18 +386,14 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.activeConn[conn] = struct{}{}
 			s.mu.Unlock()
 		*/
-
 		msg, err := transport.ReadMessage(conn)
 		if err != nil {
 			logger.Info("rpc Read ", err.Error())
 		}
-
-		req := &transport.RpcRequest{
-			Message: msg,
-			Context: context.Background(),
-		}
-
-		self.ServeRPC(w, req)
+		sock := transport.NewTcpTransportSocket(conn, 0, 0)
+		req := transport.NewRpcRequest(r.Context(), msg, sock)
+		rsp := transport.NewRpcResponse(r.Context(), req, sock)
+		self.ServeRPC(rsp, req)
 	} else { // serve as a web server
 		// Pool 提供TResponseWriter
 		rsp := self.respPool.Get().(*transport.THttpResponse)
@@ -455,7 +450,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (self *TRouter) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
+func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest) {
 	reqMessage := r.Message // return the packet struct
 
 	// 心跳包 直接返回
@@ -470,7 +465,7 @@ func (self *TRouter) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 		err error
 	)
 
-	resMetadata := make(map[string]string)
+	//resMetadata := make(map[string]string)
 	//newCtx := context.WithValue(context.WithValue(ctx, share.ReqMetaDataKey, req.Metadata),
 	//	share.ResMetaDataKey, resMetadata)
 
@@ -499,39 +494,40 @@ func (self *TRouter) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 		} else {
 			// 获取RPC参数
 			// 获取控制器参数类型
-			var argv = self.objectPool.Get(route.handlers[0].ArgType)
-			err = coder.Decode(reqMessage.Payload, argv.Interface()) //反序列化获得参数值
+			///var argv = self.objectPool.Get(route.handlers[0].ArgType)
+			///err = coder.Decode(reqMessage.Payload, argv.Interface()) //反序列化获得参数值
 
-			if err != nil {
-				handleError(res, err)
-			} else {
+			///if err != nil {
+			///	handleError(res, err)
+			///} else {
 
-				p, has := self.rpcHandlerPool[route.Id]
-				if !has { // TODO 优化
-					p.New = func() interface{} {
-						return NewRpcHandler(self)
-					}
+			p, has := self.rpcHandlerPool[route.Id]
+			if !has { // TODO 优化
+				p.New = func() interface{} {
+					return NewRpcHandler(self)
 				}
-				ctx = p.Get().(*TRpcContext)
-				if !ctx.inited {
-					ctx.Router = self
-					ctx.route = *route
-					ctx.inited = true
-				}
-
-				ctx.reset(w, r, self, route)
-				ctx.argv = argv
-				ctx.replyv = self.objectPool.Get(route.handlers[0].ReplyType)
-
-				// 执行控制器
-				self.route(route, ctx)
 			}
+			ctx = p.Get().(*TRpcContext)
+			if !ctx.inited {
+				ctx.Router = self
+				ctx.route = *route
+				ctx.inited = true
+			}
+
+			ctx.reset(w, r, self, route)
+			//	ctx.argv = argv
+			//	ctx.replyv = self.objectPool.Get(route.handlers[0].ReplyType)
+
+			// 执行控制器
+			self.route(route, ctx)
+			///}
 		}
 	}
 
 	// 返回数据
 	if !reqMessage.IsOneway() {
 		// 序列化数据
+		/* remove 已经交由Body response处理
 		data, err := coder.Encode(ctx.replyv.Interface())
 		//argsReplyPools.Put(mtype.ReplyType, replyv)
 		if err != nil {
@@ -551,12 +547,11 @@ func (self *TRouter) ServeRPC(w transport.IResponse, r *transport.RpcRequest) {
 			}
 		}
 
-		var cnt int
-		cnt, err = w.Write(res.Payload)
+		err = w.Write(res.Payload)
 		if err != nil {
 			logger.Dbg(err.Error())
 		}
-		logger.Dbg("aa", cnt, string(res.Payload))
+		logger.Dbg("aa", string(res.Payload))*/
 	}
 
 	return

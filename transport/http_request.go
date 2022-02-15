@@ -6,7 +6,8 @@ import (
 
 type (
 	THttpRequest struct {
-		req *http.Request
+		Transport ITransport
+		req       *http.Request
 	}
 )
 

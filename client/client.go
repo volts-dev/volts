@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"time"
+
+	"github.com/volts-dev/volts/util/body"
 )
 
 type (
@@ -15,7 +17,7 @@ type (
 		////NewMessage(topic string, msg interface{}, opts ...MessageOption) Message
 		///NewRequest(service, endpoint string, req interface{}, reqOpts ...RequestOption) Request
 		//Call(ctx context.Context, req Request, rsp interface{} ) error
-		Call(ctx context.Context, request IRequest, response interface{}, opts ...CallOption) error
+		Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error)
 		//Stream(ctx context.Context, req Request, opts ...CallOption) (Stream, error)
 		//Publish(ctx context.Context, msg Message, opts ...PublishOption) error
 		//String() string
@@ -42,23 +44,25 @@ type (
 
 	// Response is the response received from a service
 	IResponse interface {
+		Body() *body.TBody
 		// Read the response
 		//Codec() codec.Reader
 		// read the header
 		Header() map[string]string
 		// Read the undecoded response
-		Read() ([]byte, error)
+		//Read(out interface{}) error
 	}
 )
 
 var (
 	// Default Client
 	DefaultClient IClient = NewRpcClient()
-
+	// DefaultRetry is the default check-for-retry function for retries
+	DefaultRetry = RetryOnError
 	// DefaultRetries is the default number of times a request is tried
 	DefaultRetries = 1
 	// DefaultRequestTimeout is the default request timeout
-	DefaultRequestTimeout = time.Second * 5
+	DefaultRequestTimeout = time.Second * 50 // TODO
 	// DefaultPoolSize sets the connection pool size
 	DefaultPoolSize = 100
 	// DefaultPoolTTL sets the connection pool ttl
@@ -72,8 +76,8 @@ var (
 //}
 
 // Makes a synchronous call to a service using the default client
-func Call(ctx context.Context, request IRequest, response interface{}, opts ...CallOption) error {
-	return DefaultClient.Call(ctx, request, response, opts...)
+func Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
+	return DefaultClient.Call(ctx, request, opts...)
 }
 
 // NewClient returns a new client

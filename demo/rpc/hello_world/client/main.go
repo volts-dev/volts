@@ -15,7 +15,7 @@ func main() {
 	req := client.NewHttpRequest(service, endpoint, nil)
 
 	// test calling remote address
-	if err := client.Call(context.Background(), req, nil, client.WithAddress(address)); err != nil {
+	if _, err := client.Call(context.Background(), req, client.WithAddress(address)); err != nil {
 		logger.Err("call with address error:", err)
 	}
 }

@@ -8,25 +8,26 @@ type httpRequest struct {
 	service     string
 	method      string
 	contentType string
-	request     interface{}
+	body        interface{}
 	opts        RequestOptions
 }
 
-func NewHttpRequest(service, method string, request interface{}, reqOpts ...RequestOption) *httpRequest {
-	var opts RequestOptions
-	for _, o := range reqOpts {
-		o(&opts)
+func NewHttpRequest(service, method string, data interface{}, opts ...RequestOption) *httpRequest {
+	var reqOpts RequestOptions
+	for _, o := range opts {
+		o(&reqOpts)
 	}
 
 	req := &httpRequest{
-		service: service,
-		method:  method,
-		request: request,
-		opts:    opts,
+		service:     service,
+		method:      method,
+		body:        data,
+		opts:        reqOpts,
+		contentType: codec.Bytes.String(),
 	}
 
-	if len(opts.ContentType) == 0 {
-		req.contentType = opts.ContentType
+	if len(reqOpts.ContentType) > 0 {
+		req.contentType = reqOpts.ContentType
 	}
 
 	return req
@@ -48,12 +49,12 @@ func (h *httpRequest) Endpoint() string {
 	return h.method
 }
 
-func (h *httpRequest) Codec() codec.ICodec {
+func (h *httpRequest) __Codec() codec.ICodec {
 	return nil
 }
 
 func (h *httpRequest) Body() interface{} {
-	return h.request
+	return h.body
 }
 
 func (h *httpRequest) Stream() bool {

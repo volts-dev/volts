@@ -14,7 +14,6 @@ import (
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 	vrouter "github.com/volts-dev/volts/router"
-
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -90,13 +89,13 @@ func newConfig(opts ...Option) *Config {
 		opt(cfg)
 	}
 
+	if cfg.Transport == nil {
+		cfg.Transport = transport.NewHTTPTransport()
+	}
+
 	// if not special router use the default
 	if cfg.Router == nil {
 		cfg.Router = vrouter.NewRouter()
-	}
-
-	if cfg.Transport == nil {
-		cfg.Transport = transport.NewHTTPTransport()
 	}
 
 	return cfg

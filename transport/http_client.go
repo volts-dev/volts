@@ -17,11 +17,11 @@ import (
 
 type (
 	httpTransportClient struct {
-		ht     *httpTransport
-		addr   string
-		conn   net.Conn
-		config DialConfig
-		once   sync.Once
+		transport *httpTransport
+		addr      string
+		conn      net.Conn
+		config    DialConfig
+		once      sync.Once
 
 		sync.RWMutex
 
@@ -80,8 +80,8 @@ func (h *httpTransportClient) Send(m *Message) error {
 	h.Unlock()
 
 	// set timeout if its greater than 0
-	if h.ht.config.WriteTimeout > time.Duration(0) {
-		h.conn.SetDeadline(time.Now().Add(h.ht.config.WriteTimeout))
+	if h.transport.config.WriteTimeout > time.Duration(0) {
+		h.conn.SetDeadline(time.Now().Add(h.transport.config.WriteTimeout))
 	}
 
 	return req.Write(h.conn)
@@ -102,8 +102,8 @@ func (h *httpTransportClient) Recv(m *Message) error {
 	}
 
 	// set timeout if its greater than 0
-	if h.ht.config.ReadTimeout > time.Duration(0) {
-		h.conn.SetDeadline(time.Now().Add(h.ht.config.ReadTimeout))
+	if h.transport.config.ReadTimeout > time.Duration(0) {
+		h.conn.SetDeadline(time.Now().Add(h.transport.config.ReadTimeout))
 	}
 
 	rsp, err := http.ReadResponse(h.buff, r)

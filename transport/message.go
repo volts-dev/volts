@@ -64,8 +64,9 @@ type (
 		*Bom                      // 字节码
 		Path    string            // the path
 		Header  map[string]string // 消息头
-		Payload []byte            // 主题内容
 		Body    []byte            // 消息主体
+		Payload []byte            // 消息主体中的内容
+
 	}
 )
 
@@ -75,7 +76,9 @@ func newMessage() *Message {
 	bom[0] = MagicNumber
 
 	return &Message{
-		Bom: &bom,
+		Bom:    &bom,
+		Header: make(map[string]string), //TODO 优化替代或者删除
+
 	}
 }
 

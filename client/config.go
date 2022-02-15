@@ -129,13 +129,13 @@ func newConfig(opts ...Option) *Config {
 		Retries: 3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,
-		SerializeType:  codec.JSON,
+		SerializeType:  codec.MsgPack,
 		CompressType:   transport.None,
 		BackupLatency:  10 * time.Millisecond,
 
 		CallOptions: CallOptions{
 			//Backoff:        DefaultBackoff,
-			//Retry:          DefaultRetry,
+			Retry:          DefaultRetry,
 			Retries:        DefaultRetries,
 			RequestTimeout: DefaultRequestTimeout,
 			DialTimeout:    transport.DefaultTimeout,
@@ -160,6 +160,12 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
+func WithContentType(c string) RequestOption {
+	return func(cfg *RequestOptions) {
+		cfg.ContentType = c
+	}
+}
+
 // WithRequestTimeout is a CallOption which overrides that which
 // set in Options.CallOptions
 func WithRequestTimeout(d time.Duration) CallOption {
@@ -172,6 +178,13 @@ func WithRequestTimeout(d time.Duration) CallOption {
 func WithAddress(a ...string) CallOption {
 	return func(o *CallOptions) {
 		o.Address = a
+	}
+}
+
+// Codec to be used to encode/decode requests for a given content type
+func WithCodec(c codec.SerializeType) Option {
+	return func(cfg *Config) {
+		cfg.SerializeType = c
 	}
 }
 

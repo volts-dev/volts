@@ -14,13 +14,7 @@ var (
 
 	msgPool = sync.Pool{
 		New: func() interface{} {
-			bom := Bom([12]byte{})
-			bom[0] = MagicNumber
-
-			return &Message{
-				Bom:    &bom,
-				Header: make(map[string]string), //TODO 优化替代或者删除
-			}
+			return newMessage()
 		},
 	}
 )

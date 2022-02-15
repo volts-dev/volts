@@ -18,6 +18,7 @@ import (
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
+	"github.com/volts-dev/volts/util/body"
 	"github.com/volts-dev/volts/util/pool"
 )
 
@@ -170,7 +171,7 @@ func (h *httpClient) newHTTPCodec(contentType string) (codec.ICodec, error) {
 	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
 }
 
-func (h *httpClient) call(ctx context.Context, node *registry.Node, req IRequest, rsp interface{}, opts CallOptions) error {
+func (h *httpClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
 	// set the address
 	address := node.Address
 	header := make(http.Header)
@@ -183,19 +184,19 @@ func (h *httpClient) call(ctx context.Context, node *registry.Node, req IRequest
 	// set timeout in nanoseconds
 	header.Set("Timeout", fmt.Sprintf("%d", opts.RequestTimeout))
 	// set the content type for the request
-	header.Set("Content-Type", req.ContentType())
+	header.Set("Content-Type", req.ContentType()) // TODO 自动类型
 
 	// get codec
 	cf, err := h.newHTTPCodec(req.ContentType())
 	if err != nil {
-		return errors.InternalServerError("http.client", err.Error())
+		return nil, errors.InternalServerError("http.client", err.Error())
 	}
 
 	// marshal request
 	data := make([]byte, 0)
 	err = cf.Decode(req.Body().([]byte), data)
 	if err != nil {
-		return errors.InternalServerError("http.client", err.Error())
+		return nil, errors.InternalServerError("http.client", err.Error())
 	}
 
 	buf := &buffer{bytes.NewBuffer(data)}
@@ -217,26 +218,31 @@ func (h *httpClient) call(ctx context.Context, node *registry.Node, req IRequest
 	// make the request
 	hrsp, err := h.client.Do(hreq.WithContext(ctx))
 	if err != nil {
-		return errors.InternalServerError("http.client", err.Error())
+		return nil, errors.InternalServerError("http.client", err.Error())
 	}
 	defer hrsp.Body.Close()
 
 	// parse response
 	b, err := ioutil.ReadAll(hrsp.Body)
 	if err != nil {
-		return errors.InternalServerError("http.client", err.Error())
+		return nil, errors.InternalServerError("http.client", err.Error())
+	}
+
+	bd := &body.TBody{}
+	bd.Data.Write(b)
+	rsp := &httpResponse{
+		body: bd,
 	}
 
 	// unmarshal
-	if err := cf.Decode(b, rsp); err != nil {
-		return errors.InternalServerError("http.client", err.Error())
+	if err := cf.Decode(b, rsp.body); err != nil {
+		return nil, errors.InternalServerError("http.client", err.Error())
 	}
-
-	return nil
+	return rsp, nil
 }
 
 // 阻塞请求
-func (self *httpClient) Call(ctx context.Context, request IRequest, response interface{}, opts ...CallOption) error {
+func (self *httpClient) Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	for _, opt := range opts {
@@ -246,7 +252,7 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, response int
 	// get next nodes from the selector
 	next, err := self.next(request, callOpts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// check if we already have a deadline
@@ -264,7 +270,7 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, response int
 	// should we noop right here?
 	select {
 	case <-ctx.Done():
-		return errors.New("http.client", fmt.Sprintf("%v", ctx.Err()), 408)
+		return nil, errors.New("http.client", fmt.Sprintf("%v", ctx.Err()), 408)
 	default:
 	}
 
@@ -277,7 +283,7 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, response int
 	//}
 
 	// return errors.New("http.client", "request timeout", 408)
-	call := func(i int) error {
+	call := func(i int, response IResponse) error {
 		// call backoff first. Someone may want an initial start delay
 		/*t, err := callOpts.Backoff(ctx, request, i)
 		if err != nil {
@@ -298,41 +304,41 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, response int
 		}
 
 		// make the call
-		err = hcall(ctx, node, request, response, callOpts)
+		response, err = hcall(ctx, node, request, callOpts)
 		self.config.Selector.Mark(request.Service(), node, err)
 		return err
 	}
 
 	ch := make(chan error, callOpts.Retries)
 	var gerr error
-
+	var response IResponse
 	// 调用
 	for i := 0; i < callOpts.Retries; i++ {
 		go func() {
-			ch <- call(i)
+			ch <- call(i, response)
 		}()
 
 		select {
 		case <-ctx.Done():
-			return errors.New("http.client", fmt.Sprintf("%v", ctx.Err()), 408)
+			return nil, errors.New("http.client", fmt.Sprintf("%v", ctx.Err()), 408)
 		case err := <-ch:
 			// if the call succeeded lets bail early
 			if err == nil {
-				return nil
+				return nil, nil
 			}
 
 			retry, rerr := callOpts.Retry(ctx, request, i, err)
 			if rerr != nil {
-				return rerr
+				return nil, rerr
 			}
 
 			if !retry {
-				return err
+				return nil, err
 			}
 
 			gerr = err
 		}
 	}
 
-	return gerr
+	return response, gerr
 }

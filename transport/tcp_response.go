@@ -1,40 +1,49 @@
 package transport
 
 import (
-	"bufio"
-	"net"
-	"reflect"
+	"context"
+
+	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/util/body"
 )
 
 type RpcResponse struct {
-	conn net.Conn
-	req  *RpcRequest   // request for this response
-	w    *bufio.Writer // buffers output in chunks to chunkWriter
-	Val  reflect.Value
+	body    *body.TBody //
+	sock    ISocket
+	Request *RpcRequest // request for this response
 }
 
-// 写状态
+func NewRpcResponse(ctx context.Context, req *RpcRequest, socket ISocket) *RpcResponse {
+	body := &body.TBody{
+		Codec: codec.IdentifyCodec(req.Message.SerializeType()),
+	}
+
+	return &RpcResponse{
+		sock:    socket,
+		Request: req,
+		body:    body,
+	}
+}
+
+func (self *RpcResponse) Body() *body.TBody {
+	return self.body
+}
+
+// TODO 写状态
 func (self *RpcResponse) WriteHeader(code MessageType) {
-	self.req.Message.SetMessageType(code)
-}
-func (self *RpcResponse) Write(data []byte) (n int, err error) {
-	//n = len(data)
-	return self.write(data)
+	self.Request.Message.SetMessageType(code)
 }
 
-func (self *RpcResponse) write(data []byte) (n int, err error) {
-	msg := self.req.Message
-	msg.Payload = data
-
+func (self *RpcResponse) Write(data interface{}) error {
 	self.WriteHeader(MT_RESPONSE)
-	data = msg.Encode()
-	//n, err = self.conn.Write(data)
-	return self.conn.Write(data)
-}
 
-func (w *RpcResponse) finishRequest() {
+	msg := self.Request.Message
+	err := self.body.Write(data)
+	if err != nil {
+		return err
+	}
 
-}
-func (self *RpcResponse) Value() reflect.Value {
-	return self.Val
+	msg.Payload = self.Body().Data.Bytes()
+
+	return self.sock.Send(msg)
 }

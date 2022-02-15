@@ -17,8 +17,8 @@ type (
 	TRpcContext struct {
 		log.ILogger
 		context      context.Context
-		response     transport.IResponse   //http.ResponseWriter
-		request      *transport.RpcRequest //
+		response     *transport.RpcResponse //http.ResponseWriter
+		request      *transport.RpcRequest  //
 		Router       *TRouter
 		route        route //执行本次Handle的Route
 		inited       bool
@@ -52,6 +52,14 @@ func NewRpcHandler(router *TRouter) *TRpcContext {
 	handler.val = reflect.ValueOf(handler)
 	handler.typ = handler.val.Type()
 	return handler
+}
+
+func (self *TRpcContext) Request() *transport.RpcRequest {
+	return self.request
+}
+
+func (self *TRpcContext) Response() *transport.RpcResponse {
+	return self.response
 }
 
 func (self *TRpcContext) Route() route {
@@ -91,7 +99,7 @@ func (self *TRpcContext) TypeModel() reflect.Type {
 	return self.typ
 }
 
-func (self *TRpcContext) reset(rw transport.IResponse, req *transport.RpcRequest, Router IRouter, Route *route) {
+func (self *TRpcContext) reset(rw *transport.RpcResponse, req *transport.RpcRequest, Router IRouter, Route *route) {
 	self.request = req
 	self.response = rw
 }

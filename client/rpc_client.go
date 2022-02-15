@@ -11,6 +11,7 @@ import (
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
+	"github.com/volts-dev/volts/util/body"
 	vnet "github.com/volts-dev/volts/util/net"
 	"github.com/volts-dev/volts/util/pool"
 )
@@ -57,10 +58,10 @@ func (self *rpcClient) Config() *Config {
 
 // 新建请求
 func (self *rpcClient) NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) IRequest {
-	return NewRpcRequest(service, method, request, self.config.ContentType, reqOpts...)
+	return NewRpcRequest(service, method, request, reqOpts...)
 }
 
-func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IRequest, resp interface{}, opts CallOptions) error {
+func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
 	address := node.Address
 
 	msg := transport.GetMessageFromPool()
@@ -91,7 +92,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		//call.Error = rpc.ErrUnsupportedCodec
 		//client.mutex.Unlock()
 		//call.done()
-		return errors.UnsupportedCodec("volts.client", self.config.SerializeType)
+		return nil, errors.UnsupportedCodec("volts.client", self.config.SerializeType)
 	}
 
 	dOpts := []transport.DialOption{
@@ -105,7 +106,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	// 获取空闲链接
 	conn, err := self.pool.Get(address, dOpts...)
 	if err != nil {
-		return errors.InternalServerError("volts.client", "connection error: %v", err)
+		return nil, errors.InternalServerError("volts.client", "connection error: %v", err)
 	}
 
 	msg.Path = req.Service()
@@ -114,14 +115,14 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		logger.Dbg("odec.Encode(call.Args)", err.Error())
 		//call.Error = err
 		//call.done()
-		return err
+		return nil, err
 	}
 	if len(data) > 1024 && self.config.CompressType == transport.Gzip {
 		data, err = transport.Zip(data)
 		if err != nil {
 			//call.Error = err
 			//call.done()
-			return err
+			return nil, err
 		}
 
 		msg.SetCompressType(self.config.CompressType)
@@ -134,7 +135,10 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	// wait for error response
 	ch := make(chan error, 1)
 
-	go func() {
+	resp := &rpcResponse{
+		//body: []byte{},
+	}
+	go func(resp *rpcResponse) {
 		defer func() {
 			if r := recover(); r != nil {
 				ch <- errors.InternalServerError("volts.client", "panic recovered: %v", r)
@@ -157,32 +161,41 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 			return
 		}
 
-		// 解码消息内容
-		data := msg.Payload
-		if len(data) > 0 {
-			msgCodece := codec.IdentifyCodec(msg.SerializeType())
-			if msgCodece == nil {
-				//call.Error = ServiceError(ErrUnsupportedCodec.Error())
-				ch <- errors.UnsupportedCodec("volts.client", msg.SerializeType())
-				return
-			} else {
-				// 解码内容
-				err = msgCodece.Decode(data, resp)
-				if err != nil {
-					ch <- err
-					return
-				}
-			}
+		b := &body.TBody{
+			Codec: codec.IdentifyCodec(msg.SerializeType()),
 		}
+		b.Data.Write(msg.Payload)
+		// 解码消息内容
+		resp.contentType = msg.SerializeType()
+		resp.body = b // msg.Payload
+		/*
+			///	移动到reponse里处理
+				data := msg.Payload
+				if len(data) > 0 {
+					msgCodece := codec.IdentifyCodec(msg.SerializeType())
+					if msgCodece == nil {
+						//call.Error = ServiceError(ErrUnsupportedCodec.Error())
+						ch <- errors.UnsupportedCodec("volts.client", msg.SerializeType())
+						return
+					} else {
 
+						// 解码内容
+						err = msgCodece.Decode(data, &resp.body)
+						if err != nil {
+							ch <- err
+							return
+						}
+					}
+				}
+		*/
 		// success
 		ch <- nil
-	}()
+	}(resp)
 
 	var grr error
 	select {
 	case err := <-ch:
-		return err
+		return resp, err
 	case <-ctx.Done():
 		grr = errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
 		break
@@ -194,14 +207,14 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		//stream.err = grr
 		//stream.Unlock()
 
-		return grr
+		return nil, grr
 	}
 
-	return nil
+	return resp, nil
 }
 
 // 阻塞请求
-func (self *rpcClient) Call(ctx context.Context, request IRequest, response interface{}, opts ...CallOption) error {
+func (self *rpcClient) Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	for _, opt := range opts {
@@ -210,7 +223,7 @@ func (self *rpcClient) Call(ctx context.Context, request IRequest, response inte
 
 	next, err := self.next(request, callOpts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// check if we already have a deadline
@@ -230,52 +243,52 @@ func (self *rpcClient) Call(ctx context.Context, request IRequest, response inte
 	// should we noop right here?
 	select {
 	case <-ctx.Done():
-		return errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
+		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
 	default:
 	}
 
 	// return errors.New("volts.client", "request timeout", 408)
-	call := func(i int) error {
+	call := func(i int, response *IResponse) error {
 		// select next node
 		node, err := next()
 		// make the call
-		err = self.call(ctx, node, request, response, callOpts)
+		*response, err = self.call(ctx, node, request, callOpts)
 		//r.opts.Selector.Mark(service, node, err)
 		return err
 	}
-
+	var response IResponse
 	// get the retries
 	retries := callOpts.Retries
 	ch := make(chan error, retries+1)
 	var gerr error
 	for i := 0; i <= retries; i++ {
-		go func(i int) {
-			ch <- call(i)
-		}(i)
+		go func(i int, response *IResponse) {
+			ch <- call(i, response)
+		}(i, &response)
 
 		select {
 		case <-ctx.Done():
-			return errors.Timeout("volts.client", fmt.Sprintf("call timeout: %v", ctx.Err()))
+			return nil, errors.Timeout("volts.client", fmt.Sprintf("call timeout: %v", ctx.Err()))
 		case err := <-ch:
 			// if the call succeeded lets bail early
 			if err == nil {
-				return nil
+				return response, nil
 			}
 
 			retry, rerr := callOpts.Retry(ctx, request, i, err)
 			if rerr != nil {
-				return rerr
+				return nil, rerr
 			}
 
 			if !retry {
-				return err
+				return nil, err
 			}
 
 			gerr = err
 		}
 	}
 
-	return gerr
+	return response, gerr
 }
 
 // next returns an iterator for the next nodes to call
