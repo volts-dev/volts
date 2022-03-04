@@ -75,7 +75,7 @@ func newConfig(opts ...Option) *Config {
 		Name:             DefaultName,
 		Logger:           logger,
 		Bus:              bus.DefaultBus,
-		Registry:         registry.DefaultRegistry,
+		Registry:         registry.Default(),
 		Codecs:           make(map[string]codec.ICodec),
 		Metadata:         map[string]string{},
 		Address:          DefaultAddress,
@@ -95,7 +95,7 @@ func newConfig(opts ...Option) *Config {
 
 	// if not special router use the default
 	if cfg.Router == nil {
-		cfg.Router = vrouter.NewRouter()
+		cfg.Router = vrouter.New()
 	}
 
 	return cfg

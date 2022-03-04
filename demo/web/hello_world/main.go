@@ -28,7 +28,7 @@ func (self ctrls) macth_all(hd *router.THttpContext) {
 }
 
 func main() {
-	r := router.NewRouter()
+	r := router.New()
 	r.Url("GET", "/", func(hd *router.THttpContext) {
 		hd.Respond([]byte("Hello World"))
 	})
@@ -41,14 +41,14 @@ func main() {
 		router.PrintRequest(),
 	)
 
-	srv := server.NewServer(
+	srv := server.New(
 		server.Address(":16888"),
 		server.Router(r),
 	)
 
 	app := volts.NewService(
 		volts.Server(srv),
-		volts.Registry(etcd.NewRegistry()),
+		volts.Registry(etcd.New()),
 	)
 	app.Run()
 }

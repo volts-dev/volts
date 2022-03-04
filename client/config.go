@@ -143,8 +143,8 @@ func newConfig(opts ...Option) *Config {
 		PoolSize: DefaultPoolSize,
 		PoolTTL:  DefaultPoolTTL,
 		//	Broker:    broker.DefaultBroker,
-		Selector: selector.DefaultSelector,
-		Registry: registry.DefaultRegistry,
+		Selector: selector.Default(),
+		Registry: registry.Default(),
 	}
 
 	cfg.Init(opts...)

@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	DefaultSelector = NewSelector()
+	defaultSelector = New()
 
 	ErrNotFound      = errors.New("not found")
 	ErrNoneAvailable = errors.New("none available")
@@ -43,7 +43,7 @@ type (
 	Strategy func([]*registry.Service) Next
 )
 
-func NewSelector(opts ...Option) ISelector {
+func New(opts ...Option) ISelector {
 	cfg := &Config{
 		Strategy: Random,
 	}
@@ -53,7 +53,7 @@ func NewSelector(opts ...Option) ISelector {
 	}
 
 	if cfg.Registry == nil {
-		cfg.Registry = registry.DefaultRegistry
+		cfg.Registry = registry.Default()
 	}
 
 	s := &registrySelector{
@@ -62,4 +62,15 @@ func NewSelector(opts ...Option) ISelector {
 	s.rc = s.newCache()
 
 	return s
+}
+
+func Default(new ...ISelector) ISelector {
+	if new != nil {
+		defaultSelector = new[0]
+	} else {
+		if defaultSelector == nil {
+			defaultSelector = New()
+		}
+	}
+	return defaultSelector
 }

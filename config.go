@@ -32,9 +32,9 @@ type (
 func NewConfig(opts ...Option) *Config {
 	DefaultTransport := transport.NewHTTPTransport()
 	cfg := &Config{
-		Client:    client.DefaultClient,
-		Server:    server.NewServer(server.Transport(DefaultTransport)),
-		Registry:  registry.NewMdnsRegistry(),
+		Client:    client.Default(),
+		Server:    server.New(server.Transport(DefaultTransport)),
+		Registry:  registry.New(),
 		Transport: DefaultTransport,
 		Context:   context.Background(),
 	}

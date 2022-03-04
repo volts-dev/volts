@@ -33,7 +33,7 @@ type etcdRegistry struct {
 	leases   map[string]clientv3.LeaseID
 }
 
-func NewRegistry(opts ...registry.Option) registry.IRegistry {
+func New(opts ...registry.Option) registry.IRegistry {
 	reg := &etcdRegistry{
 		config:   &registry.Config{},
 		register: make(map[string]uint64),

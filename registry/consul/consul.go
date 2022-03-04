@@ -39,7 +39,7 @@ func init() {
 	//cmd.DefaultRegistries["consul"] = NewRegistry
 }
 
-func NewRegistry(opts ...registry.Option) registry.IRegistry {
+func New(opts ...registry.Option) registry.IRegistry {
 	cr := &consulRegistry{
 		opts:        &registry.Config{},
 		register:    make(map[string]uint64),

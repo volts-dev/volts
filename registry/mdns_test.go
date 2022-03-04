@@ -63,7 +63,7 @@ func TestMDNS(t *testing.T) {
 	}
 
 	// new registry
-	r := NewMdnsRegistry(opts...)
+	r := New(opts...)
 
 	for _, service := range testData {
 		// register service
@@ -283,7 +283,7 @@ func TestWatcher(t *testing.T) {
 	}
 
 	// new registry
-	r := NewMdnsRegistry(opts...)
+	r := New(opts...)
 
 	w, err := r.Watch()
 	if err != nil {

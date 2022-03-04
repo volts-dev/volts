@@ -56,7 +56,7 @@ type (
 
 var (
 	// Default Client
-	DefaultClient IClient = NewRpcClient()
+	defaultClient IClient = NewRpcClient()
 	// DefaultRetry is the default check-for-retry function for retries
 	DefaultRetry = RetryOnError
 	// DefaultRetries is the default number of times a request is tried
@@ -77,10 +77,14 @@ var (
 
 // Makes a synchronous call to a service using the default client
 func Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
-	return DefaultClient.Call(ctx, request, opts...)
+	return defaultClient.Call(ctx, request, opts...)
 }
 
 // NewClient returns a new client
-func NewClient(opts ...Option) IClient {
+func New(opts ...Option) IClient {
 	return NewRpcClient(opts...)
+}
+
+func Default() IClient {
+	return defaultClient
 }

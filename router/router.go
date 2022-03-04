@@ -16,6 +16,8 @@ import (
 	"github.com/volts-dev/volts/transport"
 )
 
+var defaultRouter *TRouter
+
 type (
 	// Router handle serving messages
 	IRouter interface {
@@ -124,7 +126,7 @@ func slice(s string) []string {
 	return sl
 }
 
-func NewRouter() *TRouter {
+func New() *TRouter {
 	cfg := newConfig()
 	router := &TRouter{
 		TGroup:     *NewGroup(),
@@ -140,6 +142,14 @@ func NewRouter() *TRouter {
 	go router.watch()   // 实时订阅
 	go router.refresh() // 定时刷新
 	return router
+}
+
+func Default() *TRouter {
+	if defaultRouter == nil {
+		defaultRouter = New()
+	}
+
+	return defaultRouter
 }
 
 func (self *TRouter) PrintRoutes() {

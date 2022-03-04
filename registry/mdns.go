@@ -52,7 +52,8 @@ type (
 	}
 )
 
-func NewMdnsRegistry(opts ...Option) IRegistry {
+//NewMdnsRegistry
+func New(opts ...Option) IRegistry {
 	cfg := newConfig()
 
 	for _, opt := range opts {

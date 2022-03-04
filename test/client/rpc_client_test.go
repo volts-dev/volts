@@ -14,10 +14,10 @@ import (
 )
 
 func TestHelloworld(t *testing.T) {
-	r := router.NewRouter()
+	r := router.New()
 	r.Url("CONNECT", "Arith", new(test.ArithCtrl))
 
-	srv := server.NewServer(
+	srv := server.New(
 		server.Router(r),
 	)
 

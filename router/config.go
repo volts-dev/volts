@@ -37,7 +37,7 @@ func newConfig(opts ...Option) *Config {
 	cfg.Init(opts...)
 
 	if cfg.Registry == nil {
-		cfg.Registry = registry.DefaultRegistry
+		cfg.Registry = registry.Default()
 		cfg.RegistryCacher = cacher.New(cfg.Registry)
 	}
 

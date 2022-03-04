@@ -3,7 +3,7 @@ package registry
 import "errors"
 
 var (
-	DefaultRegistry = NewMdnsRegistry()
+	defaultRegistry IRegistry
 
 	// Not found error when GetService is called
 	ErrNotFound = errors.New("service not found")
@@ -73,6 +73,17 @@ type (
 		Values []*Value `json:"values"`
 	}
 )
+
+func Default(new ...IRegistry) IRegistry {
+	if new != nil {
+		defaultRegistry = new[0]
+	} else {
+		if defaultRegistry == nil {
+			defaultRegistry = New()
+		}
+	}
+	return defaultRegistry
+}
 
 // 比对服务节点UID是否一致，
 func (self Service) Equal(to *Service) bool {

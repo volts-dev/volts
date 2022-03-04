@@ -28,11 +28,11 @@ func (action ctrls) delete(hd *router.THttpContext) {
 }
 
 func main() {
-	r := router.NewRouter()
+	r := router.New()
 	//r.RegisterMiddleware(event.NewEvent())
 	r.Url("REST", "/ctrls", new(ctrls))
 
-	srv := server.NewServer()
+	srv := server.New()
 
 	// serve as a http server
 	app := volts.NewService(

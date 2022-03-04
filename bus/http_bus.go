@@ -83,7 +83,7 @@ func newTransport(config *tls.Config) *http.Transport {
 func NewHttpBus(opts ...Option) *httpBus {
 	cfg := &Config{
 		Codec:    codec.IdentifyCodec(codec.JSON),
-		Registry: registry.DefaultRegistry,
+		Registry: registry.Default(),
 		Context:  context.TODO(),
 	}
 
@@ -202,7 +202,7 @@ func (self *httpBus) Listen() error { // 开始阻塞监听
 	// get registry
 	reg := self.config.Registry
 	if reg == nil {
-		reg = registry.DefaultRegistry
+		reg = registry.Default()
 	}
 	// set cache
 	//self.r = cache.New(reg)

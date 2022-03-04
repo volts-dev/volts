@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	defaultServer           *TServer
 	DefaultAddress          = ":0"
 	DefaultName             = "volts.server"
 	DefaultVersion          = "latest"
@@ -71,7 +72,7 @@ type (
 )
 
 // new a server for the service node
-func NewServer(opts ...Option) *TServer {
+func New(opts ...Option) *TServer {
 	cfg := newConfig(opts...)
 
 	//router.hdlrWrappers = options.HdlrWrappers
@@ -85,6 +86,14 @@ func NewServer(opts ...Option) *TServer {
 		exit:       make(chan chan error),
 		wg:         &sync.WaitGroup{},
 	}
+}
+
+func Default() *TServer {
+	if defaultServer == nil {
+		defaultServer = New()
+	}
+
+	return defaultServer
 }
 
 func (self *TServer) Init(opts ...Option) error {

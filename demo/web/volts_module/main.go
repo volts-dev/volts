@@ -9,12 +9,12 @@ import (
 )
 
 func main() {
-	r := router.NewRouter()
+	r := router.New()
 	r.RegisterGroup(base.Base)
 	r.RegisterGroup(web.Web)
 
 	r.SetTemplateVar("VOLTS", "Hi Guy")
-	srv := server.NewServer(
+	srv := server.New(
 		server.Router(r),
 	)
 
