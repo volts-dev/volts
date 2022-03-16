@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asim/go-micro/v3/logger"
+	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/registry"
 	util "github.com/volts-dev/volts/util/registry"
 	"golang.org/x/sync/singleflight"
@@ -352,8 +352,8 @@ func (c *cache) run() {
 			c.setStatus(err)
 
 			if a > 3 {
-				if logger.V(logger.DebugLevel, logger.DefaultLogger) {
-					logger.Debug("rcache: ", err, " backing off ", d)
+				if log.GetLevel() == logger.LevelDebug {
+					log.Dbg("rcache: ", err, " backing off ", d)
 				}
 				a = 0
 			}
@@ -377,8 +377,8 @@ func (c *cache) run() {
 			c.setStatus(err)
 
 			if b > 3 {
-				if logger.V(logger.DebugLevel, logger.DefaultLogger) {
-					logger.Debug("rcache: ", err, " backing off ", d)
+				if log.GetLevel() == logger.LevelDebug {
+					log.Dbg("rcache: ", err, " backing off ", d)
 				}
 				b = 0
 			}

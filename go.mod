@@ -7,6 +7,7 @@ require (
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/consul/api v1.12.0
+	github.com/miekg/dns v1.1.46
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/refraction-networking/utls v1.0.0
 	github.com/spf13/viper v1.10.1

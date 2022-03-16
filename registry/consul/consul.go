@@ -12,7 +12,6 @@ import (
 	"time"
 
 	consul "github.com/hashicorp/consul/api"
-	//"github.com/asim/go-micro/v3/cmd"
 	hash "github.com/mitchellh/hashstructure"
 	"github.com/volts-dev/volts/registry"
 	mnet "github.com/volts-dev/volts/util/net"

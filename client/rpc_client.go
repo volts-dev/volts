@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/asim/go-micro/v3/metadata"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/metadata"
 	vnet "github.com/volts-dev/volts/util/net"
 	"github.com/volts-dev/volts/util/pool"
 )

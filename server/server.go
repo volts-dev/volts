@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asim/go-micro/v3/metadata"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/util/addr"
 	"github.com/volts-dev/volts/util/backoff"
+	"github.com/volts-dev/volts/util/metadata"
 	vnet "github.com/volts-dev/volts/util/net"
 )
 

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asim/go-micro/v3/util/buf"
+	"github.com/volts-dev/volts/util/buf"
 )
 
 type (

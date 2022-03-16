@@ -16,7 +16,28 @@ func TestProxy(t *testing.T) {
 		server.Router(r),
 	)
 
-	app := volts.NewService(
+	app := volts.New(
+		volts.Server(srv),
+		//volts.Transport(transport.NewTCPTransport()),
+		volts.Debug(),
+	)
+
+	app.Run()
+
+}
+
+func TestRecover(t *testing.T) {
+	r := router.New()
+	r.Url("GET", "/", func(ctx *router.THttpContext) {
+		p := ctx.PathParams()
+		p.FieldByName("query").AsString()
+	})
+
+	srv := server.New(
+		server.Router(r),
+	)
+
+	app := volts.New(
 		volts.Server(srv),
 		//volts.Transport(transport.NewTCPTransport()),
 		volts.Debug(),

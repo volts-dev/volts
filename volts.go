@@ -39,7 +39,7 @@ type (
 )
 
 // NewService creates and returns a new Service based on the packages within.
-func NewService(opts ...Option) IService {
+func New(opts ...Option) IService {
 	return &service{
 		config: NewConfig(opts...),
 	}

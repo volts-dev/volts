@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	maddr "github.com/asim/go-micro/v3/util/addr"
+	maddr "github.com/volts-dev/volts/util/addr"
 	vnet "github.com/volts-dev/volts/util/net"
 	vtls "github.com/volts-dev/volts/util/tls"
 

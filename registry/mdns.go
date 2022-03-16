@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/asim/go-micro/v3/util/mdns"
 	"github.com/google/uuid"
+	"github.com/volts-dev/volts/util/mdns"
 )
 
 type (

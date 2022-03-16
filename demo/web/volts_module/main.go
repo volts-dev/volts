@@ -19,7 +19,7 @@ func main() {
 	)
 
 	// serve as a http server
-	app := volts.NewService(
+	app := volts.New(
 		volts.Server(srv),
 		volts.Debug(),
 	)

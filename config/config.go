@@ -67,8 +67,8 @@ func (self *Config) Save() error {
 	return nil
 }
 
-func (self *Config) GetBool(key string) bool {
-	return self.fmt.GetBool(key)
+func (self *Config) GetBool(key string, defaultValue bool) bool {
+	return self.fmt.GetBool(key, defaultValue)
 }
 
 // GetStringValue from default namespace
@@ -93,14 +93,22 @@ func (self *Config) GetIntSlice(key string, defaultValue []int) []int {
 	return self.fmt.GetIntSlice(key, defaultValue)
 }
 
-func (self *Config) GetTime(key string) time.Time {
-	return self.fmt.GetTime(key)
+func (self *Config) GetTime(key string, defaultValue time.Time) time.Time {
+	return self.fmt.GetTime(key, defaultValue)
 }
 
-func (self *Config) GetFloat64(key string) float64 {
-	return self.fmt.GetFloat64(key)
+func (self *Config) GetDuration(key string, defaultValue time.Duration) time.Duration {
+	return self.fmt.GetDuration(key, defaultValue)
+}
+
+func (self *Config) GetFloat64(key string, defaultValue float64) float64 {
+	return self.fmt.GetFloat64(key, defaultValue)
 }
 
 func (self *Config) SetValue(key string, value interface{}) {
 	self.fmt.SetValue(key, value)
+}
+
+func (self *Config) UnmarshalKey(key string, rawVal interface{}) {
+	self.fmt.UnmarshalKey(key, rawVal)
 }

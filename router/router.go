@@ -304,6 +304,11 @@ func (self *TRouter) refresh() {
 
 		// for each service, get service and store endpoints
 		for _, s := range services {
+			if self.config.Registry.CurrentService().Equal(s) {
+				// 不添加自己
+				continue
+			}
+
 			service, err := self.config.RegistryCacher.GetService(s.Name)
 			if err != nil {
 				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {

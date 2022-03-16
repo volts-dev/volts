@@ -20,7 +20,8 @@ func newFormat() *format {
 	}
 }
 
-func (self *format) GetBool(key string) bool {
+func (self *format) GetBool(key string, defaultValue bool) bool {
+	self.SetDefault(key, defaultValue)
 	return self.v.GetBool(key)
 }
 
@@ -66,15 +67,28 @@ func (self *format) GetIntSlice(key string, defaultValue []int) []int {
 	return val
 }
 
-func (self *format) GetTime(key string) time.Time {
+func (self *format) GetTime(key string, defaultValue time.Time) time.Time {
+	self.SetDefault(key, defaultValue)
 	return self.v.GetTime(key)
 }
 
-func (self *format) GetFloat64(key string) float64 {
-	return self.v.GetFloat64(key)
+func (self *format) GetDuration(key string, defaultValue time.Duration) time.Duration {
+	val := self.v.GetDuration(key)
+	if val == 0 {
+		return defaultValue
+	}
+	return val
 }
 
-func (self *format) UnmarshalToKey(key string, rawVal interface{}) {
+func (self *format) GetFloat64(key string, defaultValue float64) float64 {
+	val := self.v.GetFloat64(key)
+	if val == 0 {
+		return defaultValue
+	}
+	return val
+}
+
+func (self *format) UnmarshalKey(key string, rawVal interface{}) {
 	self.v.UnmarshalKey(key, rawVal)
 }
 

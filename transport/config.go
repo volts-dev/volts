@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"time"
-
-	"github.com/asim/go-micro/v3/codec"
 )
 
 type (
@@ -19,7 +17,7 @@ type (
 		Addrs []string
 		// Codec is the codec interface to use where headers are not supported
 		// by the transport and the entire payload must be encoded
-		Codec codec.Marshaler
+		//Codec codec.Marshaler
 		// Secure tells the transport to secure the connection.
 		// In the case TLSConfig is not specified best effort self-signed
 		// certs should be used
@@ -78,14 +76,6 @@ func newConfig() *Config {
 func Addrs(addrs ...string) Option {
 	return func(o *Config) {
 		o.Addrs = addrs
-	}
-}
-
-// Codec sets the codec used for encoding where the transport
-// does not support message headers
-func Codec(c codec.Marshaler) Option {
-	return func(o *Config) {
-		o.Codec = c
 	}
 }
 

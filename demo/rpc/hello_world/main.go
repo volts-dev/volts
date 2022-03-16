@@ -39,7 +39,7 @@ func main() {
 		server.Router(r),
 	)
 
-	app := volts.NewService(
+	app := volts.New(
 		volts.Server(srv),
 		volts.Transport(transport.NewTCPTransport()),
 		volts.Debug(),

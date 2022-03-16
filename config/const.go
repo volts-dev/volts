@@ -3,7 +3,7 @@ package config
 type ModeType int
 
 const (
-	CONFIG_FILE_NAME = "config.ini"
+	CONFIG_FILE_NAME = "config.json"
 
 	MODE_NORMAL ModeType = iota
 	MODE_DEBUG
