@@ -2,10 +2,12 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 
 	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/transport"
+	"github.com/volts-dev/volts/util/body"
 )
 
 var (
@@ -27,7 +29,6 @@ type (
 		__rcvr       reflect.Value // receiver of methods for the service
 		val          reflect.Value
 		typ          reflect.Type // type of the receiver
-
 		//method   map[string]*methodType   // registered methods
 		//function map[string]*functionType // registered functions
 		argv   reflect.Value
@@ -110,4 +111,34 @@ func (self *TRpcContext) setData(v interface{}) {
 
 func (self *TRpcContext) String() string {
 	return "RpcContext"
+}
+
+func (self *TRpcContext) Body() *body.TBody {
+	/*	if self.body == nil {
+			self.body = NewContentBody(self.request.Body().Data.Bytes())
+		}
+
+		//self.Request.Body.Close()
+		//self.Request.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+		return self.body
+	*/
+	return self.request.Body()
+}
+
+func (self *TRpcContext) Write(data interface{}) error {
+	return self.response.Write(data)
+}
+
+func (self *TRpcContext) RespondByJson(data interface{}) {
+	js, err := json.Marshal(data)
+	if err != nil {
+		self.response.Write([]byte(err.Error()))
+		return
+	}
+
+	self.response.Write(js)
+}
+
+func (self *TRpcContext) Abort(body string) {
+	// TODO
 }

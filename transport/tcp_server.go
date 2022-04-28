@@ -23,7 +23,7 @@ type (
 	tcpTransportListener struct {
 		listener  net.Listener
 		transport *tcpTransport
-		sock      *tcpTransportSocket
+		sock      *tcpTransportSocket // TODO 还未实现
 	}
 )
 
@@ -82,7 +82,7 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 			return err
 		}
 
-		t.sock = NewTcpTransportSocket(conn, t.transport.config.ReadTimeout, t.transport.config.WriteTimeout)
+		sock := NewTcpTransportSocket(conn, t.transport.config.ReadTimeout, t.transport.config.WriteTimeout)
 
 		go func() {
 			//@ 获取空白通讯包
@@ -91,7 +91,7 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 			// TODO: think of a better error response strategy
 			defer func() {
 				if r := recover(); r != nil {
-					t.sock.Close()
+					sock.Close()
 				}
 
 				PutMessageToPool(msg)
@@ -102,12 +102,13 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 			err = msg.Decode(conn) // 等待读取客户端信号
 			if err != nil {
 				//return err
+				// TODO
 			}
 
 			ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
 
-			req := NewRpcRequest(ctx, msg, t.sock)
-			rsp := NewRpcResponse(ctx, req, t.sock)
+			req := NewRpcRequest(ctx, msg, sock)
+			rsp := NewRpcResponse(ctx, req, sock)
 
 			hd.ServeRPC(rsp, req)
 		}()

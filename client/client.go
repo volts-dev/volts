@@ -85,6 +85,7 @@ func New(opts ...Option) IClient {
 	return NewRpcClient(opts...)
 }
 
-func Default() IClient {
+func Default(opts ...Option) IClient {
+	defaultClient.Init(opts...)
 	return defaultClient
 }

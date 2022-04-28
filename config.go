@@ -30,17 +30,30 @@ type (
 )
 
 func NewConfig(opts ...Option) *Config {
-	DefaultTransport := transport.NewHTTPTransport()
-	cfg := &Config{
-		Client:    client.Default(),
-		Server:    server.New(server.Transport(DefaultTransport)),
-		Registry:  registry.New(),
-		Transport: DefaultTransport,
-		Context:   context.Background(),
-	}
+	cfg := &Config{}
 
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	if cfg.Transport == nil {
+		cfg.Transport = transport.NewHTTPTransport()
+	}
+
+	if cfg.Client == nil {
+		cfg.Client = client.Default(client.Transport(cfg.Transport))
+	}
+
+	if cfg.Server == nil {
+		cfg.Server = server.New(server.Transport(cfg.Transport))
+	}
+
+	if cfg.Registry == nil {
+		cfg.Registry = registry.New()
+	}
+
+	if cfg.Context == nil {
+		cfg.Context = context.Background()
 	}
 
 	return cfg
@@ -78,26 +91,39 @@ func Server(srv server.IServer) Option {
 	}
 }
 
-// Registry sets the registry for the service
+// Registry sets the registry for the Server
 // and the underlying components
 func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
 		// Update Client and Server
-		cfg.Client.Init(client.Registry(r))
-		cfg.Server.Init(server.Registry(r))
+
+		if cfg.Client != nil {
+			cfg.Client.Init(client.Registry(r))
+		}
+
+		if cfg.Server != nil {
+			cfg.Server.Init(server.Registry(r))
+		}
 		// Update Broker
 		//cfg.Broker.Init(broker.Registry(r))
 	}
 }
 
-// Transport sets the transport for the service
+// Transport sets the transport for the Server and client
 // and the underlying components
 func Transport(t transport.ITransport) Option {
 	return func(cfg *Config) {
 		cfg.Transport = t
+
 		// Update Client and Server
-		cfg.Client.Init(client.Transport(t))
-		cfg.Server.Init(server.Transport(t))
+		if cfg.Client != nil {
+			cfg.Client.Init(client.Transport(t))
+		}
+
+		if cfg.Server != nil {
+			cfg.Server.Init(server.Transport(t))
+		}
+
 	}
 }

@@ -3,6 +3,8 @@ package router
 import (
 	"context"
 	"reflect"
+
+	"github.com/volts-dev/volts/util/body"
 )
 
 type (
@@ -13,6 +15,10 @@ type (
 		//setData(v interface{}) // TODO 修改API名称  设置response数据
 
 		// public
+		Body() *body.TBody
+		Write(data interface{}) error
+		RespondByJson(data interface{})
+		Abort(string)
 		Route() route
 		Context() context.Context
 		HandlerIndex() int

@@ -2,7 +2,9 @@ package body
 
 import (
 	"bytes"
+	"encoding/json"
 
+	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/codec"
 )
 
@@ -24,4 +26,20 @@ func (self *TBody) Write(in interface{}) error {
 	}
 	_, err = self.Data.Write(data)
 	return err
+}
+
+func (self *TBody) AsBytes() []byte {
+	return self.Data.Bytes()
+}
+
+// Body 必须是Json结构才能你转
+func (self *TBody) AsMap() (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+	err := json.Unmarshal(self.Data.Bytes(), &result)
+	if err != nil {
+		logger.Err(err.Error())
+		return nil, err
+	}
+
+	return result, err
 }

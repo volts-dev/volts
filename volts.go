@@ -18,7 +18,7 @@ type (
 		// The service name
 		Name() string
 		// Init initialises options
-		//Init(...Option)
+		Init(opts ...Option)
 		// Options returns the current options
 		Config() *Config
 		// Client is used to call services
@@ -42,6 +42,12 @@ type (
 func New(opts ...Option) IService {
 	return &service{
 		config: NewConfig(opts...),
+	}
+}
+
+func (self *service) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self.config)
 	}
 }
 

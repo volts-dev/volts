@@ -35,11 +35,11 @@ func HttpReverseProxy(ctx *THttpContext) {
 	}
 
 	if isWebSocket(ctx) {
-		serveWebSocket(rp.Host, ctx.Response(), ctx.Request())
+		serveWebSocket(rp.Host, ctx.Response(), ctx.Request().Request)
 		return
 	}
 
-	httputil.NewSingleHostReverseProxy(rp).ServeHTTP(ctx.Response(), ctx.Request())
+	httputil.NewSingleHostReverseProxy(rp).ServeHTTP(ctx.Response(), ctx.Request().Request)
 }
 
 // getService returns the service for this request from the selector

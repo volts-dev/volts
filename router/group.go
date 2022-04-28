@@ -21,6 +21,7 @@ type (
 	GroupConfig struct {
 		Name       string
 		PrefixPath string
+		FilePath   string // 当前文件夹名称
 	}
 
 	// [scheme:][//[userinfo@]host][/[path]/controller.action][?query][#fragment]
@@ -55,8 +56,8 @@ type (
 		rcvr   reflect.Value // receiver of methods for the module
 		typ    reflect.Type  // type of the receiver
 
-		path     string // URL 路径
-		filePath string // 当前文件夹名称
+		path string // URL 路径
+
 		//modulePath string // 当前模块文件夹路径
 		domain string // 子域名用于区分不同域名不同路由
 	}
@@ -66,6 +67,12 @@ type (
 
 	}
 )
+
+func WithCurrentModulePath() GroupOption {
+	return func(cfg *GroupConfig) {
+		cfg.FilePath, cfg.Name = curFilePath(4)
+	}
+}
 
 func GroupName(name string) GroupOption {
 	return func(cfg *GroupConfig) {
@@ -177,8 +184,20 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 }
 
 // get current file path without file name
-func curFilePath() (string, string) {
-	_, file, _, _ := runtime.Caller(2)
+func curFilePath(skip int) (string, string) {
+	/*s := 0
+	for {
+		if pc, file, _, ok := runtime.Caller(s); ok {
+			// Note that the test line may be different on
+			// distinct calls for the same test.  Showing
+			// the "internal" line is helpful when debugging.
+			logger.Dbg(config.AppPath, pc, " ", file, s)
+		} else {
+			break
+		}
+		s += 1
+	}*/
+	_, file, _, _ := runtime.Caller(skip)
 	filePath, _ := gpath.Split(file)
 	dirName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
 	logger.Dbg(config.AppPath, " ", filePath)
@@ -189,7 +208,7 @@ func curFilePath() (string, string) {
 
 	// 确保路径在APP内
 	if !strings.HasPrefix(filePath, config.AppPath) {
-		logger.Panicf("Get current group path failed!")
+		//logger.Panicf("Get current group path failed!")
 		return "", ""
 	}
 
@@ -201,23 +220,22 @@ func curFilePath() (string, string) {
 // default file path :/{mod_name}/{static}/
 // default tmpl path :/{mod_name{/{tmpl}/
 func NewGroup(opts ...GroupOption) *TGroup {
-	// 获取路径文件夹名称
-	filePath, dirName := curFilePath()
-
-	cfg := &GroupConfig{
-		Name: dirName,
-	}
+	cfg := &GroupConfig{}
 
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	// 获取路径文件夹名称
+	if cfg.Name == "" || cfg.FilePath == "" {
+		cfg.FilePath, cfg.Name = curFilePath(2)
 	}
 
 	grp := &TGroup{
 		config:      cfg,
 		TemplateVar: newTemplateVar(),
 		tree:        NewRouteTree(),
-		path:        gpath.Join("/", dirName),
-		filePath:    filePath,
+		path:        gpath.Join("/", cfg.Name),
 	}
 
 	// init router tree
@@ -240,7 +258,7 @@ func (self *TGroup) GetPath() string {
 }
 
 func (self *TGroup) GetFilePath() string {
-	return self.filePath
+	return self.config.FilePath
 }
 
 func (self *TGroup) SetPath(path string) {
@@ -248,7 +266,7 @@ func (self *TGroup) SetPath(path string) {
 }
 
 func (self *TGroup) SetFilePath(path string) {
-	self.filePath = path
+	self.config.FilePath = path
 }
 
 // Static serves files from the given file system root.
@@ -262,7 +280,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		panic("URL parameters can not be used when serving a static folder")
 	}
 
-	filePath := self.filePath
+	filePath := self.config.FilePath
 	if len(root) > 0 {
 		filePath = root[0]
 	}
@@ -283,7 +301,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 			return
 		}
 
-		fileServer.ServeHTTP(c.response, c.request)
+		fileServer.ServeHTTP(c.response, c.request.Request)
 		c.Apply() //已经服务当前文件并结束
 	}
 
@@ -410,7 +428,7 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 		url.Path = "/" + url.Path
 	}
 
-	route := newRoute(self, methods, url, url.Path, self.filePath, self.config.Name, url.Action)
+	route := newRoute(self, methods, url, url.Path, self.config.FilePath, self.config.Name, url.Action)
 
 	/*// # is it proxy route
 	if scheme != "" && host != "" {
@@ -435,7 +453,7 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 			return route
 		}
 
-		logger.Dbg("NumIn", ctrl_type.NumIn(), ctrl_type.String())
+		//logger.Dbg("NumIn", ctrl_type.NumIn(), ctrl_type.String())
 		// Method needs four ins: receiver, context.Context, *args, *reply.
 		/*if ctrl_type.NumIn() != 4 {
 			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v %v`, url.Action, ctrl_type.In(0), ctrl_type.NumIn()))

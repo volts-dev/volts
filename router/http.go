@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"net/url"
@@ -22,6 +22,7 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/transport"
+	"github.com/volts-dev/volts/util/body"
 	//httpx "github.com/volts-dev/volts/server/listener/http"
 )
 
@@ -71,12 +72,6 @@ type maxLatencyWriter struct {
 	done chan bool
 }
 type (
-	// 用来提供API格式化Body
-	TContentBody struct {
-		handler *THttpContext
-		data    []byte // !NOTE! 由于读完Body被清空所以必须再次保存样本
-	}
-
 	TParamsSet struct {
 		dataset.TRecordSet
 		handler *THttpContext
@@ -90,7 +85,7 @@ type (
 		http.ResponseWriter
 		context  context.Context
 		response *transport.THttpResponse //http.ResponseWriter
-		request  *http.Request            //
+		request  *transport.THttpRequest  //
 		Router   *TRouter
 		route    route //执行本次Handle的Route
 
@@ -98,7 +93,7 @@ type (
 		data         *TParamsSet // 数据缓存在各个Controler间调用
 		methodParams *TParamsSet //map[string]string // Post Get 传递回来的参数
 		pathParams   *TParamsSet //map[string]string // Url 传递回来的参数
-		body         *TContentBody
+		//body         *TContentBody
 
 		// 模板
 		TemplateVar
@@ -118,20 +113,6 @@ type (
 		typ reflect.Type
 	}
 )
-
-// 100%返回TContentBody
-func NewContentBody(hd *THttpContext) (res *TContentBody) {
-	res = &TContentBody{
-		handler: hd,
-	}
-	body, err := ioutil.ReadAll(hd.request.Body)
-	if err != nil {
-		logger.Errf("Read request body faild with an error : %s!", err.Error())
-	}
-
-	res.data = body
-	return
-}
 
 func NewParamsSet(hd *THttpContext) *TParamsSet {
 	return &TParamsSet{
@@ -161,28 +142,6 @@ func NewHttpContext(router *TRouter) *THttpContext {
 	hd.val = reflect.ValueOf(hd)
 	hd.typ = hd.val.Type()
 	return hd
-}
-
-func (self *TContentBody) Read(p []byte) (n int, err error) {
-	p = self.data
-
-	return len(p), nil
-}
-
-func (self *TContentBody) AsBytes() []byte {
-	return self.data
-}
-
-// Body 必须是Json结构才能你转
-func (self *TContentBody) AsMap() (map[string]interface{}, error) {
-	result := make(map[string]interface{})
-	err := json.Unmarshal(self.data, &result)
-	if err != nil {
-		logger.Err(err.Error())
-		return nil, err
-	}
-
-	return result, err
 }
 
 /*
@@ -227,7 +186,7 @@ func (self *THttpContext) getPathParams() {
 }
 */
 
-func (self *THttpContext) Request() *http.Request {
+func (self *THttpContext) Request() *transport.THttpRequest {
 	return self.request
 }
 
@@ -291,21 +250,26 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 	return self.methodParams
 }
 
+func (self *THttpContext) Body() *body.TBody {
+	return self.request.Body()
+}
+
+func (self *THttpContext) Write(data interface{}) error {
+	if buf, ok := data.([]byte); !ok {
+		_, err := self.response.Write(buf)
+		return err
+	}
+
+	return errors.New("only accept []byte type data")
+}
+
 // 如果返回 nil 代表 Url 不含改属性
 func (self *THttpContext) PathParams() *TParamsSet {
 	return self.pathParams
 }
+
 func (self *THttpContext) String() string {
 	return "HttpContext"
-}
-func (self *THttpContext) Body() *TContentBody {
-	if self.body == nil {
-		self.body = NewContentBody(self)
-	}
-
-	//self.Request.Body.Close()
-	//self.Request.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-	return self.body
 }
 
 // 值由Router 赋予
@@ -332,7 +296,7 @@ func (self *THttpContext) UpdateSession() {
 #刷新Handler的新请求数据
 */
 // Inite and Connect a new ResponseWriter when a new request is coming
-func (self *THttpContext) reset(rw *transport.THttpResponse, req *http.Request) {
+func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THttpRequest) {
 	self.TemplateVar = *newTemplateVar() // 清空
 	self.data = nil                      // 清空
 	self.pathParams = nil
@@ -342,7 +306,6 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *http.Request) 
 	self.ResponseWriter = rw
 	self.TemplateSrc = ""
 	self.ContentType = ""
-	self.body = nil
 	self.Result = nil
 	self.handlerIndex = 0 // -- 提示目前控制器Index
 	self.isDone = false   // -- 已经提交过
@@ -576,8 +539,8 @@ func (self *THttpContext) SetHeader(unique bool, hdr string, val string) {
 	}
 }
 
-func (self *THttpContext) Abort(status int, body string) {
-	self.response.WriteHeader(status)
+func (self *THttpContext) Abort(body string) {
+	self.response.WriteHeader(http.StatusInternalServerError)
 	self.response.Write([]byte(body))
 	self.isDone = true
 }
@@ -590,7 +553,7 @@ func (self *THttpContext) RespondError(error string) {
 	self.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	self.Header().Set("X-Content-Type-Options", "nosniff")
 	self.WriteHeader(http.StatusInternalServerError)
-	fmt.Fprintln(self, error)
+	fmt.Fprintln(self.response, error)
 
 	// stop run next ctrl
 	self.isDone = true
@@ -639,12 +602,12 @@ func (self *THttpContext) Download(file_path string) error {
 
 	fName := filepath.Base(file_path)
 	self.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%v\"", fName))
-	_, err = io.Copy(self, f)
+	_, err = io.Copy(self.response, f)
 	return err
 }
 
 func (self *THttpContext) ServeFile(file_path string) {
-	http.ServeFile(self.response, self.request, file_path)
+	http.ServeFile(self.response, self.request.Request, file_path)
 }
 
 // render the template and return to the end
@@ -679,12 +642,13 @@ func (self *THttpContext) SetTemplateVar(key string, value interface{}) {
 
 // Responds with 404 Not Found
 func (self *THttpContext) RespondWithNotFound(message ...string) {
-	//self.Abort(http.StatusNotFound, body)
+	self.response.WriteHeader(http.StatusNotFound)
 	if len(message) == 0 {
-		self.Abort(http.StatusNotFound, http.StatusText(http.StatusNotFound))
+		self.response.Write([]byte(http.StatusText(http.StatusNotFound)))
 		return
 	}
-	self.Abort(http.StatusNotFound, message[0])
+	self.response.Write([]byte(message[0]))
+	self.isDone = true
 }
 
 func singleJoiningSlash(a, b string) string {

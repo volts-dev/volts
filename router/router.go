@@ -131,6 +131,7 @@ func New() *TRouter {
 	router := &TRouter{
 		TGroup:     *NewGroup(),
 		config:     cfg,
+		middleware: NewMiddlewareManager(),
 		objectPool: newPool(),
 		exit:       make(chan bool),
 	}
@@ -389,7 +390,7 @@ func (self *TRouter) RegisterGroup(grp ...IGroup) {
 	}
 }
 
-func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest) {
 	if r.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {

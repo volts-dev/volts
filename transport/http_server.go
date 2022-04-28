@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"fmt"
 	"net"
 	"net/http"
 
@@ -10,14 +9,27 @@ import (
 )
 
 type (
+	customHandler interface {
+		//ServeHTTP(ResponseWriter, *Request)
+		ServeHTTP(w http.ResponseWriter, r *THttpRequest)
+	}
+	customxx struct {
+		hd customHandler
+	}
 	httpTransportListener struct {
 		listener net.Listener
 		ht       *httpTransport
-		sock     *HttpConn
+		sock     *HttpConn // TODO 还没实现
 		https    *http.Server
 	}
 )
 
+func (self *customxx) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	self.hd.ServeHTTP(
+		w,
+		NewHttpRequest(r),
+	)
+}
 func (h *httpTransportListener) Addr() net.Addr {
 	return h.listener.Addr()
 }
@@ -35,18 +47,26 @@ func (t *httpTransportListener) Accept() (net.Conn, error) {
 }
 
 func (h *httpTransportListener) Serve(handler Handler) error {
-	hd, ok := handler.Handler().(http.Handler)
-	if !ok {
-		return fmt.Errorf("the handler is not a http handler! %v ", handler)
+	if hd, ok := handler.Handler().(http.Handler); ok {
+
+		h.https = &http.Server{
+			Handler: hd,
+		}
+		//return fmt.Errorf("the handler is not a http handler! %v ", handler)
+	}
+
+	if hd, ok := handler.Handler().(customHandler); ok {
+		h.https = &http.Server{
+			Handler: &customxx{
+				hd: hd,
+			},
+		}
 	}
 	// default http2 server
-	h.https = &http.Server{
-		Handler: hd,
-	}
 
 	// insecure connection use h2c
 	if !(h.ht.config.Secure || h.ht.config.TLSConfig != nil) {
-		h.https.Handler = h2c.NewHandler(hd, &http2.Server{})
+		h.https.Handler = h2c.NewHandler(h.https.Handler, &http2.Server{})
 	}
 
 	// begin serving

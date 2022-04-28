@@ -3,8 +3,6 @@ package transport
 import (
 	"net"
 	"time"
-
-	"github.com/volts-dev/volts/util/body"
 )
 
 type (
@@ -52,13 +50,18 @@ type (
 		// The content type
 		ContentType() string
 		// write a response directly to the client
-		Body() *body.TBody
+		Body() IBody // *body.TBody
 	}
 
 	// 提供给服务器客户端最基本接口
 	IResponse interface {
 		// write a response directly to the client
 		Write(interface{}) (int, error)
+	}
+
+	IBody interface {
+		Read(interface{}) error
+		Write(interface{}) error
 	}
 )
 

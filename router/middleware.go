@@ -22,7 +22,7 @@ Sample:
 */
 
 var (
-	Middleware = TMiddlewareManager{}
+	___Middleware = TMiddlewareManager{}
 )
 
 type (

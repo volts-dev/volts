@@ -32,6 +32,9 @@ const (
 	AllType ContentType = iota
 	NumberType
 	CharType
+
+	LBracket = '<'
+	RBracket = '>'
 )
 
 var (
@@ -203,7 +206,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 				target = nil
 				level = 0 // #开始计数
 			}
-		case '(':
+		case LBracket:
 			{
 				//fmt.Println("(")
 				bracket = 1
@@ -212,7 +215,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 			{
 				//fmt.Println(":", bracket, path[j:i-bracket])
 				var typ ContentType = AllType
-				if path[i-1] == '(' { //#like (:var)
+				if path[i-1] == LBracket { //#like (:var)
 					nodes = append(nodes, &TNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
 					bracket = 1
 				} else {
@@ -220,7 +223,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 					str := path[startOffset : i-bracket] // #like /abc1(string|upper:var)
 					idx := strings.Index(str, "(")
 					if idx == -1 {
-						panic(fmt.Sprintf("expect a '(' near position %d~%d", startOffset, i))
+						panic(fmt.Sprintf("expect a %v near position %d~%d", LBracket, startOffset, i))
 					}
 					nodes = append(nodes, &TNode{Type: StaticNode, Text: str[:idx]})
 					str = str[idx+1:]
@@ -244,13 +247,13 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 
 				if bracket == 1 {
 					// 开始记录Pos
-					for ; i < l && ')' != path[i]; i++ { // 移动Pos到")" 遇到正则字符标记起
+					for ; i < l && RBracket != path[i]; i++ { // 移动Pos到")" 遇到正则字符标记起
 						if start == -1 && utils.IsSpecialByte(path[i]) { // 如果是正则
 							start = i
 						}
 					}
-					if path[i] != ')' {
-						panic("lack of )")
+					if path[i] != RBracket {
+						panic(fmt.Sprintf("lack of %v", RBracket))
 					}
 
 					if start > -1 {
@@ -307,7 +310,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 				nodes = append(nodes, &TNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
 				startOffset = i
 				//if bracket == 1 {
-				//	for ; i < l && ')' == path[i]; i++ {
+				//	for ; i < l && RBracket == path[i]; i++ {
 				//	}
 				//} else {
 				i = i + 1

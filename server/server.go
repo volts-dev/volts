@@ -88,9 +88,11 @@ func New(opts ...Option) *TServer {
 	}
 }
 
-func Default() *TServer {
+func Default(opts ...Option) *TServer {
 	if defaultServer == nil {
-		defaultServer = New()
+		defaultServer = New(opts...)
+	} else {
+		defaultServer.Init(opts...)
 	}
 
 	return defaultServer
