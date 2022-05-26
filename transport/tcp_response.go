@@ -38,7 +38,7 @@ func (self *RpcResponse) Write(data interface{}) error {
 	self.WriteHeader(MT_RESPONSE)
 
 	msg := self.Request.Message
-	err := self.body.Write(data)
+	err := self.body.WriteData(data)
 	if err != nil {
 		return err
 	}

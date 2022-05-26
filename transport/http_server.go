@@ -18,9 +18,9 @@ type (
 	}
 	httpTransportListener struct {
 		listener net.Listener
-		ht       *httpTransport
+		ht       *HttpTransport
 		sock     *HttpConn // TODO 还没实现
-		https    *http.Server
+		http     *http.Server
 	}
 )
 
@@ -35,7 +35,7 @@ func (h *httpTransportListener) Addr() net.Addr {
 }
 
 func (h *httpTransportListener) Close() error {
-	err := h.https.Close()
+	err := h.http.Close()
 	if err != nil {
 		return err
 	}
@@ -49,14 +49,14 @@ func (t *httpTransportListener) Accept() (net.Conn, error) {
 func (h *httpTransportListener) Serve(handler Handler) error {
 	if hd, ok := handler.Handler().(http.Handler); ok {
 
-		h.https = &http.Server{
+		h.http = &http.Server{
 			Handler: hd,
 		}
 		//return fmt.Errorf("the handler is not a http handler! %v ", handler)
 	}
 
 	if hd, ok := handler.Handler().(customHandler); ok {
-		h.https = &http.Server{
+		h.http = &http.Server{
 			Handler: &customxx{
 				hd: hd,
 			},
@@ -66,11 +66,11 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 
 	// insecure connection use h2c
 	if !(h.ht.config.Secure || h.ht.config.TLSConfig != nil) {
-		h.https.Handler = h2c.NewHandler(h.https.Handler, &http2.Server{})
+		h.http.Handler = h2c.NewHandler(h.http.Handler, &http2.Server{})
 	}
 
 	// begin serving
-	return h.https.Serve(h.listener)
+	return h.http.Serve(h.listener)
 }
 
 func (self *httpTransportListener) Sock() ISocket {

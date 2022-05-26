@@ -101,6 +101,16 @@ func newConfig(opts ...Option) *Config {
 	return cfg
 }
 
+// under debug mode the port will keep at 35999
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Router.Config().PrintRequest = true
+		cfg.Router.Config().PrintRouterTree = true
+		cfg.Address = ":35999"
+		//...
+	}
+}
+
 // Server name
 func Name(name string) Option {
 	return func(cfg *Config) {

@@ -41,7 +41,7 @@ func NewConfig(opts ...Option) *Config {
 	}
 
 	if cfg.Client == nil {
-		cfg.Client = client.Default(client.Transport(cfg.Transport))
+		cfg.Client = client.Default(client.WithTransport(cfg.Transport))
 	}
 
 	if cfg.Server == nil {
@@ -67,6 +67,7 @@ func Name(name string) Option {
 }
 
 // Client to be used for service
+// under debug mode the port will keep at 35999
 func Debug() Option {
 	return func(cfg *Config) {
 		srvCfg := cfg.Server.Config()
@@ -99,7 +100,7 @@ func Registry(r registry.IRegistry) Option {
 		// Update Client and Server
 
 		if cfg.Client != nil {
-			cfg.Client.Init(client.Registry(r))
+			cfg.Client.Init(client.WithRegistry(r))
 		}
 
 		if cfg.Server != nil {
@@ -118,7 +119,7 @@ func Transport(t transport.ITransport) Option {
 
 		// Update Client and Server
 		if cfg.Client != nil {
-			cfg.Client.Init(client.Transport(t))
+			cfg.Client.Init(client.WithTransport(t))
 		}
 
 		if cfg.Server != nil {

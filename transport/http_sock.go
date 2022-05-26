@@ -14,7 +14,7 @@ import (
 
 type (
 	HttpConn struct {
-		ht *httpTransport
+		ht *HttpTransport
 		w  http.ResponseWriter
 		r  *http.Request
 		rw *bufio.ReadWriter

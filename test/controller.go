@@ -18,7 +18,7 @@ func (t ArithCtrl) Mul(hd *router.TRpcContext) {
 	//hd.Request().
 	arg := Args{}
 	reply := &Reply{}
-	err := hd.Request().Body().Read(&arg)
+	err := hd.Request().Body().ReadData(&arg)
 	if err != nil {
 		reply.Str = err.Error()
 		hd.Response().Write(reply)

@@ -39,6 +39,6 @@ func (self ArithCli) Mul(arg *Args) (result *Reply, err error) {
 		return nil, err
 	}
 
-	rsp.Body().Read(&result)
+	rsp.Body().ReadData(&result)
 	return result, nil
 }

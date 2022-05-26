@@ -216,12 +216,13 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 				//fmt.Println(":", bracket, path[j:i-bracket])
 				var typ ContentType = AllType
 				if path[i-1] == LBracket { //#like (:var)
+					// 添加变量前的静态字符节点
 					nodes = append(nodes, &TNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
 					bracket = 1
 				} else {
 					// #为变量区分数据类型
 					str := path[startOffset : i-bracket] // #like /abc1(string|upper:var)
-					idx := strings.Index(str, "(")
+					idx := strings.Index(str, string(LBracket))
 					if idx == -1 {
 						panic(fmt.Sprintf("expect a %v near position %d~%d", LBracket, startOffset, i))
 					}
@@ -404,7 +405,7 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 		}
 
 		isLast := strings.IndexByte(path, delimitChar) == -1
-		if isLast && node.Route != nil { // !NOTE! 匹配到最后一个条件
+		if (isLast || len(node.Children) == 0) && node.Route != nil { // !NOTE! 匹配到最后一个条件
 			*aParams = append(*aParams, param{node.Text[1:], path})
 			return node
 		} else { // !NOTE! 匹配回溯 当匹配进入错误子节点返回nil到父节点重新匹配父节点

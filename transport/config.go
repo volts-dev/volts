@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 type (
@@ -49,8 +51,11 @@ type (
 		// Currently set in global options
 		Ja3      Ja3
 		ProxyURL string
+		dialer   proxy.Dialer
+		Network  string
 		// Other options for implementations of the interface
 		// can be stored in a context
+		Secure  bool
 		Context context.Context
 	}
 
@@ -64,11 +69,22 @@ type (
 	}
 )
 
-func newConfig() *Config {
-	return &Config{
+func newConfig(opts ...Option) *Config {
+	cfg := &Config{
 		ConnectTimeout: DefaultTimeout,
 		ReadTimeout:    DefaultTimeout,
 		WriteTimeout:   DefaultTimeout,
+	}
+
+	cfg.Init(opts...)
+	return cfg
+}
+
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(self)
+		}
 	}
 }
 
@@ -124,6 +140,24 @@ func TLSConfig(t *tls.Config) Option {
 	}
 }
 
+func WithNetwork(network string) DialOption {
+	return func(o *DialConfig) {
+		o.Network = network
+	}
+}
+
+func WithTLS() DialOption {
+	return func(o *DialConfig) {
+		o.Secure = true
+	}
+}
+
+func WithContext(ctx context.Context) DialOption {
+	return func(o *DialConfig) {
+		o.Context = ctx
+	}
+}
+
 // Indicates whether this is a streaming connection
 func WithStream() DialOption {
 	return func(o *DialConfig) {
@@ -141,5 +175,11 @@ func WithJa3(ja3, userAgent string) DialOption {
 func WithProxyURL(proxyURL string) DialOption {
 	return func(o *DialConfig) {
 		o.ProxyURL = proxyURL
+	}
+}
+
+func WithDialer(dialer proxy.Dialer) DialOption {
+	return func(o *DialConfig) {
+		o.dialer = dialer
 	}
 }

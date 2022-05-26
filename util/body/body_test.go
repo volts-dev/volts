@@ -24,9 +24,25 @@ func TestEncoding(t *testing.T) {
 		Num2: 2,
 		Flt:  0.123,
 	}
-	body.Write(arg)
+	body.WriteData(arg)
 	arg2 := &Args{}
-	body.Read(&arg2)
+	body.ReadData(&arg2)
+
+	t.Log(arg2)
+}
+
+func TestWithoutEncoding(t *testing.T) {
+	body := &TBody{
+		Codec: codec.IdentifyCodec(codec.Bytes),
+	}
+	arg := &Args{
+		Num1: 1,
+		Num2: 2,
+		Flt:  0.123,
+	}
+	body.WriteData(arg)
+	arg2 := &Args{}
+	body.ReadData(&arg2)
 
 	t.Log(arg2)
 }

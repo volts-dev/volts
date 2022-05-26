@@ -305,7 +305,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		c.Apply() //已经服务当前文件并结束
 	}
 
-	urlPattern := gpath.Join(self.config.PrefixPath, relativePath, "/(*filepath)")
+	urlPattern := gpath.Join(self.config.PrefixPath, relativePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
 	self.url(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, handler)
 }
 

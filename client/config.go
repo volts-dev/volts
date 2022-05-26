@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"net/http"
 	"time"
 
 	log "github.com/volts-dev/logger"
@@ -24,7 +25,7 @@ type (
 		// can be stored in a context
 		Context context.Context
 	}
-
+	HttpOption func(*Config)
 	// Option contains all options for creating clients.
 	Option func(*Config)
 	// CallOption used by Call or Stream
@@ -61,6 +62,7 @@ type (
 	}
 
 	Config struct {
+		Client    IClient
 		Transport transport.ITransport
 		logger    log.ILogger
 
@@ -117,16 +119,21 @@ type (
 
 		Heartbeat         bool
 		HeartbeatInterval time.Duration
+
+		// http options
+		userAgent     string
+		allowRedirect bool
 	}
 
 	// RequestOption used by NewRequest
 	RequestOption func(*RequestOptions)
 )
 
-func newConfig(opts ...Option) *Config {
+func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
-		logger:  logger,
-		Retries: 3,
+		Transport: tr,
+		logger:    logger,
+		Retries:   3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,
 		SerializeType:  codec.MsgPack,
@@ -143,8 +150,8 @@ func newConfig(opts ...Option) *Config {
 		PoolSize: DefaultPoolSize,
 		PoolTTL:  DefaultPoolTTL,
 		//	Broker:    broker.DefaultBroker,
-		Selector: selector.Default(),
-		Registry: registry.Default(),
+		//Selector: selector.Default(),
+		//Registry: registry.Default(),
 	}
 
 	cfg.Init(opts...)
@@ -181,6 +188,26 @@ func WithAddress(a ...string) CallOption {
 	}
 }
 
+func WithCookiejar(jar http.CookieJar) HttpOption {
+	return func(cfg *Config) {
+		if cli, ok := cfg.Client.(*httpClient); ok {
+			cli.client.Jar = jar
+		}
+	}
+}
+
+func Ua(userAgent string) HttpOption {
+	return func(cfg *Config) {
+		cfg.userAgent = userAgent
+	}
+}
+
+func AllowRedirect() HttpOption {
+	return func(cfg *Config) {
+		cfg.allowRedirect = true
+	}
+}
+
 // Codec to be used to encode/decode requests for a given content type
 func WithCodec(c codec.SerializeType) Option {
 	return func(cfg *Config) {
@@ -189,7 +216,7 @@ func WithCodec(c codec.SerializeType) Option {
 }
 
 // Registry to find nodes for a given service
-func Registry(r registry.IRegistry) Option {
+func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
 		// set in the selector
@@ -198,12 +225,12 @@ func Registry(r registry.IRegistry) Option {
 }
 
 // Transport to use for communication e.g http, rabbitmq, etc
-func Transport(t transport.ITransport) Option {
+func WithTransport(t transport.ITransport) Option {
 	return func(cfg *Config) {
 		cfg.Transport = t
 	}
 }
-func Ja3(ja3, userAgent string) Option {
+func WithJa3(ja3, userAgent string) Option {
 	return func(cfg *Config) {
 		cfg.Ja3.Ja3 = ja3
 		cfg.Ja3.UserAgent = userAgent
@@ -211,9 +238,26 @@ func Ja3(ja3, userAgent string) Option {
 	}
 }
 
-func ProxyURL(proxyURL string) Option {
+func WithProxyURL(proxyURL string) Option {
 	return func(cfg *Config) {
 		cfg.ProxyURL = proxyURL
 		//cfg.DialOptions = append(cfg.DialOptions, transport.WithProxyURL(cfg.ProxyURL))
+	}
+}
+
+// init transport
+func WithTransportOptions(opts ...transport.Option) Option {
+	return func(cfg *Config) {
+		cfg.Transport.Init(opts...)
+	}
+}
+
+func WithHttpOptions(opts ...HttpOption) Option {
+	return func(cfg *Config) {
+		for _, opt := range opts {
+			if opt != nil {
+				opt(cfg)
+			}
+		}
 	}
 }

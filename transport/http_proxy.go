@@ -19,27 +19,47 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+const (
+	proxyAuthHeader = "Proxy-Authorization"
+)
+
 // connectDialer allows to configure one-time use HTTP CONNECT client
-type connectDialer struct {
-	ProxyURL      url.URL
-	DefaultHeader http.Header
+type (
+	pbuffer struct {
+		net.Conn
+		r io.Reader
+	}
 
-	Dialer net.Dialer // overridden dialer allow to control establishment of TCP connection
+	connectDialer struct {
+		ProxyURL      url.URL
+		DefaultHeader http.Header
 
-	// overridden DialTLS allows user to control establishment of TLS connection
-	// MUST return connection with completed Handshake, and NegotiatedProtocol
-	DialTLS func(network string, address string) (net.Conn, string, error)
+		Dialer net.Dialer // overridden dialer allow to control establishment of TCP connection
 
-	EnableH2ConnReuse  bool
-	cacheH2Mu          sync.Mutex
-	cachedH2ClientConn *http2.ClientConn
-	cachedH2RawConn    net.Conn
-}
+		// overridden DialTLS allows user to control establishment of TLS connection
+		// MUST return connection with completed Handshake, and NegotiatedProtocol
+		DialTLS func(network string, address string) (net.Conn, string, error)
+
+		EnableH2ConnReuse  bool
+		cacheH2Mu          sync.Mutex
+		cachedH2ClientConn *http2.ClientConn
+		cachedH2RawConn    net.Conn
+	}
+
+	// ContextKeyHeader Users of context.WithValue should define their own types for keys
+	ContextKeyHeader struct{}
+
+	http2Conn struct {
+		net.Conn
+		in  *io.PipeWriter
+		out io.ReadCloser
+	}
+)
 
 // newConnectDialer creates a dialer to issue CONNECT requests and tunnel traffic via HTTP/S proxy.
 // proxyUrlStr must provide Scheme and Host, may provide credentials and port.
 // Example: https://username:password@golang.org:443
-func newConnectDialer(proxyURLStr string, UserAgent string) (proxy.ContextDialer, error) {
+func NewProxyDialer(proxyURLStr string, UserAgent string) (proxy.Dialer, error) {
 	proxyURL, err := url.Parse(proxyURLStr)
 	if err != nil {
 		return nil, err
@@ -96,9 +116,6 @@ func newConnectDialer(proxyURLStr string, UserAgent string) (proxy.ContextDialer
 func (c *connectDialer) Dial(network, address string) (net.Conn, error) {
 	return c.DialContext(context.Background(), network, address)
 }
-
-// ContextKeyHeader Users of context.WithValue should define their own types for keys
-type ContextKeyHeader struct{}
 
 // ctx.Value will be inspected for optional ContextKeyHeader{} key, with `http.Header` value,
 // which will be added to outgoing request headers, overriding any colliding c.DefaultHeader
@@ -253,12 +270,6 @@ func newHTTP2Conn(c net.Conn, pipedReqBody *io.PipeWriter, respBody io.ReadClose
 	return &http2Conn{Conn: c, in: pipedReqBody, out: respBody}
 }
 
-type http2Conn struct {
-	net.Conn
-	in  *io.PipeWriter
-	out io.ReadCloser
-}
-
 func (h *http2Conn) Read(p []byte) (n int, err error) {
 	return h.out.Read(p)
 }
@@ -290,10 +301,6 @@ func (h *http2Conn) CloseRead() error {
 	return h.out.Close()
 }
 
-const (
-	proxyAuthHeader = "Proxy-Authorization"
-)
-
 func getURL(addr string) (*url.URL, error) {
 	r := &http.Request{
 		URL: &url.URL{
@@ -302,11 +309,6 @@ func getURL(addr string) (*url.URL, error) {
 		},
 	}
 	return http.ProxyFromEnvironment(r)
-}
-
-type pbuffer struct {
-	net.Conn
-	r io.Reader
 }
 
 func (p *pbuffer) Read(b []byte) (int, error) {

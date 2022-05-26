@@ -1,10 +1,10 @@
 package client
 
 import (
-	"context"
 	"time"
 
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/header"
 )
 
 type (
@@ -17,7 +17,7 @@ type (
 		////NewMessage(topic string, msg interface{}, opts ...MessageOption) Message
 		///NewRequest(service, endpoint string, req interface{}, reqOpts ...RequestOption) Request
 		//Call(ctx context.Context, req Request, rsp interface{} ) error
-		Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error)
+		//Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error)
 		//Stream(ctx context.Context, req Request, opts ...CallOption) (Stream, error)
 		//Publish(ctx context.Context, msg Message, opts ...PublishOption) error
 		//String() string
@@ -48,7 +48,7 @@ type (
 		// Read the response
 		//Codec() codec.Reader
 		// read the header
-		Header() map[string]string
+		Header() header.Header
 		// Read the undecoded response
 		//Read(out interface{}) error
 	}
@@ -76,9 +76,9 @@ var (
 //}
 
 // Makes a synchronous call to a service using the default client
-func Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
-	return defaultClient.Call(ctx, request, opts...)
-}
+///func Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
+///	return defaultClient.Call(ctx, request, opts...)
+///}
 
 // NewClient returns a new client
 func New(opts ...Option) IClient {

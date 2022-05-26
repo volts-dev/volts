@@ -105,7 +105,7 @@ func newExtMap() map[string]utls.TLSExtension {
 }
 
 // stringToSpec creates a ClientHelloSpec based on a JA3 string
-func stringToSpec(ja3 string) (*utls.ClientHelloSpec, error) {
+func ja3StringToSpec(ja3 string) (*utls.ClientHelloSpec, error) {
 	tmpMap := newExtMap()
 	tokens := strings.Split(ja3, ",")
 

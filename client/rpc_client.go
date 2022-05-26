@@ -25,11 +25,16 @@ type (
 	}
 )
 
-func NewRpcClient(opts ...Option) IClient {
-	cfg := newConfig(opts...)
-	cfg.Init(
-		Transport(transport.NewTCPTransport()),
+func NewRpcClient(opts ...Option) *rpcClient {
+	cfg := newConfig(
+		transport.NewHTTPTransport(),
+		opts...,
 	)
+
+	if cfg.Registry == nil {
+		cfg.Registry = registry.Default()
+		cfg.Selector = selector.New(selector.Registry(cfg.Registry))
+	}
 
 	p := pool.NewPool(
 		pool.Size(cfg.PoolSize),
@@ -326,4 +331,7 @@ func (r *rpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 	}
 
 	return next, nil
+}
+func (self *rpcClient) String() string {
+	return "rpcClient"
 }

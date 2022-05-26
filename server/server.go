@@ -402,8 +402,7 @@ func (self *TServer) Deregister() error {
 
 }
 
-// serve connection
-func (self *TServer) serve() error {
+func (self *TServer) Start() error {
 	self.RLock()
 	if self.started {
 		self.RUnlock()
@@ -579,10 +578,6 @@ func (self *TServer) serve() error {
 	self.Unlock()
 
 	return nil
-}
-
-func (self *TServer) Start() error {
-	return self.serve()
 }
 
 func (self *TServer) Stop() error {

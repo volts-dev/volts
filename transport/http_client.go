@@ -17,7 +17,7 @@ import (
 
 type (
 	httpTransportClient struct {
-		transport *httpTransport
+		transport *HttpTransport
 		addr      string
 		conn      net.Conn
 		config    DialConfig

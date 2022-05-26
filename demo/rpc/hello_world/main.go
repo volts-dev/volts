@@ -51,10 +51,10 @@ func main() {
 	endpoint := "Test.Endpoint"
 	address := "127.0.0.1:35999"
 
-	req := client.NewHttpRequest(service, endpoint, nil)
-
+	req, _ := client.NewHttpRequest(service, endpoint, nil)
+	cli := client.NewHttpClient()
 	// test calling remote address
-	if _, err := client.Call(context.Background(), req, client.WithAddress(address)); err != nil {
+	if _, err := cli.Call(context.Background(), req, client.WithAddress(address)); err != nil {
 		logger.Err("call with address error:", err)
 	}
 

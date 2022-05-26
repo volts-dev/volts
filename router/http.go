@@ -255,7 +255,7 @@ func (self *THttpContext) Body() *body.TBody {
 }
 
 func (self *THttpContext) Write(data interface{}) error {
-	if buf, ok := data.([]byte); !ok {
+	if buf, ok := data.([]byte); ok {
 		_, err := self.response.Write(buf)
 		return err
 	}

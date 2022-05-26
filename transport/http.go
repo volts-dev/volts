@@ -2,37 +2,115 @@ package transport
 
 import (
 	"bufio"
-	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 	vaddr "github.com/volts-dev/volts/util/addr"
 	vnet "github.com/volts-dev/volts/util/net"
 	mls "github.com/volts-dev/volts/util/tls"
-	"golang.org/x/net/proxy"
 )
 
+// Time wraps time.Time overriddin the json marshal/unmarshal to pass
+// timestamp as integer
+type Time struct {
+	time.Time
+}
+
+type data struct {
+	Time Time `json:"time"`
+}
+
+// A Cookie represents an HTTP cookie as sent in the Set-Cookie header of an
+// HTTP response or the Cookie header of an HTTP request.
+//
+// See https://tools.ietf.org/html/rfc6265 for details.
+//Stolen from Net/http/cookies
+type Cookie struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+
+	Path        string `json:"path"`   // optional
+	Domain      string `json:"domain"` // optional
+	Expires     time.Time
+	JSONExpires Time   `json:"expires"`    // optional
+	RawExpires  string `json:"rawExpires"` // for reading cookies only
+
+	// MaxAge=0 means no 'Max-Age' attribute specified.
+	// MaxAge<0 means delete cookie now, equivalently 'Max-Age: 0'
+	// MaxAge>0 means Max-Age attribute present and given in seconds
+	MaxAge   int           `json:"maxAge"`
+	Secure   bool          `json:"secure"`
+	HTTPOnly bool          `json:"httpOnly"`
+	SameSite http.SameSite `json:"sameSite"`
+	Raw      string
+	Unparsed []string `json:"unparsed"` // Raw text of unparsed attribute-value pairs
+}
+
+// UnmarshalJSON implements json.Unmarshaler inferface.
+func (t *Time) UnmarshalJSON(buf []byte) error {
+	// Try to parse the timestamp integer
+	ts, err := strconv.ParseInt(string(buf), 10, 64)
+	if err == nil {
+		if len(buf) == 19 {
+			t.Time = time.Unix(ts/1e9, ts%1e9)
+		} else {
+			t.Time = time.Unix(ts, 0)
+		}
+		return nil
+	}
+	str := strings.Trim(string(buf), `"`)
+	if str == "null" || str == "" {
+		return nil
+	}
+	// Try to manually parse the data
+	tt, err := ParseDateString(str)
+	if err != nil {
+		return err
+	}
+	t.Time = tt
+	return nil
+}
+
+// ParseDateString takes a string and passes it through Approxidate
+// Parses into a time.Time
+func ParseDateString(dt string) (time.Time, error) {
+	const layout = "Mon, 02-Jan-2006 15:04:05 MST"
+
+	return time.Parse(layout, dt)
+}
+
 type (
-	httpTransport struct {
+	HttpTransport struct {
+		sync.Mutex
 		config *Config
-		dialer proxy.ContextDialer
+		//dialer proxy.ContextDialer
+		//dialer    proxy.Dialer
+		//JA3       string
+		//UserAgent string
 	}
 )
 
-func NewHTTPTransport(opts ...Option) *httpTransport {
+func NewHTTPTransport(opts ...Option) *HttpTransport {
 	cfg := newConfig()
 
 	for _, o := range opts {
 		o(cfg)
 	}
 
-	return &httpTransport{config: cfg}
+	return &HttpTransport{
+		//dialer: proxy.Direct,
+		config: cfg,
+	}
 }
 
-func (self *httpTransport) Init(opts ...Option) error {
+func (self *HttpTransport) Init(opts ...Option) error {
 	for _, o := range opts {
 		o(self.config)
 	}
@@ -40,26 +118,21 @@ func (self *httpTransport) Init(opts ...Option) error {
 	return nil
 }
 
-func (rt *httpTransport) dialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
-
-	return nil, nil
-}
-
 // to make a Dial with server
-func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
-	cfg := DialConfig{
+func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
+	dialCfg := DialConfig{
 		//Timeout: DefaultDialTimeout,
 	}
 
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(&dialCfg)
 	}
 
 	var conn net.Conn
 	var err error
 
 	// TODO: support dial option here rather than using internal config
-	if self.config.Secure || self.config.TLSConfig != nil {
+	if dialCfg.Secure || self.config.TLSConfig != nil {
 		config := self.config.TLSConfig
 		if config == nil {
 			config = &tls.Config{
@@ -67,20 +140,8 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			}
 		}
 
-		// 代理
-		var dialer proxy.ContextDialer
-		if cfg.ProxyURL != "" {
-			dialer, err = newConnectDialer(cfg.ProxyURL, "")
-			if err != nil {
-
-			}
-		} else {
-			dialer = proxy.Direct
-		}
-
-		if cfg.Ja3.Ja3 != "" {
-
-			rawConn, err := dialer.DialContext(context.Background(), "tcp", addr)
+		if dialCfg.Ja3.Ja3 != "" {
+			rawConn, err := dialCfg.dialer.Dial(dialCfg.Network, addr)
 			if err != nil {
 				return nil, err
 			}
@@ -91,23 +152,23 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			}
 			//////////////////
 
-			spec, err := stringToSpec(cfg.Ja3.Ja3)
+			spec, err := ja3StringToSpec(dialCfg.Ja3.Ja3)
 			if err != nil {
 				return nil, err
 			}
 
-			conn := utls.UClient(rawConn, &utls.Config{
+			cnn := utls.UClient(rawConn, &utls.Config{
 				ServerName: host,
 				MinVersion: tls.VersionTLS12,
 				MaxVersion: tls.VersionTLS12,
 			}, // Default is TLS13
-				utls.HelloCustom)
-			if err := conn.ApplyPreset(spec); err != nil {
+				utls.HelloChrome_Auto)
+			if err := cnn.ApplyPreset(spec); err != nil {
 				return nil, err
 			}
 
-			if err = conn.Handshake(); err != nil {
-				_ = conn.Close()
+			if err = cnn.Handshake(); err != nil {
+				_ = cnn.Close()
 
 				if err.Error() == "tls: CurvePreferences includes unsupported curve" {
 					//fix this
@@ -116,11 +177,13 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 				return nil, fmt.Errorf("uTlsConn.Handshake() error: %+v", err)
 			}
 
+			conn = cnn
 		} else {
-			config.NextProtos = []string{"http/1.1"}
-			conn, err = newConn(func(addr string) (net.Conn, error) {
-				return tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
-			})(addr)
+			//config.NextProtos = []string{"http/1.1"}
+			//	conn, err = newConn(func(addr string) (net.Conn, error) {
+			//		return tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
+			//	})(addr)
+			conn, err = tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
 		}
 
 	} else {
@@ -135,7 +198,7 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 
 	return &httpTransportClient{
 		transport: self,
-		config:    cfg,
+		config:    dialCfg,
 		addr:      addr,
 		conn:      conn,
 		buff:      bufio.NewReader(conn),
@@ -145,7 +208,7 @@ func (self *httpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 	}, nil
 }
 
-func (self *httpTransport) Listen(addr string, opts ...ListenOption) (IListener, error) {
+func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener, error) {
 	var options ListenConfig
 	for _, opt := range opts {
 		opt(&options)
@@ -211,10 +274,10 @@ func (h *httpTransport) Response(sock *Socket, cde codec.ICodec) IResponse {
 	return nil
 }
 */
-func (self *httpTransport) Config() *Config {
+func (self *HttpTransport) Config() *Config {
 	return self.config
 }
 
-func (self *httpTransport) String() string {
+func (self *HttpTransport) String() string {
 	return "Http Transport"
 }
