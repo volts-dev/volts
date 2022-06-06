@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/codec"
+	log "github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
@@ -18,9 +18,10 @@ var logger log.ILogger = log.NewLogger(log.WithPrefix("Client"))
 
 type (
 	RequestOptions struct {
-		ContentType string
-		Stream      bool
-
+		ContentType   string
+		Stream        bool
+		Codec         codec.ICodec
+		SerializeType codec.SerializeType
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context
@@ -136,9 +137,9 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		Retries:   3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,
-		SerializeType:  codec.MsgPack,
-		CompressType:   transport.None,
-		BackupLatency:  10 * time.Millisecond,
+		//SerializeType:  codec.MsgPack,
+		CompressType:  transport.None,
+		BackupLatency: 10 * time.Millisecond,
 
 		CallOptions: CallOptions{
 			//Backoff:        DefaultBackoff,
@@ -167,9 +168,16 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
-func WithContentType(c string) RequestOption {
+func __WithContentType(c string) RequestOption {
 	return func(cfg *RequestOptions) {
 		cfg.ContentType = c
+	}
+}
+
+func WithCodec(c codec.SerializeType) RequestOption {
+	return func(cfg *RequestOptions) {
+		cfg.SerializeType = c
+		cfg.Codec = codec.IdentifyCodec(c)
 	}
 }
 
@@ -188,9 +196,15 @@ func WithAddress(a ...string) CallOption {
 	}
 }
 
+func WithContext(ctx context.Context) CallOption {
+	return func(o *CallOptions) {
+		o.Context = ctx
+	}
+}
+
 func WithCookiejar(jar http.CookieJar) HttpOption {
 	return func(cfg *Config) {
-		if cli, ok := cfg.Client.(*httpClient); ok {
+		if cli, ok := cfg.Client.(*HttpClient); ok {
 			cli.client.Jar = jar
 		}
 	}
@@ -209,7 +223,7 @@ func AllowRedirect() HttpOption {
 }
 
 // Codec to be used to encode/decode requests for a given content type
-func WithCodec(c codec.SerializeType) Option {
+func WithSerializeType(c codec.SerializeType) Option {
 	return func(cfg *Config) {
 		cfg.SerializeType = c
 	}

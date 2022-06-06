@@ -38,12 +38,12 @@ func (self *RpcResponse) Write(data interface{}) error {
 	self.WriteHeader(MT_RESPONSE)
 
 	msg := self.Request.Message
-	err := self.body.WriteData(data)
+	_, err := self.body.Encode(data)
 	if err != nil {
 		return err
 	}
 
-	msg.Payload = self.Body().Data.Bytes()
+	msg.Payload = self.Body().AsBytes()
 
 	return self.sock.Send(msg)
 }

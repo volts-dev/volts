@@ -4,6 +4,15 @@ import (
 	"testing"
 )
 
+func TestByted(t *testing.T) {
+	t.Log(JSON)
+	str := []byte("你好！")
+	codec := IdentifyCodec(Bytes)
+	out := make([]byte, 0)
+	codec.Decode(str, &out)
+	t.Log(string(out))
+}
+
 func TestFn(t *testing.T) {
 	t.Log(JSON)
 

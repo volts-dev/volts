@@ -104,9 +104,101 @@ func newExtMap() map[string]utls.TLSExtension {
 	}
 }
 
-// stringToSpec creates a ClientHelloSpec based on a JA3 string
-func ja3StringToSpec(ja3 string) (*utls.ClientHelloSpec, error) {
-	tmpMap := newExtMap()
+func extsMapping(token string) utls.TLSExtension {
+	switch token {
+	case "0":
+		return &utls.SNIExtension{}
+	case "5":
+		return &utls.StatusRequestExtension{}
+		// These are applied later
+		// "10": &tls.SupportedCurvesExtension{...}
+		// "11": &tls.SupportedPointsExtension{...}
+	case "13":
+		return &utls.SignatureAlgorithmsExtension{
+			SupportedSignatureAlgorithms: []utls.SignatureScheme{
+				utls.ECDSAWithP256AndSHA256,
+				utls.ECDSAWithP384AndSHA384,
+				utls.ECDSAWithP521AndSHA512,
+				utls.PSSWithSHA256,
+				utls.PSSWithSHA384,
+				utls.PSSWithSHA512,
+				utls.PKCS1WithSHA256,
+				utls.PKCS1WithSHA384,
+				utls.PKCS1WithSHA512,
+				utls.ECDSAWithSHA1,
+				utls.PKCS1WithSHA1,
+			},
+		}
+	case "16":
+		return &utls.ALPNExtension{
+			AlpnProtocols: []string{"h2", "http/1.1"},
+		}
+	case "18":
+		return &utls.SCTExtension{}
+	case "21":
+		return &utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle}
+	case "22":
+		return &utls.GenericExtension{Id: 22} // encrypt_then_mac
+		//case "22": &utls.GenericExtension{Id: 0x16, Data: []uint8{}},
+	case "23":
+		return &utls.UtlsExtendedMasterSecretExtension{}
+		//"27": &utls.FakeCertCompressionAlgsExtension{},
+	case "27":
+		return &utls.FakeCertCompressionAlgsExtension{
+			Methods: []utls.CertCompressionAlgo{utls.CertCompressionBrotli},
+		}
+	case "28":
+		return &utls.FakeRecordSizeLimitExtension{} //Limit: 0x4001
+	case "35":
+		return &utls.SessionTicketExtension{}
+	case "34":
+		return &utls.GenericExtension{Id: 34}
+	case "41":
+		return &utls.GenericExtension{Id: 41} //FIXME pre_shared_key
+	case "43":
+		return &utls.SupportedVersionsExtension{Versions: []uint16{
+			// utls.GREASE_PLACEHOLDER, //可能导致版本错乱
+			// utls.VersionTLS13, // NOTE 不想支持的加上去会报错
+			utls.VersionTLS12,
+			utls.VersionTLS11,
+			utls.VersionTLS10}}
+	case "44":
+		return &utls.CookieExtension{}
+	case "45":
+		return &utls.PSKKeyExchangeModesExtension{
+			Modes: []uint8{utls.PskModeDHE},
+		}
+	case "49":
+		return &utls.GenericExtension{Id: 49} // post_handshake_auth
+	case "50":
+		return &utls.GenericExtension{Id: 50} // signature_algorithms_cert
+		//"51": &utls.KeyShareExtension{KeyShares: []utls.KeyShare{},},
+	case "51":
+		return &utls.KeyShareExtension{KeyShares: []utls.KeyShare{
+			//	{Group: utls.GREASE_PLACEHOLDER, Data: []byte{0}}, //可能导致版本错乱
+			{Group: utls.X25519},
+			{Group: utls.CurveP256},
+			{Group: utls.CurveP384},
+			//{Group: utls.CurveP521},
+
+			// {Group: utls.CurveP384}, known bug missing correct extensions for handshake
+		}}
+	case "30032":
+		return &utls.GenericExtension{Id: 0x7550, Data: []byte{0}} //FIXME
+	case "13172":
+		return &utls.NPNExtension{}
+	case "65281":
+		return &utls.RenegotiationInfoExtension{
+			Renegotiation: utls.RenegotiateOnceAsClient,
+		}
+	}
+
+	return nil
+}
+
+// parseJA3 creates a ClientHelloSpec based on a JA3 string
+func parseJA3(ja3 string) (*utls.ClientHelloSpec, error) {
+	//tmpMap := newExtMap()
 	tokens := strings.Split(ja3, ",")
 
 	//version := tokens[0]
@@ -131,7 +223,7 @@ func ja3StringToSpec(ja3 string) (*utls.ClientHelloSpec, error) {
 		}
 		targetCurves = append(targetCurves, utls.CurveID(cid))
 	}
-	tmpMap["10"] = &utls.SupportedCurvesExtension{Curves: targetCurves}
+	//tmpMap["10"] = &utls.SupportedCurvesExtension{Curves: targetCurves}
 
 	// parse point formats
 	var targetPointFormats []byte
@@ -142,15 +234,28 @@ func ja3StringToSpec(ja3 string) (*utls.ClientHelloSpec, error) {
 		}
 		targetPointFormats = append(targetPointFormats, byte(pid))
 	}
-	tmpMap["11"] = &utls.SupportedPointsExtension{SupportedPoints: targetPointFormats}
+	//tmpMap["11"] = &utls.SupportedPointsExtension{SupportedPoints: targetPointFormats}
 
 	// build extenions list
 	var exts []utls.TLSExtension
 	for _, e := range extensions {
-		te, ok := tmpMap[e]
-		if !ok {
-			return nil, ErrExtensionNotExist(e)
+		te := extsMapping(e)
+		if te == nil {
+			if e == "10" {
+				te = &utls.SupportedCurvesExtension{Curves: targetCurves}
+			}
+			if e == "11" {
+				te = &utls.SupportedPointsExtension{SupportedPoints: targetPointFormats}
+			}
+
+			if te == nil {
+				return nil, ErrExtensionNotExist(e)
+			}
 		}
+		//te, ok := tmpMap[e]
+		//if !ok {
+		//	return nil, ErrExtensionNotExist(e)
+		//}
 		exts = append(exts, te)
 	}
 	// build SSLVersion

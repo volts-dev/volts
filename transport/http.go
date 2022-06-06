@@ -152,7 +152,7 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			}
 			//////////////////
 
-			spec, err := ja3StringToSpec(dialCfg.Ja3.Ja3)
+			spec, err := parseJA3(dialCfg.Ja3.Ja3)
 			if err != nil {
 				return nil, err
 			}

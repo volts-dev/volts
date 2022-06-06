@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/logger"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	util "github.com/volts-dev/volts/util/registry"
 	"golang.org/x/sync/singleflight"

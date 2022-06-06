@@ -4,9 +4,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 	"github.com/volts-dev/volts/test"
@@ -39,8 +39,8 @@ func TestHelloworld(t *testing.T) {
 	//<-time.After(3 * time.Second)
 
 	arg := &test.Args{Num1: 1, Num2: 2, Flt: 0.0123}
-
-	arith := test.NewArithCli(client.NewRpcClient())
+	cli, _ := client.NewRpcClient()
+	arith := test.NewArithCli(cli)
 	result, err := arith.Mul(arg)
 	if err != nil {
 		t.Fatal(err)

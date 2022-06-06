@@ -19,7 +19,6 @@ type httpResponse struct {
 }
 
 func (self *httpResponse) Body() *body.TBody {
-	//self.body = &body.TBody{}
 	// parse response
 	b, err := ioutil.ReadAll(self.response.Body)
 	if err == nil {
@@ -28,6 +27,10 @@ func (self *httpResponse) Body() *body.TBody {
 	}
 
 	return self.body
+}
+
+func (self *httpResponse) Request() *http.Request {
+	return self.response.Request
 }
 
 func (self *httpResponse) Cookies() []*http.Cookie {

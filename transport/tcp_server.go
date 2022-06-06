@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	log "github.com/volts-dev/logger"
+	log "github.com/volts-dev/volts/logger"
 )
 
 type (

@@ -75,7 +75,7 @@ func (r *RpcRequest) ___Read() ([]byte, error) {
 	if r.first {
 		b := r.Body()
 		r.first = false
-		return b.Data.Bytes(), nil
+		return b.AsBytes(), nil
 	}
 
 	var msg Message

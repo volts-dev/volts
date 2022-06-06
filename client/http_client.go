@@ -5,11 +5,9 @@ import (
 	"context"
 	_errors "errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -35,12 +33,17 @@ var (
 	}
 )
 
-type (
-	buffer struct {
-		*bytes.Buffer
-	}
+type buffer struct {
+	*bytes.Buffer
+}
 
-	httpClient struct {
+func (b *buffer) Close() error {
+	b.Buffer.Reset()
+	return nil
+}
+
+type (
+	HttpClient struct {
 		config   *Config
 		client   *http.Client
 		pool     pool.Pool // connect pool
@@ -49,32 +52,16 @@ type (
 	}
 )
 
-// Given a string of the form "host", "host:port", or "[ipv6::address]:port",
-// return true if the string includes a port.
-func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
-
-// removeEmptyPort strips the empty port in ":port" to ""
-// as mandated by RFC 3986 Section 6.2.3.
-func removeEmptyPort(host string) string {
-	if hasPort(host) {
-		return strings.TrimSuffix(host, ":")
-	}
-	return host
-}
-
-func isNotToken(r rune) bool {
-	return !httpguts.IsTokenRune(r)
-}
-func (b *buffer) Close() error {
-	b.Buffer.Reset()
-	return nil
-}
-
-func NewHttpClient(opts ...Option) *httpClient {
+func NewHttpClient(opts ...Option) (*HttpClient, error) {
 	cfg := newConfig(
 		transport.NewHTTPTransport(),
 		opts...,
 	)
+
+	// 默认编码
+	if cfg.SerializeType == 0 {
+		cfg.SerializeType = codec.Bytes
+	}
 
 	p := pool.NewPool(
 		pool.Size(cfg.PoolSize),
@@ -94,14 +81,14 @@ func NewHttpClient(opts ...Option) *httpClient {
 	if cfg.ProxyURL != "" {
 		dialer, err = transport.NewProxyDialer(cfg.ProxyURL, "")
 		if err != nil {
-			log.Panic(err)
+			return nil, err
 		}
 	} else {
 		dialer = proxy.Direct
 	}
 
 	cfg.Transport.Config().TLSConfig = cfg.TLSConfig
-	cli := &httpClient{
+	cli := &HttpClient{
 		config: cfg,
 		pool:   p,
 		client: &http.Client{
@@ -128,19 +115,19 @@ func NewHttpClient(opts ...Option) *httpClient {
 	// TODO add switch
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	cli.client.Jar = jar
 
 	cfg.Client = cli
-	return cli
+	return cli, nil
 }
 
-func (self *httpClient) String() string {
-	return "httpClient"
+func (self *HttpClient) String() string {
+	return "HttpClient"
 }
 
-func (self *httpClient) Init(opts ...Option) error {
+func (self *HttpClient) Init(opts ...Option) error {
 	cfg := self.config
 	for _, opt := range opts {
 		opt(cfg)
@@ -162,20 +149,25 @@ func (self *httpClient) Init(opts ...Option) error {
 	return nil
 }
 
-func (self *httpClient) Config() *Config {
+func (self *HttpClient) Config() *Config {
 	return self.config
 }
 
 // 新建请求
-func (self *httpClient) NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) (IRequest, error) {
-	return NewHttpRequest(service, method, request, reqOpts...)
+func (self *HttpClient) NewRequest(method, url string, data interface{}, optinos ...RequestOption) (*httpRequest, error) {
+	opts := []RequestOption{WithCodec(self.config.SerializeType)}
+	opts = append(opts,
+		optinos...,
+	)
+
+	return newHttpRequest(method, url, data, opts...)
 }
 
-func (h *httpClient) next(request IRequest, opts CallOptions) (selector.Next, error) {
+func (h *HttpClient) next(request *httpRequest, opts CallOptions) (selector.Next, error) {
 	if h.config.Selector == nil {
 		return func() (*registry.Node, error) {
 			return &registry.Node{
-				Address: request.Service(),
+				Address: request.url,
 			}, nil
 		}, nil
 	}
@@ -219,26 +211,21 @@ func (h *httpClient) next(request IRequest, opts CallOptions) (selector.Next, er
 	return next, nil
 }
 
-func (h *httpClient) newHTTPCodec(contentType string) (codec.ICodec, error) {
+func newHTTPCodec(contentType string) (codec.ICodec, error) {
 	if c, ok := defaultHTTPCodecs[contentType]; ok {
 		return c, nil
 	}
 	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
 }
 
-func (h *httpClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (*httpResponse, error) {
-	r, ok := req.(*httpRequest)
-	if !ok {
-		return nil, _errors.New("the request is not for http!")
-	}
-
+func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpRequest, opts CallOptions) (*httpResponse, error) {
 	if ctx == nil {
 		return nil, _errors.New("net/http: nil Context")
 	}
 
 	// set the address
-	address := node.Address
-	header := r.Header // make(http.Header)
+	//address := node.Address
+	header := req.Header // make(http.Header)
 	if md, ok := metadata.FromContext(ctx); ok {
 		for k, v := range md {
 			header.Set(k, v)
@@ -247,85 +234,66 @@ func (h *httpClient) call(ctx context.Context, node *registry.Node, req IRequest
 
 	// set timeout in nanoseconds
 	header.Set("Timeout", fmt.Sprintf("%d", opts.RequestTimeout))
+
 	// set the content type for the request
-	//header.Set("Content-Type", req.ContentType()) // TODO 自动类型
-
-	// marshal request
-	var err error
-	var buf *buffer
-	var cf codec.ICodec
-	data := make([]byte, 0)
-	if req.Body() != nil {
-		// get codec
-		cf, err = h.newHTTPCodec(req.ContentType())
-		if err != nil {
-			return nil, errors.InternalServerError("http.client", err.Error())
-		}
-
-		err = cf.Decode(req.Body().([]byte), data)
-		if err != nil {
-			return nil, errors.InternalServerError("http.client", err.Error())
-		}
-
+	// 默认bytes 编码不改Content-Type 以request为主
+	st := h.config.SerializeType
+	if req.opts.SerializeType != h.config.SerializeType {
+		st = req.opts.SerializeType
+	}
+	if st != codec.Bytes {
+		header.Set("Content-Type", req.ContentType()) // TODO 自动类型
 	}
 
-	// 无论如何都要创建
-	buf = &buffer{bytes.NewBuffer(data)}
+	// to ReadCloser
+	/*	data := make([]byte, 0)
+		if req.Body().Data.Len() != 0 {
+			data = req.Body().Data.Bytes()
+		}*/
+	buf := &buffer{bytes.NewBuffer(req.Body().Data.Bytes())}
 	defer buf.Close()
 
-	u, err := url.Parse(address)
-	if err != nil {
-		return nil, err
-	}
-
+	u := req.URL
 	u.Host = removeEmptyPort(u.Host)
 	hreq := &http.Request{
-		Method:        r.method,
+		Method:        req.method,
 		URL:           u,
+		Host:          u.Host,
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 		Header:        header,
 		Body:          buf,
-		ContentLength: int64(len(data)),
-		Host:          u.Host,
+		ContentLength: int64(buf.Len()),
 	}
 
-	//hreq, _ = http.NewRequest("get", "https://www.baidu.com/", nil)
 	// make the request
 	hrsp, err := h.client.Do(hreq.WithContext(ctx))
 	if err != nil {
 		return nil, errors.InternalServerError("http.client", err.Error())
 	}
-	//defer hrsp.Body.Close()
 
 	// parse response
-	//b, err := ioutil.ReadAll(hrsp.Body)
-	//if err != nil {
-	//	return nil, errors.InternalServerError("http.client", err.Error())
-	//}
-
-	bd := &body.TBody{
-		Codec: cf,
+	/*b, err := ioutil.ReadAll(hrsp.Body)
+	if err != nil {
+		return nil, errors.InternalServerError("http.client", err.Error())
 	}
-	//bd.Data.Write(b)
+	defer hrsp.Body.Close()
+	*/
+	bd := body.New(req.body.Codec)
+	//bd.Data.Write(b) // NOTED 存入编码数据
 	rsp := &httpResponse{
-		response: hrsp,
-		body:     bd,
-
+		response:   hrsp,
+		body:       bd,
 		Status:     hrsp.Status,
 		StatusCode: hrsp.StatusCode,
 	}
-	/*
-		// unmarshal
-		if err := cf.Decode(b, rsp.body); err != nil {
-			return nil, errors.InternalServerError("http.client", err.Error())
-		}*/
+
 	return rsp, nil
 }
 
 // 阻塞请求
-func (self *httpClient) Call(ctx context.Context, request IRequest, opts ...CallOption) (*httpResponse, error) {
+func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	for _, opt := range opts {
@@ -338,6 +306,10 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, opts ...Call
 		return nil, err
 	}
 
+	ctx := callOpts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// check if we already have a deadline
 	d, ok := ctx.Deadline()
 	if !ok {
@@ -388,6 +360,9 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, opts ...Call
 
 		// make the call
 		resp, err := hcall(ctx, node, request, callOpts)
+		if err != nil {
+			return err
+		}
 		if self.config.Selector != nil {
 			self.config.Selector.Mark(request.Service(), node, err)
 		}
@@ -429,6 +404,23 @@ func (self *httpClient) Call(ctx context.Context, request IRequest, opts ...Call
 	return response, gerr
 }
 
-func (self *httpClient) CookiesManager() http.CookieJar {
+func (self *HttpClient) CookiesManager() http.CookieJar {
 	return self.client.Jar
+}
+
+// Given a string of the form "host", "host:port", or "[ipv6::address]:port",
+// return true if the string includes a port.
+func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
+
+// removeEmptyPort strips the empty port in ":port" to ""
+// as mandated by RFC 3986 Section 6.2.3.
+func removeEmptyPort(host string) string {
+	if hasPort(host) {
+		return strings.TrimSuffix(host, ":")
+	}
+	return host
+}
+
+func isNotToken(r rune) bool {
+	return !httpguts.IsTokenRune(r)
 }

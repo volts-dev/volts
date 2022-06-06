@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"time"
 
-	log "github.com/volts-dev/logger"
+	log "github.com/volts-dev/volts/logger"
 )
 
 // use a .volts domain rather than .local

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 
-	log "github.com/volts-dev/logger"
+	log "github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
 )

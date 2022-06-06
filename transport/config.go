@@ -49,7 +49,7 @@ type (
 
 		// TODO: add tls options when dialling
 		// Currently set in global options
-		Ja3      Ja3
+		Ja3      Ja3 // TODO 添加加缓存
 		ProxyURL string
 		dialer   proxy.Dialer
 		Network  string

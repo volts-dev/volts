@@ -1,11 +1,9 @@
 package test
 
 import (
-	"context"
-
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/logger"
 )
 
 type (
@@ -25,20 +23,20 @@ func (self ArithCli) Mul(arg *Args) (result *Reply, err error) {
 	endpoint := "Test.Endpoint"
 	address := "127.0.0.1:35999"
 
-	cli := client.NewRpcClient(
+	cli, _ := client.NewRpcClient()
+	req, _ := cli.NewRequest(service, endpoint, arg,
 		client.WithCodec(codec.MsgPack), // 默认传输编码
 	)
-	req := client.NewRpcRequest(service, endpoint, arg)
-	req.SetContentType(codec.MsgPack) // 也可以在Req中制定传输编码
-	req.Write(arg)
+	//req.SetContentType(codec.MsgPack) // 也可以在Req中制定传输编码
+	//req.Write(arg)
 
 	// test calling remote address
-	rsp, err := cli.Call(context.Background(), req, client.WithAddress(address))
+	rsp, err := cli.Call(req, client.WithAddress(address))
 	if err != nil {
 		logger.Err("call with address error:", err)
 		return nil, err
 	}
 
-	rsp.Body().ReadData(&result)
+	rsp.Body().Decode(&result)
 	return result, nil
 }

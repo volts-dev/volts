@@ -25,11 +25,9 @@ type (
 )
 
 func (self *customxx) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	self.hd.ServeHTTP(
-		w,
-		NewHttpRequest(r),
-	)
+	self.hd.ServeHTTP(w, NewHttpRequest(r))
 }
+
 func (h *httpTransportListener) Addr() net.Addr {
 	return h.listener.Addr()
 }

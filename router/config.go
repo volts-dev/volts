@@ -1,7 +1,7 @@
 package router
 
 import (
-	log "github.com/volts-dev/logger"
+	log "github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 )

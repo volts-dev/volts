@@ -13,7 +13,7 @@ require (
 	github.com/spf13/viper v1.10.1
 	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	github.com/volts-dev/dataset v0.0.0-20210303044526-4e29c6250cdc
-	github.com/volts-dev/logger v0.0.0-20210803162057-18754d780c31
+	github.com/volts-dev/logger v0.0.0-20210803162057-18754d780c31 // indirect
 	github.com/volts-dev/template v0.0.0-20210719092648-7217ecacd39b
 	github.com/volts-dev/utils v0.0.0-20220301183119-0de4229e75b4
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee

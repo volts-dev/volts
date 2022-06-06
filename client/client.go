@@ -35,7 +35,7 @@ type (
 		// The content type
 		ContentType() string
 		// The unencoded request body
-		Body() interface{}
+		Body() *body.TBody
 		// Write to the encoded request writer. This is nil before a call is made
 		//Codec() codec.Writer
 		// indicates whether the request will be a streaming one rather than unary
@@ -56,7 +56,7 @@ type (
 
 var (
 	// Default Client
-	defaultClient IClient = NewRpcClient()
+	defaultClient IClient
 	// DefaultRetry is the default check-for-retry function for retries
 	DefaultRetry = RetryOnError
 	// DefaultRetries is the default number of times a request is tried
@@ -81,11 +81,18 @@ var (
 ///}
 
 // NewClient returns a new client
-func New(opts ...Option) IClient {
+func New(opts ...Option) (IClient, error) {
 	return NewRpcClient(opts...)
 }
 
 func Default(opts ...Option) IClient {
+	if defaultClient == nil {
+		var err error
+		defaultClient, err = NewRpcClient()
+		if err != nil {
+			panic(err)
+		}
+	}
 	defaultClient.Init(opts...)
 	return defaultClient
 }

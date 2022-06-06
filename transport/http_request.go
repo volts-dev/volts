@@ -4,7 +4,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/volts-dev/logger"
+	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/util/body"
 )
 
@@ -17,27 +18,25 @@ type (
 )
 
 func NewHttpRequest(req *http.Request) *THttpRequest {
+	ct := req.Header.Get("Content-Type")
+	c := codec.IdentifyCodec(codec.CodecByName(ct))
+
 	return &THttpRequest{
 		Request: req,
+		body:    body.New(c),
 	}
 }
 
 func (self *THttpRequest) Body() *body.TBody {
-	data, err := ioutil.ReadAll(self.Request.Body)
-	if err != nil {
-		logger.Errf("Read request body faild with an error : %s!", err.Error())
-	}
-
-	if self.body == nil {
-		self.body = &body.TBody{
-			//Codec: codec.IdentifyCodec(msg.SerializeType()),
+	if self.body.Data.Len() == 0 {
+		data, err := ioutil.ReadAll(self.Request.Body)
+		if err != nil {
+			logger.Errf("Read request body faild with an error : %s!", err.Error())
 		}
+
+		self.body.Data.Write(data)
 	}
 
-	self.body.Data.Write(data)
-
-	//self.Request.Body.Close()
-	//self.Request.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	return self.body
 }
 

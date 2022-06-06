@@ -25,11 +25,16 @@ type (
 	}
 )
 
-func NewRpcClient(opts ...Option) *rpcClient {
+func NewRpcClient(opts ...Option) (*rpcClient, error) {
 	cfg := newConfig(
 		transport.NewHTTPTransport(),
 		opts...,
 	)
+
+	// 默认编码
+	if cfg.SerializeType == 0 {
+		cfg.SerializeType = codec.MsgPack
+	}
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.Default()
@@ -47,7 +52,7 @@ func NewRpcClient(opts ...Option) *rpcClient {
 		pool:   p,
 	}
 
-	return cli
+	return cli, nil
 }
 
 func (self *rpcClient) Init(opts ...Option) error {
@@ -62,8 +67,12 @@ func (self *rpcClient) Config() *Config {
 }
 
 // 新建请求
-func (self *rpcClient) NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) IRequest {
-	return NewRpcRequest(service, method, request, reqOpts...)
+func (self *rpcClient) NewRequest(service, method string, request interface{}, optinos ...RequestOption) (*rpcRequest, error) {
+	opts := []RequestOption{WithCodec(self.config.SerializeType)}
+	opts = append(opts,
+		optinos...,
+	)
+	return newRpcRequest(service, method, request, opts...)
 }
 
 func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
@@ -115,7 +124,8 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	}
 
 	msg.Path = req.Service()
-	data, err := msgCodece.Encode(req.Body())
+	//data, err := msgCodece.Encode(req.Body())
+	data := req.Body().Data.Bytes()
 	if err != nil {
 		logger.Dbg("odec.Encode(call.Args)", err.Error())
 		//call.Error = err
@@ -219,7 +229,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 }
 
 // 阻塞请求
-func (self *rpcClient) Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error) {
+func (self *rpcClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	for _, opt := range opts {
@@ -231,6 +241,10 @@ func (self *rpcClient) Call(ctx context.Context, request IRequest, opts ...CallO
 		return nil, err
 	}
 
+	ctx := callOpts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// check if we already have a deadline
 	d, ok := ctx.Deadline()
 	if !ok {

@@ -15,17 +15,21 @@ func (c byteCodec) Encode(i interface{}) ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	if data, ok := i.([]byte); ok {
-		return data, nil
-	}
+	switch v := i.(type) {
+	case []byte:
+		return v, nil
+	case string:
+		return []byte(v), nil
 
-	return nil, fmt.Errorf("%T is not a []byte", i)
+	default:
+		return nil, fmt.Errorf("%T is not a []byte", i)
+	}
 }
 
 // Decode returns raw slice of bytes.
 func (c byteCodec) Decode(data []byte, i interface{}) error {
 	reflect.Indirect(reflect.ValueOf(i)).SetBytes(data)
-	//&i = data
+
 	return nil
 }
 

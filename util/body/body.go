@@ -3,37 +3,94 @@ package body
 import (
 	"bytes"
 	"errors"
+	"io"
 
 	"github.com/volts-dev/dataset"
 	"github.com/volts-dev/volts/codec"
 )
 
 type (
+	// NOTED 不提供IO Reader/Writer/Closer
 	TBody struct {
-		Data  bytes.Buffer
+		//Buf     interface{} // 存储未编码的数据读取晴空
+		Data  *bytes.Buffer // 存储已经编码的数据
 		Codec codec.ICodec
+		len   int
 	}
 )
 
 func (self *TBody) Close() error {
+	self.Data.Reset()
 	return nil
 }
 
+func New(coder codec.ICodec, data ...interface{}) *TBody {
+	if coder == nil {
+		coder = codec.IdentifyCodec(codec.Bytes)
+	}
+
+	bd := &TBody{
+		Data:  &bytes.Buffer{},
+		Codec: coder,
+	}
+
+	if data != nil {
+		bd.Encode(data[0])
+	}
+
+	return bd
+}
+
+// 读取原始数据或者编码数据
+func (self *TBody) _Read(p []byte) (int, error) {
+	return self.Data.Read(p)
+}
+
 // as ioreader
-func (self *TBody) Read(p []byte) (int, error) {
+func (self *TBody) __Read(p []byte) (int, error) {
 	if self.Codec != nil {
-		err := self.Codec.Decode(self.Data.Bytes(), p)
+		cnt, err := self.Data.Read(p)
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+
+		raw := make([]byte, 0, len(p)*2) // 必须保留有解码后长度增加的空间
+		err = self.Codec.Decode(p[0:cnt], &raw)
 		if err != nil {
 			return 0, err
 		}
-		return len(p), nil
+
+		n := copy(p, raw[0:])
+		if cnt < len(p) {
+			return n, io.EOF
+		}
+		return n, nil
 	}
 
 	return self.Data.Read(p)
 }
 
+// 写入原始数据或者编码数据
+func (self *TBody) _Write(p []byte) (n int, err error) {
+	return self.Data.Write(p)
+}
+
+// 写入原始数据转编码数据
+func (self *TBody) __Write(p []byte) (n int, err error) {
+	if self.Codec != nil {
+		data, err := self.Codec.Encode(p)
+		if err != nil {
+			return 0, err
+		}
+
+		return self.Data.Write(data)
+	}
+
+	return self.Data.Write(p)
+}
+
 // mapping to data type
-func (self *TBody) ReadData(out interface{}) (err error) {
+func (self *TBody) Decode(out interface{}) (err error) {
 	if self.Codec != nil {
 		return self.Codec.Decode(self.Data.Bytes(), out)
 	}
@@ -41,33 +98,24 @@ func (self *TBody) ReadData(out interface{}) (err error) {
 	return errors.New("body not support convert to this type")
 }
 
-func (self *TBody) Write(p []byte) (n int, err error) {
-	if self.Codec != nil {
-		data, err := self.Codec.Encode(p)
-		if err != nil {
-			return 0, err
-		}
-		return self.Data.Write(data)
-	}
-	return self.Data.Write(p)
-}
-
-func (self *TBody) WriteData(in interface{}) error {
+func (self *TBody) Encode(in interface{}) (int, error) {
 	if self.Codec != nil {
 		data, err := self.Codec.Encode(in)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		_, err = self.Data.Write(data)
+
+		return self.Data.Write(data)
 	}
-	return errors.New("body not support convert to this type")
+	return 0, errors.New("body not support convert to this type")
 }
 
 // the boady data in bytes
 func (self *TBody) AsBytes() (res []byte) {
 	if self.Codec != nil {
-		err := self.Codec.Decode(self.Data.Bytes(), res)
+		err := self.Codec.Decode(self.Data.Bytes(), &res)
 		if err != nil {
+			// NOTED it should not happen!
 			return nil
 		}
 		return res

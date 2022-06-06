@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
+	log "github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 	vrouter "github.com/volts-dev/volts/router"

@@ -3,7 +3,7 @@ package cacher
 import (
 	"time"
 
-	"github.com/volts-dev/logger"
+	"github.com/volts-dev/volts/logger"
 )
 
 type (

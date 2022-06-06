@@ -3,8 +3,8 @@ package config
 import (
 	"time"
 
-	"github.com/volts-dev/logger"
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/logger"
 )
 
 var log logger.ILogger = logger.NewLogger(logger.WithPrefix("Config"))

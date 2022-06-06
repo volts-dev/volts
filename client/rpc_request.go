@@ -1,45 +1,65 @@
 package client
 
-import "github.com/volts-dev/volts/codec"
+import (
+	"io"
+
+	"github.com/volts-dev/volts/util/body"
+)
 
 type (
 	rpcRequest struct {
-		service     string //
-		method      string
-		endpoint    string
-		contentType codec.SerializeType // body 内容传输格式
-		body        interface{}
-		opts        RequestOptions
+		service       string //
+		method        string
+		endpoint      string
+		ContentLength int64
+		body          *body.TBody
+		opts          RequestOptions
 	}
 )
 
-func NewRpcRequest(service, endpoint string, content interface{}, reqOpts ...RequestOption) *rpcRequest {
-	var opts RequestOptions
-
-	for _, o := range reqOpts {
-		o(&opts)
+func newRpcRequest(service, endpoint string, data interface{}, opts ...RequestOption) (*rpcRequest, error) {
+	reqOpts := RequestOptions{}
+	for _, o := range opts {
+		o(&reqOpts)
 	}
 
-	contentType := codec.Bytes
-	// set the content-type specified
-	if len(opts.ContentType) > 0 {
-		contentType = codec.CodecByName(opts.ContentType)
+	req := &rpcRequest{
+		service:       service,
+		method:        endpoint,
+		endpoint:      endpoint,
+		body:          body.New(reqOpts.Codec),
+		ContentLength: 0,
+		opts:          reqOpts,
 	}
 
-	return &rpcRequest{
-		service:     service,
-		method:      endpoint,
-		endpoint:    endpoint,
-		body:        content,
-		contentType: contentType,
-		opts:        opts,
+	err := req.write(data)
+	if err != nil {
+		return nil, err
 	}
+	return req, nil
 }
 
 // TODO
 // 写入请求二进制数据
-func (r *rpcRequest) Write(data interface{}) {
-	r.body = data
+func (self *rpcRequest) write(data interface{}) error {
+	if data == nil {
+		return nil
+	}
+
+	var err error
+	switch v := data.(type) {
+	case io.Reader:
+		d, err := io.ReadAll(v)
+		if err != nil {
+			return err
+		}
+		_, err = self.body.Encode(d)
+	default:
+		_, err = self.body.Encode(v)
+	}
+
+	self.ContentLength = int64(self.body.Data.Len())
+	return err
 }
 
 func (r *rpcRequest) Service() string {
@@ -51,14 +71,10 @@ func (self *rpcRequest) Method() string {
 }
 
 func (self *rpcRequest) ContentType() string {
-	return self.contentType.String()
+	return self.body.Codec.String()
 }
 
-func (self *rpcRequest) SetContentType(name codec.SerializeType) {
-	self.contentType = name
-}
-
-func (self *rpcRequest) Body() interface{} {
+func (self *rpcRequest) Body() *body.TBody {
 	return self.body
 }
 
