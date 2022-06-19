@@ -155,12 +155,11 @@ func (self *HttpClient) Config() *Config {
 
 // 新建请求
 func (self *HttpClient) NewRequest(method, url string, data interface{}, optinos ...RequestOption) (*httpRequest, error) {
-	opts := []RequestOption{WithCodec(self.config.SerializeType)}
-	opts = append(opts,
-		optinos...,
+	optinos = append(optinos,
+		WithCodec(self.config.SerializeType),
 	)
 
-	return newHttpRequest(method, url, data, opts...)
+	return newHttpRequest(method, url, data, optinos...)
 }
 
 func (h *HttpClient) next(request *httpRequest, opts CallOptions) (selector.Next, error) {
@@ -218,6 +217,39 @@ func newHTTPCodec(contentType string) (codec.ICodec, error) {
 	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
 }
 
+func (self *HttpClient) printRequest(req *http.Request, rsp *httpResponse) {
+	buf := bytes.NewBufferString("")
+	if req != nil {
+		buf.WriteString(fmt.Sprintf("%s %s %s\n", req.Method, req.URL.Path, req.Proto))
+		for n, h := range req.Header {
+			buf.WriteString(fmt.Sprintf("%s: %s  \n", n, strings.Join(h, ";")))
+		}
+
+		if bd, ok := req.Body.(*buffer); ok {
+			buf.WriteString(bd.String() + "\n")
+		}
+	}
+
+	// Response
+	if rsp != nil {
+		buf.WriteString(fmt.Sprintf("Address: %s  \n", rsp.Request().URL.String()))
+		buf.WriteString(fmt.Sprintf("Response code: %d  \n", rsp.StatusCode))
+		buf.WriteString("Received Headers:\n")
+		for n, h := range rsp.Header() {
+			buf.WriteString(fmt.Sprintf("%s: %s  \n", n, strings.Join(h, ";")))
+		}
+		// cookies
+		buf.WriteString("Received Cookies:\n")
+		for _, cks := range rsp.Cookies() {
+			buf.WriteString(fmt.Sprintf("%s: %s  \n", cks.Name, cks.String()))
+		}
+		//
+		buf.WriteString("Received Payload:\n")
+		buf.WriteString(string(string(rsp.Body().AsBytes()) + "\n"))
+	}
+	logger.Info(buf.String())
+}
+
 func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpRequest, opts CallOptions) (*httpResponse, error) {
 	if ctx == nil {
 		return nil, _errors.New("net/http: nil Context")
@@ -230,6 +262,18 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 		for k, v := range md {
 			header.Set(k, v)
 		}
+	}
+
+	// User-Agent
+	var ua string
+	if h.config.UserAgent != "" {
+		ua = h.config.UserAgent
+	} else if h.config.Ja3.UserAgent != "" {
+		ua = h.config.Ja3.UserAgent
+	}
+
+	if ua != "" {
+		header.Set("User-Agent", ua)
 	}
 
 	// set timeout in nanoseconds
@@ -267,6 +311,10 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 		ContentLength: int64(buf.Len()),
 	}
 
+	// NOTE 必须提交前打印否则Body被清空req被修改清空
+	if h.config.PrintRequest {
+		h.printRequest(hreq, nil)
+	}
 	// make the request
 	hrsp, err := h.client.Do(hreq.WithContext(ctx))
 	if err != nil {
@@ -287,6 +335,10 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 		body:       bd,
 		Status:     hrsp.Status,
 		StatusCode: hrsp.StatusCode,
+	}
+
+	if h.config.PrintRequest {
+		h.printRequest(nil, rsp)
 	}
 
 	return rsp, nil

@@ -17,7 +17,7 @@ import (
 	"github.com/volts-dev/volts/transport"
 )
 
-var logger log.ILogger = log.NewLogger(log.WithPrefix("Server"))
+var logger log.ILogger = log.New("Server")
 
 type (
 	Option func(*Config)

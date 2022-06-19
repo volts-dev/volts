@@ -11,7 +11,7 @@ import (
 
 type httpResponse struct {
 	response *http.Response
-	header   map[string]string
+	_header  map[string]string
 	body     *body.TBody
 
 	Status     string // e.g. "200 OK"

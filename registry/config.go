@@ -10,7 +10,7 @@ import (
 
 // use a .volts domain rather than .local
 var mdnsDomain = "volts"
-var logger log.ILogger = log.NewLogger(log.WithPrefix("registry"))
+var logger log.ILogger = log.New("registry")
 
 type (
 	Option       func(*Config)

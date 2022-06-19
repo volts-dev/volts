@@ -7,7 +7,7 @@ import (
 	"github.com/volts-dev/volts/logger"
 )
 
-var log logger.ILogger = logger.NewLogger(logger.WithPrefix("Config"))
+var log = logger.New("Config")
 
 var (
 	// App settings.

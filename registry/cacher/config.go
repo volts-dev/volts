@@ -15,7 +15,7 @@ type (
 	}
 )
 
-var log logger.ILogger = logger.NewLogger(logger.WithPrefix("Registry.Cacher"))
+var log logger.ILogger = logger.New("Registry.Cacher")
 
 // WithTTL sets the cache TTL
 func WithTTL(t time.Duration) Option {

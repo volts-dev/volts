@@ -9,12 +9,13 @@ import (
 
 func TestGetRequest(t *testing.T) {
 	client, err := NewHttpClient(
+		WithPrintRequest(),
 		WithJa3(
 			"771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-16-22-23-13-43-45-51-21,29-23-30-25-24,0-1-2",
 			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36",
 		),
 		WithHttpOptions(
-			Ua("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36"),
+			WithUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36"),
 		),
 	)
 	if err != nil {
@@ -23,19 +24,12 @@ func TestGetRequest(t *testing.T) {
 
 	//data := []byte("你好!")
 	_url := ""
-	_url = "https://api.myip.com/" // FIXME
+	_url = "https://httpbin.org/ip" // FIXME
 	//_url = "https://www.baidu.com/"// FIXME
 	req, err := client.NewRequest("get", _url, nil)
 	if err != nil {
 		panic(err)
 	}
-	u, err := url.Parse(_url)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Host", u.Host)
 
 	resp, err := client.Call(req)
 	if err != nil {
@@ -47,12 +41,13 @@ func TestGetRequest(t *testing.T) {
 
 func TestPostRequest(t *testing.T) {
 	client, err := NewHttpClient(
+		WithPrintRequest(),
 		WithJa3(
 			"771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-16-22-23-13-43-45-51-21,29-23-1035-25-24,0-1-2",
 			"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111",
 		),
 		WithHttpOptions(
-			Ua("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
+			WithUserAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
 		),
 	)
 	if err != nil {
@@ -65,14 +60,9 @@ func TestPostRequest(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	u, err := url.Parse(_url)
-	if err != nil {
-		panic(err)
-	}
+
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111")
-	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Host", u.Host)
 	req.AddCookie(&http.Cookie{Name: "ABC", Value: "U"})
 	resp, err := client.Call(req)
 	if err != nil {
@@ -86,12 +76,13 @@ func TestOrderHeader(t *testing.T) {
 	//urladdr := "https://www.baidu.com/"
 	urladdr := "https://www.ti.com/secure-link-forward/"
 	client, err := NewHttpClient(
+		WithPrintRequest(),
 		WithJa3(
 			"771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-16-22-23-13-43-45-51-21,29-23-1035-25-24,0-1-2",
 			"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111",
 		),
 		WithHttpOptions(
-			Ua("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
+			WithUserAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
 		),
 	)
 	if err != nil {

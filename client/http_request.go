@@ -58,7 +58,8 @@ func newHttpRequest(method, url string, data interface{}, opts ...RequestOption)
 		method: strings.ToUpper(method),
 		opts:   reqOpts,
 	}
-
+	req.Header.Set("Accept", "*/*") // TODO 检测是否已经重复实现
+	req.Header.Set("Host", u.Host)
 	err = req.write(data)
 	if err != nil {
 		return nil, err

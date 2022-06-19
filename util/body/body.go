@@ -110,6 +110,10 @@ func (self *TBody) Encode(in interface{}) (int, error) {
 	return 0, errors.New("body not support convert to this type")
 }
 
+func (self *TBody) AsBuffer() *bytes.Buffer {
+	return bytes.NewBuffer(self.AsBytes())
+}
+
 // the boady data in bytes
 func (self *TBody) AsBytes() (res []byte) {
 	if self.Codec != nil {

@@ -136,7 +136,7 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		config := self.config.TLSConfig
 		if config == nil {
 			config = &tls.Config{
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: true, // 跳过认证证书
 			}
 		}
 
@@ -158,9 +158,10 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			}
 
 			cnn := utls.UClient(rawConn, &utls.Config{
-				ServerName: host,
-				MinVersion: tls.VersionTLS12,
-				MaxVersion: tls.VersionTLS12,
+				ServerName:         host,
+				MinVersion:         tls.VersionTLS12,
+				MaxVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: config.InsecureSkipVerify,
 			}, // Default is TLS13
 				utls.HelloChrome_Auto)
 			if err := cnn.ApplyPreset(spec); err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/volts-dev/volts/transport"
 )
 
-var logger log.ILogger = log.NewLogger(log.WithPrefix("Client"))
+var logger = log.New("Client")
 
 type (
 	RequestOptions struct {
@@ -95,9 +95,6 @@ type (
 		// TLSConfig for tcp and quic
 		TLSConfig *tls.Config
 
-		Ja3      transport.Ja3
-		ProxyURL string
-
 		// kcp.BlockCrypt
 		Block interface{}
 		// RPCPath for http connection
@@ -121,9 +118,14 @@ type (
 		Heartbeat         bool
 		HeartbeatInterval time.Duration
 
+		Ja3      transport.Ja3
+		ProxyURL string
 		// http options
-		userAgent     string
-		allowRedirect bool
+		UserAgent     string
+		AllowRedirect bool
+
+		// Debug mode
+		PrintRequest bool
 	}
 
 	// RequestOption used by NewRequest
@@ -210,15 +212,16 @@ func WithCookiejar(jar http.CookieJar) HttpOption {
 	}
 }
 
-func Ua(userAgent string) HttpOption {
+func WithUserAgent(userAgent string) HttpOption {
 	return func(cfg *Config) {
-		cfg.userAgent = userAgent
+		cfg.UserAgent = userAgent
+		cfg.Ja3.UserAgent = userAgent
 	}
 }
 
 func AllowRedirect() HttpOption {
 	return func(cfg *Config) {
-		cfg.allowRedirect = true
+		cfg.AllowRedirect = true
 	}
 }
 
@@ -244,10 +247,12 @@ func WithTransport(t transport.ITransport) Option {
 		cfg.Transport = t
 	}
 }
+
 func WithJa3(ja3, userAgent string) Option {
 	return func(cfg *Config) {
 		cfg.Ja3.Ja3 = ja3
 		cfg.Ja3.UserAgent = userAgent
+		cfg.UserAgent = userAgent
 		//	cfg.DialOptions = append(cfg.DialOptions, transport.WithJa3(cfg.Ja3.Ja3, cfg.Ja3.UserAgent))
 	}
 }
@@ -273,5 +278,12 @@ func WithHttpOptions(opts ...HttpOption) Option {
 				opt(cfg)
 			}
 		}
+	}
+}
+
+// 打印请求信息
+func WithPrintRequest() Option {
+	return func(cfg *Config) {
+		cfg.PrintRequest = true
 	}
 }
