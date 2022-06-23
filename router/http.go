@@ -567,16 +567,19 @@ func (self *THttpContext) NotModified() {
 	self.response.WriteHeader(304)
 }
 
+// NOTE default EscapeHTML=false
 // Respond content by Json mode
 func (self *THttpContext) RespondByJson(data interface{}) {
-	js, err := json.Marshal(data)
-	if err != nil {
+	buf := bytes.NewBuffer([]byte{})
+	js := json.NewEncoder(buf)
+	js.SetEscapeHTML(false)
+	if err := js.Encode(data); err != nil {
 		self.response.Write([]byte(err.Error()))
 		return
 	}
 
 	self.response.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	self.Result = js
+	self.Result = buf.Bytes()
 }
 
 // Ck

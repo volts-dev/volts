@@ -217,21 +217,35 @@ func newHTTPCodec(contentType string) (codec.ICodec, error) {
 	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
 }
 
-func (self *HttpClient) printRequest(req *http.Request, rsp *httpResponse) {
-	buf := bytes.NewBufferString("")
+func (self *HttpClient) printRequest(buf *bytes.Buffer, req *http.Request, rsp *httpResponse) {
 	if req != nil {
 		buf.WriteString(fmt.Sprintf("%s %s %s\n", req.Method, req.URL.Path, req.Proto))
 		for n, h := range req.Header {
 			buf.WriteString(fmt.Sprintf("%s: %s  \n", n, strings.Join(h, ";")))
 		}
 
+		// cookies
+		buf.WriteString("Cookies:\n")
+		for _, cks := range self.client.Jar.Cookies(req.URL) {
+			buf.WriteString(fmt.Sprintf("%s: %s  \n", cks.Name, cks.Value))
+		}
+
 		if bd, ok := req.Body.(*buffer); ok {
-			buf.WriteString(bd.String() + "\n")
+			context := bd.String()
+			if !self.config.PrintRequestAll {
+				if len(context) > 512 {
+					context = context[:512] + "..."
+				}
+			}
+			buf.WriteString(context + "\n")
 		}
 	}
 
 	// Response
 	if rsp != nil {
+		if buf.Len() > 0 {
+			buf.WriteString("\n")
+		}
 		buf.WriteString(fmt.Sprintf("Address: %s  \n", rsp.Request().URL.String()))
 		buf.WriteString(fmt.Sprintf("Response code: %d  \n", rsp.StatusCode))
 		buf.WriteString("Received Headers:\n")
@@ -241,13 +255,20 @@ func (self *HttpClient) printRequest(req *http.Request, rsp *httpResponse) {
 		// cookies
 		buf.WriteString("Received Cookies:\n")
 		for _, cks := range rsp.Cookies() {
-			buf.WriteString(fmt.Sprintf("%s: %s  \n", cks.Name, cks.String()))
+			buf.WriteString(fmt.Sprintf("%s: %s  \n", cks.Name, cks.Value))
 		}
 		//
 		buf.WriteString("Received Payload:\n")
-		buf.WriteString(string(string(rsp.Body().AsBytes()) + "\n"))
+
+		context := string(rsp.Body().AsBytes())
+		if !self.config.PrintRequestAll {
+			if len(context) > 512 {
+				context = context[:512] + "..."
+			}
+		}
+		buf.WriteString(context + "\n")
+
 	}
-	logger.Info(buf.String())
 }
 
 func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpRequest, opts CallOptions) (*httpResponse, error) {
@@ -312,8 +333,10 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 	}
 
 	// NOTE 必须提交前打印否则Body被清空req被修改清空
+	var pr *bytes.Buffer
 	if h.config.PrintRequest {
-		h.printRequest(hreq, nil)
+		pr = bytes.NewBufferString("")
+		h.printRequest(pr, hreq, nil)
 	}
 	// make the request
 	hrsp, err := h.client.Do(hreq.WithContext(ctx))
@@ -338,7 +361,8 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 	}
 
 	if h.config.PrintRequest {
-		h.printRequest(nil, rsp)
+		h.printRequest(pr, nil, rsp)
+		logger.Info(pr.String())
 	}
 
 	return rsp, nil

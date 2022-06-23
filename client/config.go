@@ -125,7 +125,8 @@ type (
 		AllowRedirect bool
 
 		// Debug mode
-		PrintRequest bool
+		PrintRequest    bool
+		PrintRequestAll bool
 	}
 
 	// RequestOption used by NewRequest
@@ -282,8 +283,11 @@ func WithHttpOptions(opts ...HttpOption) Option {
 }
 
 // 打印请求信息
-func WithPrintRequest() Option {
+func WithPrintRequest(all ...bool) Option {
 	return func(cfg *Config) {
 		cfg.PrintRequest = true
+		if len(all) > 0 {
+			cfg.PrintRequestAll = all[0]
+		}
 	}
 }
