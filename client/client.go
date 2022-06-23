@@ -82,7 +82,7 @@ var (
 
 // NewClient returns a new client
 func New(opts ...Option) (IClient, error) {
-	return NewRpcClient(opts...)
+	return NewRpcClient(opts...) //
 }
 
 func Default(opts ...Option) IClient {
