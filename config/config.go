@@ -23,8 +23,11 @@ var (
 
 type (
 	Config struct {
-		fmt  *format
-		Mode ModeType
+		fmt         *format
+		Mode        ModeType
+		AppFilePath string
+		AppPath     string
+		AppDir      string
 	}
 )
 
@@ -36,8 +39,11 @@ func init() {
 
 func New() *Config {
 	return &Config{
-		fmt:  newFormat(),
-		Mode: MODE_NORMAL,
+		fmt:         newFormat(),
+		Mode:        MODE_NORMAL,
+		AppFilePath: AppFilePath,
+		AppPath:     AppPath,
+		AppDir:      AppDir,
 	}
 }
 
@@ -45,6 +51,7 @@ func Default() *Config {
 	return defaultConfig
 }
 
+// default is CONFIG_FILE_NAME = "config.json"
 func (self *Config) Load(fileName ...string) error {
 	if fileName != nil {
 		self.fmt.v.SetConfigFile(fileName[0])
@@ -67,48 +74,53 @@ func (self *Config) Save() error {
 	return nil
 }
 
-func (self *Config) GetBool(key string, defaultValue bool) bool {
-	return self.fmt.GetBool(key, defaultValue)
+func (self *Config) GetBool(field string, defaultValue bool) bool {
+	return self.fmt.GetBool(field, defaultValue)
 }
 
 // GetStringValue from default namespace
-func (self *Config) GetString(key, defaultValue string) string {
-	return self.fmt.GetString(key, defaultValue)
+func (self *Config) GetString(field, defaultValue string) string {
+	return self.fmt.GetString(field, defaultValue)
 }
 
 // GetIntValue from default namespace
-func (self *Config) GetInt(key string, defaultValue int) int {
-	return self.fmt.GetInt(key, defaultValue)
+func (self *Config) GetInt(field string, defaultValue int) int {
+	return self.fmt.GetInt(field, defaultValue)
 }
 
-func (self *Config) GetInt32(key string, defaultValue int32) int32 {
-	return self.fmt.GetInt32(key, defaultValue)
+func (self *Config) GetInt32(field string, defaultValue int32) int32 {
+	return self.fmt.GetInt32(field, defaultValue)
 }
 
-func (self *Config) GetInt64(key string, defaultValue int64) int64 {
-	return self.fmt.GetInt64(key, defaultValue)
+func (self *Config) GetInt64(field string, defaultValue int64) int64 {
+	return self.fmt.GetInt64(field, defaultValue)
 }
 
-func (self *Config) GetIntSlice(key string, defaultValue []int) []int {
-	return self.fmt.GetIntSlice(key, defaultValue)
+func (self *Config) GetIntSlice(field string, defaultValue []int) []int {
+	return self.fmt.GetIntSlice(field, defaultValue)
 }
 
-func (self *Config) GetTime(key string, defaultValue time.Time) time.Time {
-	return self.fmt.GetTime(key, defaultValue)
+func (self *Config) GetTime(field string, defaultValue time.Time) time.Time {
+	return self.fmt.GetTime(field, defaultValue)
 }
 
-func (self *Config) GetDuration(key string, defaultValue time.Duration) time.Duration {
-	return self.fmt.GetDuration(key, defaultValue)
+func (self *Config) GetDuration(field string, defaultValue time.Duration) time.Duration {
+	return self.fmt.GetDuration(field, defaultValue)
 }
 
-func (self *Config) GetFloat64(key string, defaultValue float64) float64 {
-	return self.fmt.GetFloat64(key, defaultValue)
+func (self *Config) GetFloat64(field string, defaultValue float64) float64 {
+	return self.fmt.GetFloat64(field, defaultValue)
 }
 
-func (self *Config) SetValue(key string, value interface{}) {
-	self.fmt.SetValue(key, value)
+func (self *Config) SetValue(field string, value interface{}) {
+	self.fmt.SetValue(field, value)
 }
 
-func (self *Config) UnmarshalKey(key string, rawVal interface{}) {
-	self.fmt.UnmarshalKey(key, rawVal)
+func (self *Config) Unmarshal(rawVal interface{}) {
+	self.fmt.Unmarshal(rawVal)
+}
+
+// 反序列字段映射到数据类型
+func (self *Config) UnmarshalField(field string, rawVal interface{}) {
+	self.fmt.UnmarshalKey(field, rawVal)
 }

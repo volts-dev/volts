@@ -88,6 +88,10 @@ func (self *format) GetFloat64(key string, defaultValue float64) float64 {
 	return val
 }
 
+func (self *format) Unmarshal(rawVal interface{}) {
+	self.v.Unmarshal(rawVal)
+}
+
 func (self *format) UnmarshalKey(key string, rawVal interface{}) {
 	self.v.UnmarshalKey(key, rawVal)
 }
