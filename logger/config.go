@@ -6,23 +6,40 @@ type (
 	Option func(*TConfig)
 
 	TConfig struct {
-		Level  Level  `json:"Level"`
-		Prefix string `json:"Prefix"`
+		Level     Level  `json:"Level"`
+		Prefix    string `json:"Prefix"`
+		WriteName string
 	}
 )
 
 var (
 	creators = make(map[string]IWriterType) // 注册的Writer类型函数接口
-	defualt  = newLogger()
-	all      sync.Map
+	defualt  = New("LOG")
+	loggers  sync.Map
 )
 
-// the output like: 2035/01/01 00:00:00 [Prefix][Action] message...
-func New(Prefix string, opts ...Option) *TLogger {
-	opts = append(opts, WithPrefix(Prefix)) //
-	log := newLogger(opts...)
-	all.Store(Prefix, log)
-	return log
+func newConfig(opts ...Option) *TConfig {
+	config := &TConfig{
+		Level:  LevelDebug,
+		Prefix: "LOG",
+	}
+	config.Init(opts...)
+	return config
+}
+
+// init options
+func (self *TConfig) Init(opts ...Option) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(self)
+		}
+	}
+}
+
+func WithWrite(name string) Option {
+	return func(cfg *TConfig) {
+		cfg.WriteName = name
+	}
 }
 
 func WithPrefix(name string) Option {

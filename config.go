@@ -29,11 +29,15 @@ type (
 	}
 )
 
-func NewConfig(opts ...Option) *Config {
+func newConfig(opts ...Option) *Config {
 	cfg := &Config{}
 
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	if cfg.Context == nil {
+		cfg.Context = context.Background()
 	}
 
 	if cfg.Transport == nil {
@@ -50,10 +54,6 @@ func NewConfig(opts ...Option) *Config {
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.New()
-	}
-
-	if cfg.Context == nil {
-		cfg.Context = context.Background()
 	}
 
 	return cfg

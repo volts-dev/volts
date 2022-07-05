@@ -262,7 +262,11 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 		ht:       self,
 		listener: l,
 	}
-
+	/*
+		self.config.Listener = &transportListener{
+			transport: self,
+			listener:  l,
+		}*/
 	return self.config.Listener, nil
 }
 

@@ -93,7 +93,7 @@ func (self *TMiddlewareManager) Add(key string, value IMiddleware) {
 		self.middlewares[key] = value
 		self.names = append(self.names, key) // # 保存添加顺序
 	} else {
-		logger.Err("key:" + key + " already exists")
+		log.Err("key:" + key + " already exists")
 	}
 }
 

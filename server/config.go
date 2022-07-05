@@ -10,27 +10,25 @@ import (
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
-	log "github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 	vrouter "github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
 )
 
-var logger log.ILogger = log.New("Server")
-
 type (
 	Option func(*Config)
 
 	Config struct {
 		Codecs map[string]codec.ICodec
-		Bus    bus.IBus
+		Bus    bus.IBus // 实例
 		//Tracer    trace.Tracer
-		Registry  registry.IRegistry
-		Transport transport.ITransport
-		Router    vrouter.IRouter // The router for requests
-		Logger    log.ILogger     //
-		TLSConfig *tls.Config     // TLSConfig specifies tls.Config for secure serving
+		Registry  registry.IRegistry   // 实例
+		Transport transport.ITransport // 实例
+		Router    vrouter.IRouter      // 实例 The router for requests
+		Logger    logger.ILogger       // 实例
+		TLSConfig *tls.Config          // TLSConfig specifies tls.Config for secure serving
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -51,6 +49,8 @@ type (
 		RegisterTTL time.Duration
 		// The interval on which to register
 		RegisterInterval time.Duration
+
+		AutoCreate bool //自动创建实例
 	}
 )
 
@@ -73,7 +73,7 @@ func newConfig(opts ...Option) *Config {
 	cfg := &Config{
 		Uid:              uuid.New().String(),
 		Name:             DefaultName,
-		Logger:           logger,
+		Logger:           log,
 		Bus:              bus.DefaultBus,
 		Registry:         registry.Default(),
 		Codecs:           make(map[string]codec.ICodec),
@@ -83,22 +83,42 @@ func newConfig(opts ...Option) *Config {
 		RegisterTTL:      DefaultRegisterTTL,
 		RegisterCheck:    DefaultRegisterCheck,
 		Version:          DefaultVersion,
+		AutoCreate:       true,
 	}
 
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	if cfg.Transport == nil {
-		cfg.Transport = transport.NewHTTPTransport()
-	}
-
-	// if not special router use the default
-	if cfg.Router == nil {
-		cfg.Router = vrouter.New()
-	}
-
+	cfg.Init(opts...)
 	return cfg
+}
+
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self)
+	}
+
+	if self.Transport == nil {
+		if self.AutoCreate {
+			self.Transport = transport.NewHTTPTransport()
+		} else {
+			//log.Warn("Transport is NIL")
+		}
+	}
+
+	// if not special router use create new
+	if self.Router == nil {
+		if self.AutoCreate {
+			self.Router = vrouter.New()
+		} else {
+			//log.Warn("Router is NIL")
+		}
+	}
+
+	if self.Registry == nil {
+		if self.AutoCreate {
+			self.Registry = registry.Default()
+		} else {
+			//log.Warn("Registry is NIL")
+		}
+	}
 }
 
 // under debug mode the port will keep at 35999
@@ -204,5 +224,12 @@ func TLSConfig(t *tls.Config) Option {
 			transport.Secure(true),
 			transport.TLSConfig(t),
 		)
+	}
+}
+
+// 如果为False服务器不会自动创建默认必要组件实例,开发者自己配置
+func AutoCreate(open bool) Option {
+	return func(cfg *Config) {
+		cfg.AutoCreate = open
 	}
 }

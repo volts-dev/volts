@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 
-	log "github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
 )
@@ -17,7 +17,7 @@ var (
 type (
 	// 代表一个控制集
 	TRpcContext struct {
-		log.ILogger
+		logger.ILogger
 		context      context.Context
 		response     *transport.RpcResponse //http.ResponseWriter
 		request      *transport.RpcRequest  //
@@ -31,6 +31,8 @@ type (
 		typ          reflect.Type // type of the receiver
 		//method   map[string]*methodType   // registered methods
 		//function map[string]*functionType // registered functions
+		isDone bool // -- 已经提交过
+
 		argv   reflect.Value
 		replyv reflect.Value
 	}
@@ -47,7 +49,7 @@ func handleError(res *transport.Message, err error) (*transport.Message, error) 
 
 func NewRpcHandler(router *TRouter) *TRpcContext {
 	handler := &TRpcContext{
-		ILogger: logger,
+		ILogger: log,
 		Router:  router,
 	}
 	handler.val = reflect.ValueOf(handler)
@@ -87,7 +89,7 @@ func (self *TRpcContext) Context() context.Context {
 }
 
 func (self *TRpcContext) IsDone() bool {
-	return false
+	return self.isDone
 }
 
 // the reflect model of Value
@@ -141,4 +143,5 @@ func (self *TRpcContext) RespondByJson(data interface{}) {
 
 func (self *TRpcContext) Abort(body string) {
 	// TODO
+	self.isDone = true
 }

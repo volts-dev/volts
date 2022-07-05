@@ -362,7 +362,7 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 
 	if h.config.PrintRequest {
 		h.printRequest(pr, nil, rsp)
-		logger.Info(pr.String())
+		log.Info(pr.String())
 	}
 
 	return rsp, nil

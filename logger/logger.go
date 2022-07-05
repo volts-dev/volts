@@ -22,6 +22,7 @@ type (
 		Infof(format string, v ...interface{})
 
 		//Panic(v ...interface{})
+		Panic(v ...interface{})
 		Dbg(v ...interface{})
 		Atk(v ...interface{})
 		Err(v ...interface{}) error
@@ -31,23 +32,24 @@ type (
 
 	// Supply API to user
 	TLogger struct {
+		Config  *TConfig
 		manager *TWriterManager
 	}
 )
 
-func newLogger(opts ...Option) *TLogger {
-	config := &TConfig{
-		Level:  LevelDebug,
-		Prefix: "LOG",
-	}
-	// init options
-	for _, opt := range opts {
-		if opt != nil {
-			opt(config)
-		}
+// the output like: 2035/01/01 00:00:00 [Prefix][Action] message...
+func New(Prefix string, opts ...Option) *TLogger {
+	if l, ok := loggers.Load(Prefix); ok {
+		return l.(*TLogger)
 	}
 
-	log := &TLogger{}
+	opts = append(opts, WithPrefix(Prefix)) //
+	config := newConfig(opts...)
+
+	//log := newLogger(opts...)
+	log := &TLogger{
+		Config: config,
+	}
 	log.manager = &TWriterManager{
 		writer:              make(map[string]IWriter),
 		level_writer:        make(map[Level]IWriter),
@@ -68,6 +70,7 @@ func newLogger(opts ...Option) *TLogger {
 		},
 	}
 
+	loggers.Store(Prefix, log)
 	return log
 }
 
@@ -86,7 +89,7 @@ func RegisterWriter(name string, aWriterCreator IWriterType) {
 }
 
 func Get(profix string) ILogger {
-	v, ok := all.Load(profix)
+	v, ok := loggers.Load(profix)
 	if ok {
 		return v.(ILogger)
 	}
@@ -94,16 +97,16 @@ func Get(profix string) ILogger {
 }
 
 func Set(profix string, log ILogger) {
-	all.Store(profix, log)
+	loggers.Store(profix, log)
 }
 
 func All() []ILogger {
-	var loggers []ILogger
-	all.Range(func(key, value interface{}) bool {
-		loggers = append(loggers, value.(ILogger))
+	var logs []ILogger
+	loggers.Range(func(key, value interface{}) bool {
+		logs = append(logs, value.(ILogger))
 		return true
 	})
-	return loggers
+	return logs
 }
 
 // 断言如果结果和条件不一致就错误
@@ -340,9 +343,18 @@ func (self *TLogger) Warn(v ...interface{}) {
 
 // Log ERROR level message.
 func (self *TLogger) Err(v ...interface{}) error {
+	// not print nil error message
+	if v != nil && v[0] == nil {
+		return nil
+	}
+
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelError, "[ERR] "+msg)
 	return errors.New(msg)
+}
+
+func (self *TLogger) Panic(args ...interface{}) {
+	panic(args)
 }
 
 // Log DEBUG level message.

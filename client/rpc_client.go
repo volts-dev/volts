@@ -17,7 +17,7 @@ import (
 )
 
 type (
-	rpcClient struct {
+	RpcClient struct {
 		config   *Config
 		pool     pool.Pool // connect pool
 		closing  bool      // user has called Close
@@ -25,9 +25,9 @@ type (
 	}
 )
 
-func NewRpcClient(opts ...Option) (*rpcClient, error) {
+func NewRpcClient(opts ...Option) (*RpcClient, error) {
 	cfg := newConfig(
-		transport.NewHTTPTransport(),
+		transport.NewTCPTransport(),
 		opts...,
 	)
 
@@ -47,35 +47,30 @@ func NewRpcClient(opts ...Option) (*rpcClient, error) {
 		pool.Transport(cfg.Transport),
 	)
 
-	cli := &rpcClient{
+	return &RpcClient{
 		config: cfg,
 		pool:   p,
-	}
-
-	return cli, nil
+	}, nil
 }
 
-func (self *rpcClient) Init(opts ...Option) error {
-	for _, opt := range opts {
-		opt(self.config)
-	}
+func (self *RpcClient) Init(opts ...Option) error {
+	self.config.Init(opts...)
 	return nil
 }
 
-func (self *rpcClient) Config() *Config {
+func (self *RpcClient) Config() *Config {
 	return self.config
 }
 
 // 新建请求
-func (self *rpcClient) NewRequest(service, method string, request interface{}, optinos ...RequestOption) (*rpcRequest, error) {
-	opts := []RequestOption{WithCodec(self.config.SerializeType)}
-	opts = append(opts,
-		optinos...,
+func (self *RpcClient) NewRequest(service, method string, request interface{}, optinos ...RequestOption) (*rpcRequest, error) {
+	optinos = append(optinos,
+		WithCodec(self.config.SerializeType),
 	)
-	return newRpcRequest(service, method, request, opts...)
+	return newRpcRequest(service, method, request, optinos...)
 }
 
-func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
+func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
 	address := node.Address
 
 	msg := transport.GetMessageFromPool()
@@ -127,7 +122,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	//data, err := msgCodece.Encode(req.Body())
 	data := req.Body().Data.Bytes()
 	if err != nil {
-		logger.Dbg("odec.Encode(call.Args)", err.Error())
+		log.Dbg("odec.Encode(call.Args)", err.Error())
 		//call.Error = err
 		//call.done()
 		return nil, err
@@ -149,10 +144,7 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 
 	// wait for error response
 	ch := make(chan error, 1)
-
-	resp := &rpcResponse{
-		//body: []byte{},
-	}
+	resp := &rpcResponse{}
 	go func(resp *rpcResponse) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -176,13 +168,11 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 			return
 		}
 
-		b := &body.TBody{
-			Codec: codec.IdentifyCodec(msg.SerializeType()),
-		}
-		b.Data.Write(msg.Payload)
+		bd := body.New(codec.IdentifyCodec(msg.SerializeType()))
+		bd.Data.Write(msg.Payload)
 		// 解码消息内容
 		resp.contentType = msg.SerializeType()
-		resp.body = b // msg.Payload
+		resp.body = bd // msg.Payload
 		/*
 			///	移动到reponse里处理
 				data := msg.Payload
@@ -207,29 +197,28 @@ func (self *rpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		ch <- nil
 	}(resp)
 
-	var grr error
+	err = nil
 	select {
 	case err := <-ch:
 		return resp, err
 	case <-ctx.Done():
-		grr = errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
+		err = errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
 		break
 	}
 
 	// set the stream error
-	if grr != nil {
+	if err != nil {
 		//stream.Lock()
 		//stream.err = grr
 		//stream.Unlock()
-
-		return nil, grr
+		return nil, err
 	}
 
 	return resp, nil
 }
 
 // 阻塞请求
-func (self *rpcClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
+func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	for _, opt := range opts {
@@ -311,7 +300,7 @@ func (self *rpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 }
 
 // next returns an iterator for the next nodes to call
-func (r *rpcClient) next(request IRequest, opts CallOptions) (selector.Next, error) {
+func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, error) {
 	// try get the proxy
 	service, address, _ := vnet.Proxy(request.Service(), opts.Address)
 
@@ -346,6 +335,6 @@ func (r *rpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 
 	return next, nil
 }
-func (self *rpcClient) String() string {
-	return "rpcClient"
+func (self *RpcClient) String() string {
+	return "RpcClient"
 }

@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/codec"
-	log "github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 )
 
-var logger = log.New("Client")
+var log = logger.New("Client")
 
 type (
 	RequestOptions struct {
@@ -65,7 +65,7 @@ type (
 	Config struct {
 		Client    IClient
 		Transport transport.ITransport
-		logger    log.ILogger
+		logger    logger.ILogger
 
 		// Connection Pool
 		PoolSize    int
@@ -136,7 +136,7 @@ type (
 func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
 		Transport: tr,
-		logger:    logger,
+		logger:    log,
 		Retries:   3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,
@@ -226,6 +226,15 @@ func AllowRedirect() HttpOption {
 	}
 }
 
+// 增加超时到60s
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.ConnectTimeout = 60 * time.Second
+		cfg.ReadTimeout = 60 * time.Second
+		cfg.WriteTimeout = 60 * time.Second
+	}
+}
+
 // Codec to be used to encode/decode requests for a given content type
 func WithSerializeType(c codec.SerializeType) Option {
 	return func(cfg *Config) {
@@ -289,5 +298,12 @@ func WithPrintRequest(all ...bool) Option {
 		if len(all) > 0 {
 			cfg.PrintRequestAll = all[0]
 		}
+	}
+}
+
+// 固定服务器列表
+func WithHost(adr ...string) Option {
+	return func(cfg *Config) {
+		cfg.CallOptions.Address = append(cfg.CallOptions.Address, adr...)
 	}
 }

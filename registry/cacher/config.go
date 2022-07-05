@@ -2,8 +2,6 @@ package cacher
 
 import (
 	"time"
-
-	"github.com/volts-dev/volts/logger"
 )
 
 type (
@@ -14,8 +12,6 @@ type (
 		TTL time.Duration
 	}
 )
-
-var log logger.ILogger = logger.New("Registry.Cacher")
 
 // WithTTL sets the cache TTL
 func WithTTL(t time.Duration) Option {

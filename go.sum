@@ -686,11 +686,16 @@ github.com/volts-dev/logger v0.0.0-20210803162057-18754d780c31/go.mod h1:6inPB8Q
 github.com/volts-dev/template v0.0.0-20190320164224-0c521881058c/go.mod h1:cJ1y6kWexP/G6/ncNclDDK3DUnESEAsoMWZoFuI+1Do=
 github.com/volts-dev/template v0.0.0-20210719092648-7217ecacd39b h1:fqg81bCGdHj4dbS4BanPqF7j+WClVKoYfjkk3rivKaM=
 github.com/volts-dev/template v0.0.0-20210719092648-7217ecacd39b/go.mod h1:2Q/kYpSY7yR/MLS3fLWc89N6azcCTFZpU3CSrYPceQg=
+github.com/volts-dev/template v0.0.0-20220629104119-52fcca66a2e1 h1:2o/Z1pn3Hg5Escng48GpWgq92HgxntnMMotAKcieIP8=
+github.com/volts-dev/template v0.0.0-20220629104119-52fcca66a2e1/go.mod h1:Wc2+D/cgmpVU699uMC6Ae74O1xK8FKwqk2t82ljgF2g=
 github.com/volts-dev/utils v0.0.0-20191020084914-72dcd57777e6/go.mod h1:0SKzbdZHLvrlZByCsbzLoWh8Zba0XFSynF8daygjvcs=
 github.com/volts-dev/utils v0.0.0-20210131181100-6365ffec7098/go.mod h1:Gc+qRhI3xm2jw2mAv+X7xI91R9+t+oeTrnYoUes1Aco=
 github.com/volts-dev/utils v0.0.0-20220301183119-0de4229e75b4 h1:/91t8R4x/efct/5r7IvXHpGjntTPLi24Yw8rH/lbjDU=
 github.com/volts-dev/utils v0.0.0-20220301183119-0de4229e75b4/go.mod h1:Gc+qRhI3xm2jw2mAv+X7xI91R9+t+oeTrnYoUes1Aco=
+github.com/volts-dev/utils v0.0.0-20220409042925-ad5762368652 h1:kR3lWD+g4680wGcBAjH5ua/y3QukbsnPqO4WkzDoo/w=
+github.com/volts-dev/utils v0.0.0-20220409042925-ad5762368652/go.mod h1:Gc+qRhI3xm2jw2mAv+X7xI91R9+t+oeTrnYoUes1Aco=
 github.com/volts-dev/volts v0.0.0-20200503182809-04484fd814bb/go.mod h1:NwNqkHwcSHc8VW0CTeVtUaAoxsiDt8BSx4uuthjS0EQ=
+github.com/volts-dev/volts v0.0.0-20220624022555-ce4156864717/go.mod h1:KLBXzETY7bFqitK4tLtOiaOUAdQXB5wLEqyiFDhOHCs=
 github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee h1:WOrAdlehv/k0OLha/Qp6lNFB7xScxEYItCExczlPrOc=
 github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee/go.mod h1:AWI0tKGYGsbcwNq3YyLjIpKxRfi4XT8D6TqnmkhOecA=
 github.com/vultr/govultr/v2 v2.0.0/go.mod h1:2PsEeg+gs3p/Fo5Pw8F9mv+DUBEOlrNZ8GmCTGmhOhs=

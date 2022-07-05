@@ -10,6 +10,6 @@ func Recover(ctx IContext) {
 		if !ok {
 			break
 		}
-		logger.Errf("file: %s %d", file, line)
+		log.Errf("file: %s %d", file, line)
 	}
 }

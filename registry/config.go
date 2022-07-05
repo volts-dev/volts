@@ -5,12 +5,11 @@ import (
 	"crypto/tls"
 	"time"
 
-	log "github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/logger"
 )
 
 // use a .volts domain rather than .local
 var mdnsDomain = "volts"
-var logger log.ILogger = log.New("registry")
 
 type (
 	Option       func(*Config)
@@ -66,8 +65,8 @@ func newConfig() *Config {
 	}
 }
 
-func Logger() log.ILogger {
-	return logger
+func Logger() logger.ILogger {
+	return log
 }
 
 // Addrs is the registry addresses to use

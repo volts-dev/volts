@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+var log = logger.New("Registry.Cacher")
+
 // Cache is the registry cache interface
 type (
 	ICacher interface {

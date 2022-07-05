@@ -20,7 +20,7 @@ import (
 	"github.com/volts-dev/dataset"
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
-	log "github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
 	//httpx "github.com/volts-dev/volts/server/listener/http"
@@ -81,7 +81,7 @@ type (
 
 	// THttpContext 负责所有请求任务,每个Handle表示有一个请求
 	THttpContext struct {
-		log.ILogger
+		logger.ILogger
 		http.ResponseWriter
 		context  context.Context
 		response *transport.THttpResponse //http.ResponseWriter
@@ -124,7 +124,7 @@ func NewParamsSet(hd *THttpContext) *TParamsSet {
 
 func NewHttpContext(router *TRouter) *THttpContext {
 	hd := &THttpContext{
-		ILogger: logger,
+		ILogger: log,
 		Router:  router,
 		//Route:   route,
 		//iResponseWriter: writer,
@@ -337,7 +337,6 @@ func (self *THttpContext) Apply() {
 	if !self.isDone {
 		if self.TemplateSrc != "" {
 			self.SetHeader(true, "Content-Type", self.ContentType)
-			//self.Template.Render(self.TemplateSrc, self.response, self.RenderArgs)
 			err := self.Template.RenderToWriter(self.TemplateSrc, self.templateVar, self.response)
 			if err != nil {
 				http.Error(self.response, "Apply fail:"+err.Error(), http.StatusInternalServerError)
@@ -543,8 +542,12 @@ func (self *THttpContext) SetHeader(unique bool, hdr string, val string) {
 	}
 }
 
-func (self *THttpContext) Abort(body string) {
-	self.response.WriteHeader(http.StatusInternalServerError)
+func (self *THttpContext) Abort(body string, code ...int) {
+	if len(code) > 0 {
+		self.response.WriteHeader(code[0])
+	} else {
+		self.response.WriteHeader(http.StatusInternalServerError)
+	}
 	self.response.Write([]byte(body))
 	self.isDone = true
 }
@@ -617,6 +620,7 @@ func (self *THttpContext) ServeFile(file_path string) {
 	http.ServeFile(self.response, self.request.Request, file_path)
 }
 
+// TODO 自定义文件夹
 // render the template and return to the end
 func (self *THttpContext) RenderTemplate(tmpl string, args interface{}) {
 	self.ContentType = "text/html; charset=utf-8"

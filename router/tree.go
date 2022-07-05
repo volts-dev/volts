@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"sort"
@@ -89,12 +90,12 @@ type (
 
 	// safely tree
 	TTree struct {
-		sync.RWMutex // lock for conbine action
-		root         map[string]*TNode
-		Text         string
-		IgnoreCase   bool
-		DelimitChar  byte // Delimit Char xxx<.>xxx
-		PrefixChar   byte // the Prefix Char </>xxx.xxx
+		sync.RWMutex  // lock for conbine action
+		root          map[string]*TNode
+		Text          string
+		IgnoreCase    bool
+		__DelimitChar byte // Delimit Char xxx<.>xxx
+		PrefixChar    byte // the Prefix Char </>xxx.xxx
 	}
 )
 
@@ -149,9 +150,9 @@ func (self TSubNodes) Less(i, j int) bool {
 
 func NewRouteTree(config_fn ...ConfigOption) *TTree {
 	tree := &TTree{
-		root:        make(map[string]*TNode),
-		DelimitChar: 0, // !NOTE! 默认为未定义 以便区分RPC
-		PrefixChar:  '/',
+		root:          make(map[string]*TNode),
+		__DelimitChar: 0, // !NOTE! 默认为未定义 以便区分RPC
+		PrefixChar:    '/',
 	}
 
 	for _, cfg := range config_fn {
@@ -504,9 +505,9 @@ func (self *TTree) Endpoints() []*registry.Endpoint {
 }
 
 func (r *TTree) Match(method string, path string) (*route, Params) {
-	delimitChar := r.DelimitChar
-	if delimitChar == 0 {
-		delimitChar = '/'
+	var delimitChar byte = '/'
+	if method == "CONNECT" {
+		delimitChar = '.'
 	}
 
 	root := r.root[method]
@@ -575,10 +576,7 @@ func (self *TTree) AddRoute(route *route) error {
 	for _, method := range route.Methods {
 		method = strings.ToUpper(method)
 
-		delimitChar := self.DelimitChar
-		if delimitChar == 0 {
-			delimitChar = '/'
-		}
+		delimitChar := route.PathDelimitChar
 
 		// to parse path as a List node
 		nodes, is_dyn := self.parsePath(route.Path, delimitChar)
@@ -594,7 +592,7 @@ func (self *TTree) AddRoute(route *route) error {
 
 		// 验证合法性
 		if !validNodes(nodes) {
-			logger.Panicf("express %s is not supported", route.Path)
+			log.Panicf("express %s is not supported", route.Path)
 		}
 
 		// insert the node to tree
@@ -615,9 +613,9 @@ func (self *TTree) DelRoute(path string, route *route) error {
 			return nil
 		}
 
-		delimitChar := self.DelimitChar
-		if delimitChar == 0 {
-			delimitChar = '/'
+		var delimitChar byte = '/'
+		if method == "CONNECT" {
+			delimitChar = '.'
 		}
 
 		// to parse path as a List node
@@ -671,10 +669,10 @@ func (self *TTree) conbine(target, from *TNode) {
 
 // conbine 2 tree together
 func (self *TTree) Conbine(from *TTree) *TTree {
-	// NOTE 避免合并不同分隔符的路由树
+	// NOTE 避免合并不同分隔符的路由树 不应该发生
 	if len(self.root) > 0 && len(from.root) > 0 { // 非空的Tree
-		if self.DelimitChar != from.DelimitChar { // 分隔符对比
-			logger.Panicf("could not conbine 2 different kinds (RPC/HTTP) of routes tree!")
+		if self.__DelimitChar != from.__DelimitChar { // 分隔符对比
+			log.Panicf("could not conbine 2 different kinds (RPC/HTTP) of routes tree!")
 			return self
 		}
 	}
@@ -761,37 +759,40 @@ func (self *TTree) addNodes(method string, nodes []*TNode, isHook bool) {
 	}
 }
 
-func printNode(i int, node *TNode) {
+func printNode(buf *bytes.Buffer, i int, node *TNode) {
 	for _, c := range node.Children {
 		for j := 0; j < i; j++ { // 空格距离ss
-			fmt.Print("  ")
+			buf.WriteString("  ")
 		}
 		if i > 1 {
-			fmt.Print("┗", "  ")
+			buf.WriteString("┗" + "  ")
 		}
 
-		fmt.Printf(`%s <Lv:%d; Type:%v; VarType:%v>`, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType])
+		buf.WriteString(fmt.Sprintf(`%s <Lv:%d; Type:%v; VarType:%v>\n`, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType]))
 		if c.Route != nil {
-			fmt.Print(" <*", len(c.Route.handlers), ">")
+			buf.WriteString(fmt.Sprintf(" <*%d>", len(c.Route.handlers)))
 		}
 		//if !reflect.DeepEqual(c.Route, route{}) {
 		if c.Route != nil {
 			//fmt.Print("  ", c.Route.HandleType.String())
 			//fmt.Printf("  %p", c.handle.method.Interface())
 		}
-		fmt.Println()
-		printNode(i+1, c)
+		buf.WriteString("\n")
+		printNode(buf, i+1, c)
 	}
 }
 
 func (self *TTree) PrintTrees() {
+	buf := bytes.NewBufferString("")
+	buf.WriteString("\n")
 	for method, node := range self.root {
 		if len(node.Children) > 0 {
-			fmt.Println(method)
-			printNode(1, node)
-			fmt.Println()
+			buf.WriteString(method + "\n")
+			printNode(buf, 1, node)
+			buf.WriteString("\n")
 		}
 	}
+	log.Info(buf.String())
 }
 
 func (self *TNode) Equal(node *TNode) bool {

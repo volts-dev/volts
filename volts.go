@@ -41,7 +41,7 @@ type (
 // NewService creates and returns a new Service based on the packages within.
 func New(opts ...Option) IService {
 	return &service{
-		config: NewConfig(opts...),
+		config: newConfig(opts...),
 	}
 }
 

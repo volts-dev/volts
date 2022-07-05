@@ -221,7 +221,7 @@ func (m *mdnsRegistry) Register(service *Service, opts ...Option) error {
 		port, _ := strconv.Atoi(pt)
 
 		//if logger.GetLevel()=={
-		logger.Dbgf("[mdns] registry create new service with ip: %s for: %s", net.ParseIP(host).String(), host)
+		log.Dbgf("[mdns] registry create new service with ip: %s for: %s", net.ParseIP(host).String(), host)
 		//}
 		// we got here, new node
 		s, err := mdns.NewMDNSService(
@@ -349,7 +349,7 @@ func (m *mdnsRegistry) GetService(service string) ([]*Service, error) {
 					addr = "[" + e.AddrV6.String() + "]"
 				} else {
 					//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-					logger.Infof("[mdns]: invalid endpoint received: %v", e)
+					log.Infof("[mdns]: invalid endpoint received: %v", e)
 					//}
 					continue
 				}

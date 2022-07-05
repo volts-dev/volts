@@ -14,8 +14,8 @@ require (
 	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	github.com/volts-dev/dataset v0.0.0-20210303044526-4e29c6250cdc
 	github.com/volts-dev/logger v0.0.0-20210803162057-18754d780c31 // indirect
-	github.com/volts-dev/template v0.0.0-20210719092648-7217ecacd39b
-	github.com/volts-dev/utils v0.0.0-20220301183119-0de4229e75b4
+	github.com/volts-dev/template v0.0.0-20220629104119-52fcca66a2e1
+	github.com/volts-dev/utils v0.0.0-20220409042925-ad5762368652
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
 	go.etcd.io/etcd/api/v3 v3.5.2
 	go.etcd.io/etcd/client/v3 v3.5.2

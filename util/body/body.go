@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"log"
 
 	"github.com/volts-dev/dataset"
 	"github.com/volts-dev/volts/codec"
@@ -120,7 +121,7 @@ func (self *TBody) AsBytes() (res []byte) {
 		err := self.Codec.Decode(self.Data.Bytes(), &res)
 		if err != nil {
 			// NOTED it should not happen!
-			return nil
+			log.Panic(err)
 		}
 		return res
 	}

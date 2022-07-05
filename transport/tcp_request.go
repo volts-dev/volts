@@ -32,9 +32,7 @@ type RpcRequest struct {
 
 func NewRpcRequest(ctx context.Context, msg *Message, socket ISocket) *RpcRequest {
 	// new a body
-	body := &body.TBody{
-		Codec: codec.IdentifyCodec(msg.SerializeType()),
-	}
+	body := body.New(codec.IdentifyCodec(msg.SerializeType()))
 	body.Data.Write(msg.Payload)
 
 	return &RpcRequest{

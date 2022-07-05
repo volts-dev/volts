@@ -46,11 +46,9 @@ func (t *httpTransportListener) Accept() (net.Conn, error) {
 
 func (h *httpTransportListener) Serve(handler Handler) error {
 	if hd, ok := handler.Handler().(http.Handler); ok {
-
 		h.http = &http.Server{
 			Handler: hd,
 		}
-		//return fmt.Errorf("the handler is not a http handler! %v ", handler)
 	}
 
 	if hd, ok := handler.Handler().(customHandler); ok {

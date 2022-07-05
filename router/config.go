@@ -1,12 +1,9 @@
 package router
 
 import (
-	log "github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 )
-
-var logger log.ILogger = log.New("Router")
 
 const (
 	MODULE_DIR   = "module" // # 模块文件夹名称

@@ -5,8 +5,11 @@ import (
 	"crypto/tls"
 	"time"
 
+	"github.com/volts-dev/volts/logger"
 	"golang.org/x/net/proxy"
 )
+
+var log = logger.New("Transport")
 
 type (
 	Option       func(*Config)

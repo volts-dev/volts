@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net"
 	"time"
-
-	log "github.com/volts-dev/volts/logger"
 )
 
 type (

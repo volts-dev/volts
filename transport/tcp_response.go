@@ -14,14 +14,10 @@ type RpcResponse struct {
 }
 
 func NewRpcResponse(ctx context.Context, req *RpcRequest, socket ISocket) *RpcResponse {
-	body := &body.TBody{
-		Codec: codec.IdentifyCodec(req.Message.SerializeType()),
-	}
-
 	return &RpcResponse{
 		sock:    socket,
 		Request: req,
-		body:    body,
+		body:    body.New(codec.IdentifyCodec(req.Message.SerializeType())),
 	}
 }
 
@@ -43,7 +39,7 @@ func (self *RpcResponse) Write(data interface{}) error {
 		return err
 	}
 
-	msg.Payload = self.Body().AsBytes()
+	msg.Payload = self.Body().Data.Bytes()
 
 	return self.sock.Send(msg)
 }

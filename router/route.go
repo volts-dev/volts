@@ -59,15 +59,16 @@ type (
 	// route 路,表示一个Link 连接地址"../webgo/"
 	// 提供基础数据参数供Handler处理
 	route struct {
-		group    *TGroup
-		Id       int    // 用于定位
-		Path     string // !NOTE! Path存储路由绑定的URL 网络路径
-		FilePath string // 短存储路径
-		Position RoutePosition
-		handlers []handler // 最终处理器 合并主处理器+次处理器 代理处理器
-		Methods  []string  // 方法
-		Host     []string
-		Url      *TUrl // 提供Restful 等Controller.Action
+		group           *TGroup
+		Id              int    // 用于定位
+		Path            string // !NOTE! Path存储路由绑定的URL 网络路径
+		PathDelimitChar byte   // URL分割符 "/"或者"."
+		FilePath        string // 短存储路径
+		Position        RoutePosition
+		handlers        []handler // 最终处理器 合并主处理器+次处理器 代理处理器
+		Methods         []string  // 方法
+		Host            []string
+		Url             *TUrl // 提供Restful 等Controller.Action
 		// 废弃
 		//HookCtrl map[string][]handler // 次控制器 map[*][]handler 匹配所有  Hook的Ctrl会在主的Ctrl执行完后执行
 		//handlers    map[string][]handler // 最终控制器 合并主控制器+次控制器
@@ -137,14 +138,15 @@ func newHandler(hanadlerType HandlerType, controller interface{}, services []*re
 
 func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, action string) *route {
 	r := &route{
-		group:    group,
-		Id:       idQueue + 1,
-		Url:      url,
-		Path:     path,
-		FilePath: filePath,
-		___Model: name,
-		Action:   action, //
-		Methods:  methods,
+		group:           group,
+		Id:              idQueue + 1,
+		Url:             url,
+		Path:            path,
+		PathDelimitChar: '/',
+		FilePath:        filePath,
+		___Model:        name,
+		Action:          action, //
+		Methods:         methods,
 		//Type:     rt,
 		handlers: make([]handler, 0),
 		//HookCtrl: make([]handler, 0),

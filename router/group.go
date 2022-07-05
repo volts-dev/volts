@@ -200,7 +200,7 @@ func curFilePath(skip int) (string, string) {
 	_, file, _, _ := runtime.Caller(skip)
 	filePath, _ := gpath.Split(file)
 	dirName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
-	logger.Dbg(config.AppPath, " ", filePath)
+	//log.Dbg(config.AppPath, " ", filePath)
 	// 过滤由router创建的组群
 	if dirName == "router" {
 		return config.AppPath, "" // filepath.Base(AppPath)
@@ -444,9 +444,10 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 	// RPC route validate
 	if utils.InStrings("CONNECT", methods...) > -1 {
 		// !NOTE! 修改分隔符
-		if self.tree.DelimitChar == 0 {
-			self.tree.DelimitChar = '.'
-		}
+		//if self.tree.DelimitChar == 0 {
+		//	self.tree.DelimitChar = '.'
+		//}
+		route.PathDelimitChar = '.'
 
 		// Method must be exported.
 		if ctrl_type.PkgPath() != "" {

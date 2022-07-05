@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/util/addr"
 	"github.com/volts-dev/volts/util/backoff"
@@ -15,8 +16,10 @@ import (
 	vnet "github.com/volts-dev/volts/util/net"
 )
 
+var defaultServer *TServer
+var log = logger.New("Server")
+
 var (
-	defaultServer           *TServer
 	DefaultAddress          = ":0"
 	DefaultName             = "volts.server"
 	DefaultVersion          = "latest"
@@ -42,8 +45,9 @@ type (
 		// Register a subscriber
 		//Subscribe(Subscriber) error
 
-		Start() error   // Start the server
-		Stop() error    // Stop the server
+		Start() error // Start the server
+		Stop() error  // Stop the server
+		Started() bool
 		String() string // Server implementation
 	}
 
@@ -88,6 +92,8 @@ func New(opts ...Option) *TServer {
 	}
 }
 
+// 默认server实例
+// NOTE 引入server时defaultServer必须是nil，防止某些场景不需要server实例
 func Default(opts ...Option) *TServer {
 	if defaultServer == nil {
 		defaultServer = New(opts...)
@@ -249,8 +255,8 @@ func (self *TServer) Register() error {
 	self.RUnlock()
 
 	if !registered {
-		//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-		//	、	logger.Infof("Registry [%s] Registering node: %s", config.Registry.String(), node.Uid)
+		//if log.V(log.InfoLevel, log.DefaultLogger) {
+		//	、	log.Infof("Registry [%s] Registering node: %s", config.Registry.String(), node.Uid)
 		//	}
 	}
 
@@ -301,7 +307,7 @@ func (self *TServer) Register() error {
 			if err != nil {
 				return err
 			}
-			if logger.V(logger.InfoLevel, logger.DefaultLogger) {
+			if log.V(log.InfoLevel, log.DefaultLogger) {
 				log.Infof("Subscribing to topic: %s", sub.Topic())
 			}
 			self.subscribers[sb] = []broker.Subscriber{sub}
@@ -363,8 +369,8 @@ func (self *TServer) Deregister() error {
 		Nodes:   []*registry.Node{node},
 	}
 
-	//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-	logger.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Uid)
+	//if log.V(log.InfoLevel, log.DefaultLogger) {
+	log.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Uid)
 	//}
 	if err := config.Registry.Deregister(service); err != nil {
 		return err
@@ -389,7 +395,7 @@ func (self *TServer) Deregister() error {
 
 		for sb, subs := range self.subscribers {
 			for _, sub := range subs {
-				//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
+				//if log.V(log.InfoLevel, log.DefaultLogger) {
 				//log.Infof("Unsubscribing %s from topic: %s", node.Uid, sub.Topic())
 				//}
 				sub.Unsubscribe()
@@ -419,7 +425,7 @@ func (self *TServer) Start() error {
 		return err
 	}
 
-	logger.Infof("Transport [%s] Listening on %s", config.Transport.String(), ts.Addr())
+	log.Infof("Transport [%s] Listening on %s", config.Transport.String(), ts.Addr())
 
 	// swap address
 	self.Lock()
@@ -431,26 +437,26 @@ func (self *TServer) Start() error {
 
 		// connect to the broker
 		if err := config.Broker.Connect(); err != nil {
-			if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-				logger.Errorf("Broker [%s] connect error: %v", bname, err)
+			if log.V(log.ErrorLevel, log.DefaultLogger) {
+				log.Errorf("Broker [%s] connect error: %v", bname, err)
 			}
 			return err
 		}
 
-		if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-			logger.Infof("Broker [%s] Connected to %s", bname, config.Broker.Address())
+		if log.V(log.InfoLevel, log.DefaultLogger) {
+			log.Infof("Broker [%s] Connected to %s", bname, config.Broker.Address())
 		}
 	*/
 	// use RegisterCheck func before register
 	if err = self.config.RegisterCheck(self.config.Context); err != nil {
-		//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-		logger.Errf("Server %s-%s register check error: %s", config.Name, config.Uid, err)
+		//if log.V(log.ErrorLevel, log.DefaultLogger) {
+		log.Errf("Server %s-%s register check error: %s", config.Name, config.Uid, err)
 		//}
 	} else {
 		// announce self to the world
 		if err = self.Register(); err != nil {
-			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-			logger.Errf("Server %s-%s register error: %s", config.Name, config.Uid, err)
+			//if log.V(log.ErrorLevel, log.DefaultLogger) {
+			log.Errf("Server %s-%s register error: %s", config.Name, config.Uid, err)
 			//}
 		}
 	}
@@ -473,7 +479,7 @@ func (self *TServer) Start() error {
 			// check the error and backoff
 			default:
 				if err != nil {
-					logger.Errf("Accept error: %v", err)
+					log.Errf("Accept error: %v", err)
 
 					time.Sleep(time.Second)
 					continue
@@ -508,21 +514,21 @@ func (self *TServer) Start() error {
 				self.RUnlock()
 				rerr := config.RegisterCheck(self.config.Context)
 				if rerr != nil && registered {
-					logger.Errf("Server %s-%s register check error: %s, deregister it", config.Name, config.Uid, err)
+					log.Errf("Server %s-%s register check error: %s, deregister it", config.Name, config.Uid, err)
 
 					// deregister self in case of error
 					if err := self.Deregister(); err != nil {
-						logger.Errf("Server %s-%s deregister error: %s", config.Name, config.Uid, err)
+						log.Errf("Server %s-%s deregister error: %s", config.Name, config.Uid, err)
 
 					}
 				} else if rerr != nil && !registered {
-					logger.Errf("Server %s-%s register check error: %s", config.Name, config.Uid, err)
+					log.Errf("Server %s-%s register check error: %s", config.Name, config.Uid, err)
 
 					continue
 				}
 
 				if err := self.Register(); err != nil {
-					logger.Errf("Server %s-%s register error: %s", config.Name, config.Uid, err)
+					log.Errf("Server %s-%s register error: %s", config.Name, config.Uid, err)
 
 				}
 			// wait for exit
@@ -539,7 +545,7 @@ func (self *TServer) Start() error {
 		if registered {
 			// deregister self
 			if err := self.Deregister(); err != nil {
-				logger.Errf("Server %s-%s deregister error: %s", config.Name, config.Uid, err)
+				log.Errf("Server %s-%s deregister error: %s", config.Name, config.Uid, err)
 
 			}
 		}
@@ -556,13 +562,13 @@ func (self *TServer) Start() error {
 		// close transport listener
 		ch <- ts.Close()
 
-		////if logger.Lvl(logger.LevelError) {
-		////	logger.Infof("Broker [%s] Disconnected from %s", bname, config.Broker.Address())
+		////if log.Lvl(log.LevelError) {
+		////	log.Infof("Broker [%s] Disconnected from %s", bname, config.Broker.Address())
 		//}
 		// disconnect the broker
 		//if err := config.Broker.Disconnect(); err != nil {
-		//	if logger.Lvl(logger.LevelError) {
-		//		logger.Errf("Broker [%s] Disconnect error: %v", bname, err)
+		//	if log.Lvl(log.LevelError) {
+		//		log.Errf("Broker [%s] Disconnect error: %v", bname, err)
 		//	}
 		//}
 
@@ -578,6 +584,10 @@ func (self *TServer) Start() error {
 	self.Unlock()
 
 	return nil
+}
+
+func (self *TServer) Started() bool {
+	return self.started
 }
 
 func (self *TServer) Stop() error {

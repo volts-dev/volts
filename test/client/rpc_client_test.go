@@ -3,6 +3,7 @@ package client
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
@@ -31,16 +32,26 @@ func TestHelloworld(t *testing.T) {
 	g.Add(1)
 
 	go func() {
-		g.Done()
 		app.Run()
+	}()
+
+	go func() {
+		for {
+			if app.Server().Started() {
+				g.Done()
+				break
+			}
+			time.Sleep(500)
+		}
 	}()
 
 	g.Wait()
 	//<-time.After(3 * time.Second)
 
-	arg := &test.Args{Num1: 1, Num2: 2, Flt: 0.0123}
 	cli, _ := client.NewRpcClient()
 	arith := test.NewArithCli(cli)
+
+	arg := &test.Args{Num1: 1, Num2: 2, Flt: 0.0123}
 	result, err := arith.Mul(arg)
 	if err != nil {
 		t.Fatal(err)

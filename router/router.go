@@ -12,11 +12,13 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/transport"
 )
 
 var defaultRouter *TRouter
+var log = logger.New("Router")
 
 type (
 	// Router handle serving messages
@@ -214,7 +216,7 @@ func (self *TRouter) store(services []*registry.Service) {
 
 				err = self.tree.AddRoute(r)
 				if err != nil {
-					logger.Err(err)
+					log.Err(err)
 				}
 			}
 		}
@@ -234,8 +236,8 @@ func (self *TRouter) watch() {
 		w, err := self.config.Registry.Watch()
 		if err != nil {
 			attempts++
-			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-			logger.Errf("error watching endpoints: %v", err)
+			//if log.V(log.ErrorLevel, log.DefaultLogger) {
+			log.Errf("error watching endpoints: %v", err)
 			//}
 			//time.Sleep(time.Duration(attempts) * time.Second)
 			continue
@@ -259,8 +261,8 @@ func (self *TRouter) watch() {
 			// process next event
 			res, err := w.Next()
 			if err != nil {
-				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-				logger.Errf("error getting next endoint: %v", err)
+				//if log.V(log.ErrorLevel, log.DefaultLogger) {
+				log.Errf("error getting next endoint: %v", err)
 				//}
 				close(ch)
 				break
@@ -274,8 +276,8 @@ func (self *TRouter) watch() {
 			// get entry from cache
 			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
 			if err != nil {
-				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-				logger.Errf("unable to get service: %v", err)
+				//if log.V(log.ErrorLevel, log.DefaultLogger) {
+				log.Errf("unable to get service: %v", err)
 				//}
 				break
 			}
@@ -294,8 +296,8 @@ func (self *TRouter) refresh() {
 		services, err := self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
-			//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-			logger.Errf("unable to list services: %v", err)
+			//if log.V(log.ErrorLevel, log.DefaultLogger) {
+			log.Errf("unable to list services: %v", err)
 			//}
 			time.Sleep(time.Duration(attempts) * time.Second)
 			continue
@@ -312,8 +314,8 @@ func (self *TRouter) refresh() {
 
 			service, err := self.config.RegistryCacher.GetService(s.Name)
 			if err != nil {
-				//if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
-				logger.Errf("unable to get service: %v", err)
+				//if log.V(log.ErrorLevel, log.DefaultLogger) {
+				log.Errf("unable to get service: %v", err)
 				//}
 				continue
 			}
@@ -394,7 +396,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 	if r.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
-			logger.Infof("rpc hijacking %v:%v", r.RemoteAddr, ": ", err.Error())
+			log.Infof("rpc hijacking %v:%v", r.RemoteAddr, ": ", err.Error())
 		}
 		io.WriteString(conn, "HTTP/1.0 200 Connected to RPC\n\n")
 		/*
@@ -404,7 +406,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		*/
 		msg, err := transport.ReadMessage(conn)
 		if err != nil {
-			logger.Info("rpc Read ", err.Error())
+			log.Info("rpc Read ", err.Error())
 		}
 		sock := transport.NewTcpTransportSocket(conn, 0, 0)
 		req := transport.NewRpcRequest(r.Context(), msg, sock)
@@ -426,7 +428,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 
 		defer func() {
 			if self.config.PrintRequest {
-				logger.Infof("[Path]%v [Route]%v", path, route.FilePath)
+				log.Infof("[Path]%v [Route]%v", path, route.FilePath)
 			}
 		}()
 		/*
@@ -448,7 +450,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			ctx.Router = self
 			ctx.route = *route
 			ctx.inited = true
-			ctx.Template = template.DefaultTemplateSet
+			ctx.Template = template.Default()
 		}
 
 		ctx.reset(rsp, r)
@@ -499,7 +501,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	// 获取支持的序列模式
 	coder = codec.IdentifyCodec(res.SerializeType())
 	if coder == nil {
-		logger.Warnf("can not find codec for %v", res.SerializeType())
+		log.Warnf("can not find codec for %v", res.SerializeType())
 		return
 		//handleError(res, err)
 	} else {
@@ -565,9 +567,9 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 
 		err = w.Write(res.Payload)
 		if err != nil {
-			logger.Dbg(err.Error())
+			log.Dbg(err.Error())
 		}
-		logger.Dbg("aa", string(res.Payload))*/
+		log.Dbg("aa", string(res.Payload))*/
 	}
 
 	return
@@ -667,7 +669,7 @@ func (self *TRouter) routeMiddleware(method string, route *route, ctx IContext, 
 	// report the name of midware which on controller but not register in the server
 	for name, found := range name_lst {
 		if !found {
-			logger.Errf("%v isn't be register in controller %v", name, ctrl.String())
+			log.Errf("%v isn't be register in controller %v", name, ctrl.String())
 		}
 	}
 }
@@ -680,7 +682,7 @@ func (self *TRouter) route(route *route, ctx IContext) {
 	)
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	//logger.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, len(lRoute.handlers), lRoute.handlers)
+	//log.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, len(lRoute.handlers), lRoute.handlers)
 	for idx, handler := range route.handlers {
 		ctx.setControllerIndex(idx)
 		// stop runing ctrl
@@ -753,7 +755,7 @@ func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, ro
 			if handler.IsValid() {
 				self.routeMiddleware("panic", route, ctx, handler)
 			}
-			logger.Errf("r:%s err:%v", ctx.Route().Path, err)
+			log.Errf("r:%s err:%v", ctx.Route().Path, err)
 			self.config.RecoverHandler(ctx)
 		}
 	}()

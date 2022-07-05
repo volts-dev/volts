@@ -63,7 +63,7 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	}, nil
 }
 
-func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, error) {
+func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, error) {
 	var options ListenConfig
 	for _, o := range opts {
 		o(&options)
@@ -73,8 +73,8 @@ func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, err
 	var err error
 
 	// TODO: support use of listen options
-	if t.config.Secure || t.config.TLSConfig != nil {
-		config := t.config.TLSConfig
+	if self.config.Secure || self.config.TLSConfig != nil {
+		config := self.config.TLSConfig
 
 		fn := func(addr string) (net.Listener, error) {
 			if config == nil {
@@ -112,12 +112,16 @@ func (t *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, err
 		return nil, err
 	}
 
-	t.config.Listener = &tcpTransportListener{
-		transport: t,
+	self.config.Listener = &tcpTransportListener{
+		transport: self,
 		listener:  l,
 	}
 
-	return t.config.Listener, nil
+	/*	self.config.Listener = &transportListener{
+		transport: self,
+		listener:  l,
+	}*/
+	return self.config.Listener, nil
 }
 
 func (t *tcpTransport) Init(opts ...Option) error {

@@ -18,7 +18,7 @@ type (
 		Body() *body.TBody
 		Write(data interface{}) error
 		RespondByJson(data interface{})
-		Abort(string)
+		//Abort(string)
 		Route() route
 		Context() context.Context
 		HandlerIndex() int

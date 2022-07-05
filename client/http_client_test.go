@@ -1,7 +1,6 @@
 package client
 
 import (
-	"log"
 	"net/http"
 	"net/url"
 	"testing"
@@ -36,7 +35,7 @@ func TestGetRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	log.Println(string(resp.Body().AsBytes()))
+	log.Dbg(string(resp.Body().AsBytes()))
 }
 
 func TestPostRequest(t *testing.T) {
@@ -69,7 +68,7 @@ func TestPostRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	log.Println(resp.StatusCode, string(resp.Body().AsBytes()))
+	log.Dbg(resp.StatusCode, string(resp.Body().AsBytes()))
 }
 
 func TestOrderHeader(t *testing.T) {
@@ -108,12 +107,12 @@ func TestOrderHeader(t *testing.T) {
 	defer resp.Body().Close()
 
 	for v, k := range resp.Header() {
-		log.Println(v, k)
+		log.Dbg(v, k)
 	}
 
 	for _, k := range client.CookiesManager().Cookies(u) {
-		log.Println(k.Name, k.Value)
+		log.Dbg(k.Name, k.Value)
 	}
 
-	log.Println(string(resp.Body().AsBytes()))
+	log.Dbg(string(resp.Body().AsBytes()))
 }

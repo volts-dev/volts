@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/volts-dev/utils"
@@ -54,9 +55,9 @@ func Default() *Config {
 // default is CONFIG_FILE_NAME = "config.json"
 func (self *Config) Load(fileName ...string) error {
 	if fileName != nil {
-		self.fmt.v.SetConfigFile(fileName[0])
+		self.fmt.v.SetConfigFile(filepath.Join(AppPath, fileName[0]))
 	} else {
-		self.fmt.v.SetConfigFile(CONFIG_FILE_NAME)
+		self.fmt.v.SetConfigFile(filepath.Join(AppPath, CONFIG_FILE_NAME))
 	}
 	err := self.fmt.v.ReadInConfig() // Find and read the config file
 	if err != nil {                  // Handle errors reading the config file
@@ -116,11 +117,11 @@ func (self *Config) SetValue(field string, value interface{}) {
 	self.fmt.SetValue(field, value)
 }
 
-func (self *Config) Unmarshal(rawVal interface{}) {
-	self.fmt.Unmarshal(rawVal)
+func (self *Config) Unmarshal(rawVal interface{}) error {
+	return self.fmt.Unmarshal(rawVal)
 }
 
 // 反序列字段映射到数据类型
-func (self *Config) UnmarshalField(field string, rawVal interface{}) {
-	self.fmt.UnmarshalKey(field, rawVal)
+func (self *Config) UnmarshalField(field string, rawVal interface{}) error {
+	return self.fmt.UnmarshalKey(field, rawVal)
 }

@@ -1,7 +1,12 @@
 package registry
 
-import "errors"
+import (
+	"errors"
 
+	"github.com/volts-dev/volts/logger"
+)
+
+var log = logger.New("Registry")
 var (
 	defaultRegistry IRegistry
 
