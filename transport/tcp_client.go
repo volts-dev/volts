@@ -10,3 +10,7 @@ type tcpTransportClient struct {
 	config    DialConfig
 	conn      net.Conn
 }
+
+func (t *tcpTransportClient) Transport() ITransport {
+	return t.transport
+}

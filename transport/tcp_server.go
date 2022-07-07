@@ -54,7 +54,7 @@ func (t *tcpTransportListener) Accept() (net.Conn, error) {
 	return t.listener.Accept()
 }
 
-func (t *tcpTransportListener) Serve(handler Handler) error {
+func (self *tcpTransportListener) Serve(handler Handler) error {
 	hd, ok := handler.Handler().(rpcHandler)
 	if !ok {
 		return fmt.Errorf("the handler is not a rpc handler! %v ", handler)
@@ -62,7 +62,7 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 	var tempDelay time.Duration
 
 	for {
-		conn, err := t.listener.Accept()
+		conn, err := self.listener.Accept()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				if tempDelay == 0 {
@@ -80,7 +80,7 @@ func (t *tcpTransportListener) Serve(handler Handler) error {
 			return err
 		}
 
-		sock := NewTcpTransportSocket(conn, t.transport.config.ReadTimeout, t.transport.config.WriteTimeout)
+		sock := NewTcpTransportSocket(conn, self.transport.config.ReadTimeout, self.transport.config.WriteTimeout)
 
 		go func() {
 			//@ 获取空白通讯包

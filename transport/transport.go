@@ -3,13 +3,15 @@ package transport
 import (
 	"net"
 	"time"
+
+	"github.com/volts-dev/volts/util/body"
 )
 
 type (
 	ITransport interface {
 		Init(...Option) error
 		Config() *Config
-		Dial(addr string, opts ...DialOption) (IClient, error)       // for client
+		Dial(addr string, opts ...DialOption) (IClient, error)       // for client 详细查看pool.NewPool
 		Listen(addr string, opts ...ListenOption) (IListener, error) // for server
 		String() string
 	}
@@ -25,6 +27,7 @@ type (
 
 	IClient interface {
 		ISocket
+		Transport() ITransport
 	}
 
 	IListener interface {
@@ -56,7 +59,9 @@ type (
 	// 提供给服务器客户端最基本接口
 	IResponse interface {
 		// write a response directly to the client
-		Write(interface{}) (int, error)
+		Write([]byte) (int, error)
+		WriteStream(interface{}) error
+		Body() *body.TBody
 	}
 
 	IBody interface {

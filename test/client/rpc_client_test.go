@@ -48,7 +48,10 @@ func TestHelloworld(t *testing.T) {
 	g.Wait()
 	//<-time.After(3 * time.Second)
 
-	cli, _ := client.NewRpcClient()
+	cli, _ := client.NewRpcClient(
+		client.Debug(),
+		client.WithHost(app.Server().Config().Address),
+	)
 	arith := test.NewArithCli(cli)
 
 	arg := &test.Args{Num1: 1, Num2: 2, Flt: 0.0123}

@@ -13,6 +13,7 @@ type RpcResponse struct {
 	Request *RpcRequest // request for this response
 }
 
+// 提供给Router的context使用
 func NewRpcResponse(ctx context.Context, req *RpcRequest, socket ISocket) *RpcResponse {
 	return &RpcResponse{
 		sock:    socket,
@@ -30,7 +31,17 @@ func (self *RpcResponse) WriteHeader(code MessageType) {
 	self.Request.Message.SetMessageType(code)
 }
 
-func (self *RpcResponse) Write(data interface{}) error {
+func (self *RpcResponse) Write(b []byte) (int, error) {
+	self.WriteHeader(MT_RESPONSE)
+
+	msg := newMessage()
+	self.Request.Message.CloneTo(msg)
+	msg.Payload = b
+	return len(b), self.sock.Send(msg)
+}
+
+// write data as stream
+func (self *RpcResponse) WriteStream(data interface{}) error {
 	self.WriteHeader(MT_RESPONSE)
 
 	msg := self.Request.Message

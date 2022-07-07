@@ -17,6 +17,7 @@ type (
 	}
 )
 
+// 提供给Router的context使用
 func NewHttpRequest(req *http.Request) *THttpRequest {
 	ct := req.Header.Get("Content-Type")
 	c := codec.IdentifyCodec(codec.CodecByName(ct))

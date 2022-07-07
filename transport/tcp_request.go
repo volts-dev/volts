@@ -30,6 +30,7 @@ type RpcRequest struct {
 	first       bool
 }
 
+// 提供给Router的context使用
 func NewRpcRequest(ctx context.Context, msg *Message, socket ISocket) *RpcRequest {
 	// new a body
 	body := body.New(codec.IdentifyCodec(msg.SerializeType()))

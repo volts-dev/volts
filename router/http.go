@@ -254,7 +254,11 @@ func (self *THttpContext) Body() *body.TBody {
 	return self.request.Body()
 }
 
-func (self *THttpContext) Write(data interface{}) error {
+func (self *THttpContext) Write(data []byte) (int, error) {
+	return self.response.Write(data)
+}
+
+func (self *THttpContext) WriteStream(data interface{}) error {
 	switch v := data.(type) {
 	case []byte:
 		_, err := self.response.Write(v)

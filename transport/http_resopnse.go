@@ -50,6 +50,7 @@ func (self *THttpResponse) Write(b []byte) (int, error) {
 	return size, err
 }
 
+// writable
 func (self *THttpResponse) Written() bool {
 	return self.status != 0
 }

@@ -259,8 +259,8 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 	}
 
 	self.config.Listener = &httpTransportListener{
-		ht:       self,
-		listener: l,
+		transport: self,
+		listener:  l,
 	}
 	/*
 		self.config.Listener = &transportListener{

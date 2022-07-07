@@ -36,6 +36,10 @@ type (
 	}
 )
 
+func (t *httpTransportClient) Transport() ITransport {
+	return t.transport
+}
+
 func (t *httpTransportClient) Conn() net.Conn {
 	return t.conn
 }

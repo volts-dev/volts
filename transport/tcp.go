@@ -23,7 +23,7 @@ func NewTCPTransport(opts ...Option) ITransport {
 	return &tcpTransport{config: cfg}
 }
 
-func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
+func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	cfg := DialConfig{
 		//Timeout: t.config.ConnectTimeout,
 	}
@@ -36,16 +36,16 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	var err error
 
 	// TODO: support dial option here rather than using internal config
-	if t.config.Secure || t.config.TLSConfig != nil {
-		config := t.config.TLSConfig
+	if self.config.Secure || self.config.TLSConfig != nil {
+		config := self.config.TLSConfig
 		if config == nil {
 			config = &tls.Config{
 				InsecureSkipVerify: true,
 			}
 		}
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: t.config.ConnectTimeout}, "tcp", addr, config)
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, t.config.ConnectTimeout)
+		conn, err = net.DialTimeout("tcp", addr, self.config.ConnectTimeout)
 	}
 
 	if err != nil {
@@ -54,8 +54,8 @@ func (t *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 
 	//encBuf := bufio.NewWriter(conn)
 	return &tcpTransportClient{
-		tcpTransportSocket: *NewTcpTransportSocket(conn, t.config.ReadTimeout, t.config.WriteTimeout),
-		transport:          t,
+		tcpTransportSocket: *NewTcpTransportSocket(conn, self.config.ReadTimeout, self.config.WriteTimeout),
+		transport:          self,
 		config:             cfg,
 		conn:               conn,
 		//encBuf:             encBuf,

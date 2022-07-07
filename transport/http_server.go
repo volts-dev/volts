@@ -17,10 +17,10 @@ type (
 		hd customHandler
 	}
 	httpTransportListener struct {
-		listener net.Listener
-		ht       *HttpTransport
-		sock     *HttpConn // TODO 还没实现
-		http     *http.Server
+		listener  net.Listener
+		transport *HttpTransport
+		sock      *HttpConn // TODO 还没实现
+		http      *http.Server
 	}
 )
 
@@ -61,7 +61,7 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 	// default http2 server
 
 	// insecure connection use h2c
-	if !(h.ht.config.Secure || h.ht.config.TLSConfig != nil) {
+	if !(h.transport.config.Secure || h.transport.config.TLSConfig != nil) {
 		h.http.Handler = h2c.NewHandler(h.http.Handler, &http2.Server{})
 	}
 

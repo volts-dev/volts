@@ -16,11 +16,13 @@ type (
 
 		// public
 		Body() *body.TBody
-		Write(data interface{}) error
-		RespondByJson(data interface{})
-		//Abort(string)
+		Write([]byte) (int, error)
+		WriteStream(interface{}) error
 		Route() route
 		Context() context.Context
+
+		RespondByJson(data interface{})
+		//Abort(string)
 		HandlerIndex() int
 		Handler(index ...int) handler
 		ValueModel() reflect.Value //

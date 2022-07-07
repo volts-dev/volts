@@ -8,7 +8,7 @@ import (
 
 type tcpTransportSocket struct {
 	conn net.Conn
-	//transport ITransport
+	// transport ITransport // NOTE 添加到自ROUTER耦合度极度降低
 
 	// ReadTimeout sets readdeadline for underlying net.Conns
 	ReadTimeout time.Duration
@@ -20,13 +20,12 @@ type tcpTransportSocket struct {
 	//encBuf *bufio.Writer
 }
 
-func NewTcpTransportSocket(conn net.Conn, readTimeout time.Duration, writeTimeout time.Duration) *tcpTransportSocket {
+func NewTcpTransportSocket(conn net.Conn, readTimeout, writeTimeout time.Duration) *tcpTransportSocket {
 	//encBuf := bufio.NewWriter(conn)
 	return &tcpTransportSocket{
 		conn:         conn,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
-		//transport: transport,
 		//encBuf:    encBuf,
 		//enc:       gob.NewEncoder(encBuf), // FIXME
 		//dec:       gob.NewDecoder(conn),   // FIXME

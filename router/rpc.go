@@ -127,10 +127,13 @@ func (self *TRpcContext) Body() *body.TBody {
 	return self.request.Body()
 }
 
-func (self *TRpcContext) Write(data interface{}) error {
+func (self *TRpcContext) Write(data []byte) (int, error) {
 	return self.response.Write(data)
 }
 
+func (self *TRpcContext) WriteStream(data interface{}) error {
+	return self.response.WriteStream(data)
+}
 func (self *TRpcContext) RespondByJson(data interface{}) {
 	js, err := json.Marshal(data)
 	if err != nil {

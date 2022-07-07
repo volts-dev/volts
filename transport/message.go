@@ -302,7 +302,6 @@ func (m *Message) Decode(r io.Reader) error {
 		return err
 	}
 
-	//log.Dbg("aafa", m.Bom[:1], err)
 	if !m.Bom.CheckMagicNumber() {
 		return fmt.Errorf("wrong magic number: %v", m.Bom[0])
 	}

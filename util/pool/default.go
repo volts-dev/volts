@@ -9,11 +9,10 @@ import (
 )
 
 type pool struct {
-	size int
-	ttl  time.Duration
-	tr   transport.ITransport
-
 	sync.Mutex
+	size  int
+	ttl   time.Duration
+	tr    transport.ITransport
 	conns map[string][]*poolConn
 }
 

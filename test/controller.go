@@ -13,15 +13,15 @@ type (
 //	}
 )
 
-func (t ArithCtrl) Mul(hd *router.TRpcContext) {
-	hd.Info("IP:")
+func (t ArithCtrl) Mul(ctx *router.TRpcContext) {
+	log.Info("IP:")
 	//hd.Request().
 	arg := Args{}
 	reply := &Reply{}
-	err := hd.Request().Body().Decode(&arg)
+	err := ctx.Request().Body().Decode(&arg)
 	if err != nil {
 		reply.Str = err.Error()
-		hd.Response().Write(reply)
+		ctx.Response().WriteStream(reply)
 		return
 	}
 
@@ -31,9 +31,9 @@ func (t ArithCtrl) Mul(hd *router.TRpcContext) {
 	//reply.Num = args.Num1 * args.Num2
 
 	//hd.Info("Mul2", t, args, *reply)
-	err = hd.Response().Write(reply)
+	err = ctx.Response().WriteStream(reply)
 	if err != nil {
-
+		ctx.Abort(err.Error())
 	}
 	return
 }
