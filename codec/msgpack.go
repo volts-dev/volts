@@ -1,7 +1,7 @@
 package codec
 
 import (
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // msgpackCodec uses messagepack marshaler and unmarshaler.

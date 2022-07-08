@@ -20,7 +20,7 @@ type (
 		StaticDir      []string       `ini:"-"` // the static dir allow to visit
 		StaticExt      []string       `ini:"-"` // the static file format allow to visit
 
-		RecoverPanic    bool
+		Recover         bool
 		RecoverHandler  func(IContext)
 		PrintRouterTree bool `ini:"enabled_print_router_tree"`
 		PrintRequest    bool
@@ -29,7 +29,8 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		RecoverPanic: true,
+		Recover:        true,
+		RecoverHandler: recoverHandler,
 	}
 	cfg.Init(opts...)
 
@@ -58,6 +59,12 @@ func PrintRoutesTree() Option {
 func PrintRequest() Option {
 	return func(cfg *Config) {
 		cfg.PrintRequest = true
+	}
+}
+
+func Recover(on bool) Option {
+	return func(cfg *Config) {
+		cfg.Recover = on
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 type (
 	// NOTED 不提供IO Reader/Writer/Closer
 	TBody struct {
-		//Buf     interface{} // 存储未编码的数据读取晴空
 		Data  *bytes.Buffer // 存储已经编码的数据
 		Codec codec.ICodec
 		len   int

@@ -447,7 +447,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 		ctx := p.Get().(*THttpContext)
 		if !ctx.inited {
-			ctx.Router = self
+			ctx.router = self
 			ctx.route = *route
 			ctx.inited = true
 			ctx.Template = template.Default()
@@ -527,7 +527,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 			}
 			ctx = p.Get().(*TRpcContext)
 			if !ctx.inited {
-				ctx.Router = self
+				ctx.router = self
 				ctx.route = *route
 				ctx.inited = true
 			}
@@ -682,7 +682,6 @@ func (self *TRouter) route(route *route, ctx IContext) {
 	)
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	//log.Dbg("parm %s %d:%d %p %p", handler.TemplateSrc, lRoute.Action, len(lRoute.handlers), lRoute.handlers)
 	for idx, handler := range route.handlers {
 		ctx.setControllerIndex(idx)
 		// stop runing ctrl
@@ -700,7 +699,7 @@ func (self *TRouter) route(route *route, ctx IContext) {
 			parm = handler.FuncType.In(i) // 获得参数
 
 			switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
-			case ctx.TypeModel(): // TODO 优化调用 // if is a pointer of TWebHandler
+			case ctx.TypeModel(): // TODO 优化调用 这里只检测指针类型// if is a pointer of TWebHandler
 				{
 					args = append(args, ctx.ValueModel()) // 这里将传递本函数先前创建的handle 给请求函数
 				}
@@ -746,16 +745,7 @@ func (self *TRouter) route(route *route, ctx IContext) {
 
 func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *route, ctx IContext, handler reflect.Value) {
 	defer func() {
-		if err := recover(); err != nil {
-			if !self.config.RecoverPanic { //是否绕过错误处理直接关闭程序
-				panic(err)
-			}
-
-			// handle middleware
-			if handler.IsValid() {
-				self.routeMiddleware("panic", route, ctx, handler)
-			}
-			log.Errf("r:%s err:%v", ctx.Route().Path, err)
+		if self.config.Recover {
 			self.config.RecoverHandler(ctx)
 		}
 	}()

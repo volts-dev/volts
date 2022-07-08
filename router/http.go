@@ -86,7 +86,7 @@ type (
 		context  context.Context
 		response *transport.THttpResponse //http.ResponseWriter
 		request  *transport.THttpRequest  //
-		Router   *TRouter
+		router   *TRouter
 		route    route //执行本次Handle的Route
 
 		// data set
@@ -125,7 +125,7 @@ func NewParamsSet(hd *THttpContext) *TParamsSet {
 func NewHttpContext(router *TRouter) *THttpContext {
 	hd := &THttpContext{
 		ILogger: log,
-		Router:  router,
+		router:  router,
 		//Route:   route,
 		//iResponseWriter: writer,
 		//Response:        writer,
@@ -166,6 +166,9 @@ func (self *TParamsSet) AsFloat(name string) float64 {
 	return utils.StrToFloat(self.params[name])
 }
 */
+func (self *THttpContext) Router() IRouter {
+	return self.router
+}
 
 // Call in the end of all controller
 func (self *THttpContext) FinalCall(handler func(*THttpContext)) {
@@ -629,9 +632,9 @@ func (self *THttpContext) ServeFile(file_path string) {
 func (self *THttpContext) RenderTemplate(tmpl string, args interface{}) {
 	self.ContentType = "text/html; charset=utf-8"
 	if vars, ok := args.(map[string]interface{}); ok {
-		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.route.group.templateVar, vars) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(self.router.templateVar, self.route.group.templateVar, vars) // 添加Router的全局变量到Templete
 	} else {
-		self.templateVar = utils.MergeMaps(self.Router.templateVar, self.route.group.templateVar) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(self.router.templateVar, self.route.group.templateVar) // 添加Router的全局变量到Templete
 	}
 
 	if self.route.FilePath == "" {

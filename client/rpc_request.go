@@ -45,8 +45,8 @@ func (self *rpcRequest) write(data interface{}) error {
 	if data == nil {
 		return nil
 	}
-
 	var err error
+
 	switch v := data.(type) {
 	case io.Reader:
 		d, err := io.ReadAll(v)
@@ -54,6 +54,13 @@ func (self *rpcRequest) write(data interface{}) error {
 			return err
 		}
 		_, err = self.body.Encode(d)
+
+	case []byte:
+		if self.opts.Encoded {
+			_, err = self.body.Data.Write(v)
+		} else {
+			_, err = self.body.Encode(v)
+		}
 	default:
 		_, err = self.body.Encode(v)
 	}

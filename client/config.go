@@ -21,6 +21,7 @@ type (
 		ContentType   string
 		Stream        bool
 		Codec         codec.ICodec
+		Encoded       bool // 传入的数据已经是编码器过的
 		SerializeType codec.SerializeType
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -181,6 +182,12 @@ func WithCodec(c codec.SerializeType) RequestOption {
 	return func(cfg *RequestOptions) {
 		cfg.SerializeType = c
 		cfg.Codec = codec.IdentifyCodec(c)
+	}
+}
+
+func Encoded(on bool) RequestOption {
+	return func(cfg *RequestOptions) {
+		cfg.Encoded = on
 	}
 }
 

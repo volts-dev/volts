@@ -19,6 +19,7 @@ type (
 		Write([]byte) (int, error)
 		WriteStream(interface{}) error
 		Route() route
+		Router() IRouter
 		Context() context.Context
 
 		RespondByJson(data interface{})
