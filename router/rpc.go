@@ -12,6 +12,7 @@ import (
 
 var (
 	RpcHandlerType = reflect.TypeOf(TRpcContext{})
+	RpcContext     = "RpcContext" // 标识用于判断String()
 )
 
 type (
@@ -114,18 +115,10 @@ func (self *TRpcContext) setData(v interface{}) {
 }
 
 func (self *TRpcContext) String() string {
-	return "RpcContext"
+	return RpcContext
 }
 
 func (self *TRpcContext) Body() *body.TBody {
-	/*	if self.body == nil {
-			self.body = NewContentBody(self.request.Body().Data.Bytes())
-		}
-
-		//self.Request.Body.Close()
-		//self.Request.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-		return self.body
-	*/
 	return self.request.Body()
 }
 
@@ -136,6 +129,7 @@ func (self *TRpcContext) Write(data []byte) (int, error) {
 func (self *TRpcContext) WriteStream(data interface{}) error {
 	return self.response.WriteStream(data)
 }
+
 func (self *TRpcContext) RespondByJson(data interface{}) {
 	js, err := json.Marshal(data)
 	if err != nil {

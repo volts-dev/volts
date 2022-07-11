@@ -21,14 +21,13 @@ type (
 		Route() route
 		Router() IRouter
 		Context() context.Context
-
 		RespondByJson(data interface{})
-		//Abort(string)
 		HandlerIndex() int
 		Handler(index ...int) handler
 		ValueModel() reflect.Value //
 		TypeModel() reflect.Type
 		IsDone() bool //response data is done
 		String() string
+		//Abort(string)
 	}
 )

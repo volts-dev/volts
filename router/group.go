@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	gpath "path"
+	_path "path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -55,9 +55,7 @@ type (
 		tree   *TTree
 		rcvr   reflect.Value // receiver of methods for the module
 		typ    reflect.Type  // type of the receiver
-
-		path string // URL 路径
-
+		path   string        // URL 路径
 		//modulePath string // 当前模块文件夹路径
 		domain string // 子域名用于区分不同域名不同路由
 	}
@@ -198,7 +196,7 @@ func curFilePath(skip int) (string, string) {
 		s += 1
 	}*/
 	_, file, _, _ := runtime.Caller(skip)
-	filePath, _ := gpath.Split(file)
+	filePath, _ := _path.Split(file)
 	dirName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
 	//log.Dbg(config.AppPath, " ", filePath)
 	// 过滤由router创建的组群
@@ -235,7 +233,7 @@ func NewGroup(opts ...GroupOption) *TGroup {
 		config:      cfg,
 		TemplateVar: newTemplateVar(),
 		tree:        NewRouteTree(),
-		path:        gpath.Join("/", cfg.Name),
+		path:        _path.Join("/", cfg.Name),
 	}
 
 	// init router tree
@@ -285,10 +283,10 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		filePath = root[0]
 	}
 
-	fs := http.Dir(gpath.Join(filePath, relativePath))                         // the filesystem path
-	absolutePath := gpath.Join(self.config.PrefixPath, relativePath)           // the url path
+	fs := http.Dir(_path.Join(filePath, relativePath))                         // the filesystem path
+	absolutePath := _path.Join(self.config.PrefixPath, relativePath)           // the url path
 	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))          // binding a file server
-	self.SetTemplateVar(relativePath[1:], gpath.Join(self.path, relativePath)) // set the template var value
+	self.SetTemplateVar(relativePath[1:], _path.Join(self.path, relativePath)) // set the template var value
 
 	handler := func(c *THttpContext) {
 		file := c.pathParams.FieldByName("filepath").AsString()
@@ -305,8 +303,8 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		c.Apply() //已经服务当前文件并结束
 	}
 
-	urlPattern := gpath.Join(self.config.PrefixPath, relativePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
-	self.url(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, handler)
+	urlPattern := _path.Join(self.config.PrefixPath, relativePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
+	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, handler)
 }
 
 // StaticFile registers a single route in order to serve a single file of the local filesystem.
@@ -323,104 +321,103 @@ func (self *TGroup) StaticFile(relativePath, filepath string) {
 }
 
 // !NOTE! RPC 或者 HTTP 不适用同一Module注册路由
-/*  Add route with method
+/*
+Add route with method
 HTTP: "GET/POST/DELETE/PUT/HEAD/OPTIONS/REST"
 RPC: "CONNECT"
 
 Match rules
-Base: (type:name) if difine type than the route only match the string same to the type
+Base: <type:name> if difine type than the route only match the string same to the type
 Example: string:id only match "abc"
          int:id only match number "123"
          :id could match all kind of type with name id
-'/web/content/(string:xmlid)',
-'/web/content/(string:xmlid)/(string:filename)',
-'/web/content/(int:id)',
-'/web/content/(int:id)/(string:filename)',
-'/web/content/(int:id)-<string:unique)',
-'/web/content/(int:id)-<string:unique)/(string:filename)',
-'/web/content/(string:model)/(int:id)/(string:field)',
-'/web/content/(string:model)/(int:id)/(string:field)/(string:filename)'
-for details please read tree.go */
+'/web/content/<string:xmlid>',
+'/web/content/<string:xmlid>/<string:filename>',
+'/web/content/<int:id>',
+'/web/content/<int:id>/<string:filename>',
+'/web/content/<int:id>-<string:unique>',
+'/web/content/<int:id>-<string:unique>/<string:filename>',
+'/web/content/<string:model>/<int:id>/<string:field>',
+'/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
+for details please read tree.go
+*/
 func (self *TGroup) Url(method string, path string, controller interface{}) *route {
-	path = gpath.Join(self.config.PrefixPath, path)
+	path = _path.Join(self.config.PrefixPath, path)
 	method = strings.ToUpper(method)
 	switch method {
 	case "GET":
-		return self.url(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
+		return self.addRoute(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
 
-	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE",
-		"REST":
-		return self.url(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
+	case "REST", "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE":
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
 
-	case "CONNECT": // RPC WS
-		return self.url(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
+	case "CONNECT": // RPC or WS
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
 
 	default:
-		panic(fmt.Sprintf("the params in Module.Url() %v:%v is invaild", method, path))
+		log.Panicf("the params in Module.Url() %v:%v is invaild", method, path)
 	}
+
+	return nil
 }
 
 /*
 pos: true 为插入Before 反之After
 */
-func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, controller interface{}) *route {
+func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, controller interface{}) *route {
 	// check vaild
 	if hanadlerType != ProxyHandler && controller == nil {
 		panic("the route must binding a controller!")
 	}
 
 	// init Value and Type
-	ctrl_value, ok := controller.(reflect.Value)
+	ctrlValue, ok := controller.(reflect.Value)
 	if !ok {
-		ctrl_value = reflect.ValueOf(controller)
+		ctrlValue = reflect.ValueOf(controller)
 	}
 
-	// transfer prt to struct
-	if ctrl_value.Kind() == reflect.Ptr {
-		ctrl_value = ctrl_value.Elem()
-	}
-	ctrl_type := ctrl_value.Type()
-	if ctrl_type.Kind() == reflect.Struct || ctrl_type.Kind() == reflect.Ptr {
-		object_name := utils.DotCasedName(utils.Obj2Name(controller))
+	ctrlType := ctrlValue.Type()
+	v := ctrlType.Kind()
+	switch v {
+	case reflect.Struct, reflect.Ptr:
+		// transfer prt to struct
+		if v == reflect.Ptr {
+			ctrlValue = ctrlValue.Elem()
+		}
 
-		n := ctrl_type.NumMethod()
-		var (
-			name   string
-			method reflect.Value
-			//typ    reflect.Type
-		)
-
+		objName := utils.DotCasedName(utils.Obj2Name(controller))
+		numMethod := ctrlType.NumMethod()
+		var name string
+		var method reflect.Value
 		isREST := utils.InStrings("REST", methods...) > -1
-		for i := 0; i < n; i++ {
+		for i := 0; i < numMethod; i++ {
 			// get the method information from the ctrl Type
-			name = ctrl_type.Method(i).Name
-			//ctrl_type = ctrl_type.Elem()
-			method = ctrl_type.Method(i).Func
+			name = ctrlType.Method(i).Name
+			method = ctrlType.Method(i).Func
+
+			// 初始化控制器
+			if strings.ToLower(name) == strings.ToLower("init") { // 保留字符
+				method.Call([]reflect.Value{ctrlValue})
+				continue
+			}
 			//typ = method.Type()
 			if method.CanInterface() {
-				//log.Dbg("RegisterName", object_name, name, method)
 				// 添加注册方法
 				if isREST {
 					// 方法为对象方法名称 url 只注册对象名称
-					self.url(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: object_name, Action: name}, method)
+					self.addRoute(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: objName, Action: name}, method)
 				} else {
-					// the rpc method needs one output.
-					//if typ.NumOut() != 1 {
-					//log.Info("method", name, "has wrong number of outs:", typ.NumOut())
-					//	continue
-					//}
-
-					self.url(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: object_name, Action: name}, method)
+					self.addRoute(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}, method)
 				}
 			}
 		}
 
 		// the end of the struct mapping
 		return nil //TODO 返回路由
-
-	} else if ctrl_type.Kind() != reflect.Func {
+	case reflect.Func:
+		break
+	default:
 		panic("controller must be func or bound method")
-
 	}
 
 	// trim the Url to including "/" on begin of path
@@ -428,18 +425,16 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 		url.Path = "/" + url.Path
 	}
 
-	route := newRoute(self, methods, url, url.Path, self.config.FilePath, self.config.Name, url.Action)
+	route := newRoute(self,
+		methods,
+		url,
+		url.Path,
+		self.config.FilePath,
+		self.config.Name,
+		url.Action,
+	)
 
-	/*// # is it proxy route
-	if scheme != "" && host != "" {
-		route.Host = &urls.path{
-			Scheme: scheme,
-			Host:   host,
-		}
-		route.isReverseProxy = true
-	}
-	*/
-	mt := newHandler(hanadlerType, ctrl_value, nil)
+	mt := newHandler(hanadlerType, ctrlValue, nil)
 
 	// RPC route validate
 	if utils.InStrings("CONNECT", methods...) > -1 {
@@ -450,38 +445,38 @@ func (self *TGroup) url(position RoutePosition, hanadlerType HandlerType, method
 		route.PathDelimitChar = '.'
 
 		// Method must be exported.
-		if ctrl_type.PkgPath() != "" {
+		if ctrlType.PkgPath() != "" {
 			return route
 		}
 
-		//logger.Dbg("NumIn", ctrl_type.NumIn(), ctrl_type.String())
+		//logger.Dbg("NumIn", ctrlType.NumIn(), ctrlType.String())
 		// Method needs four ins: receiver, context.Context, *args, *reply.
-		/*if ctrl_type.NumIn() != 4 {
-			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v %v`, url.Action, ctrl_type.In(0), ctrl_type.NumIn()))
+		/*if ctrlType.NumIn() != 4 {
+			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v %v`, url.Action, ctrlType.In(0), ctrlType.NumIn()))
 		}
-		if ctrl_type.NumIn() != 3 {
-			panic(fmt.Sprintf(`registerFunction: has wrong number of ins: %s`, ctrl_type.NumIn()))
+		if ctrlType.NumIn() != 3 {
+			panic(fmt.Sprintf(`registerFunction: has wrong number of ins: %s`, ctrlType.NumIn()))
 			return route
 		}
-		if ctrl_type.NumOut() != 1 {
-			panic(fmt.Sprintf(`registerFunction: has wrong number of outs: %v`, ctrl_type.NumOut()))
+		if ctrlType.NumOut() != 1 {
+			panic(fmt.Sprintf(`registerFunction: has wrong number of outs: %v`, ctrlType.NumOut()))
 		}*/
 
 		// First arg must be context.Context
-		ctxType := ctrl_type.In(1)
+		ctxType := ctrlType.In(1)
 		if ctxType != reflect.TypeOf(new(TRpcContext)) {
 			//log.Info("method", url.Action, " must use context.Context as the first parameter")
 			return nil
 		}
 		/*
 			// Second arg need not be a pointer.
-			argType := ctrl_type.In(2)
+			argType := ctrlType.In(2)
 			if !isExportedOrBuiltinType(argType) {
 				//log.Info(url.Action, "parameter type not exported:", argType)
 				return nil
 			}
 			// Third arg must be a pointer.
-			replyType := ctrl_type.In(3)
+			replyType := ctrlType.In(3)
 			if replyType.Kind() != reflect.Ptr {
 				//log.Info("method", url.Action, "reply type not a pointer:", replyType)
 				return nil

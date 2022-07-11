@@ -6,18 +6,14 @@ import (
 	"github.com/volts-dev/volts/logger"
 )
 
-var log = logger.New("Registry")
 var (
-	defaultRegistry IRegistry
-
-	// Not found error when GetService is called
-	ErrNotFound = errors.New("service not found")
-	// Watcher stopped error when watcher is stopped
-	ErrWatcherStopped = errors.New("watcher stopped")
+	log               = logger.New("Registry")
+	defaultRegistry   IRegistry
+	ErrNotFound       = errors.New("service not found") // Not found error when GetService is called
+	ErrWatcherStopped = errors.New("watcher stopped")   // Watcher stopped error when watcher is stopped
 )
 
 type (
-
 	// 注册中心接口
 	IRegistry interface {
 		Init(...Option) error
@@ -84,15 +80,16 @@ func Default(new ...IRegistry) IRegistry {
 		defaultRegistry = new[0]
 	} else {
 		if defaultRegistry == nil {
-			defaultRegistry = New()
+			defaultRegistry = newNoopRegistry()
 		}
 	}
 	return defaultRegistry
 }
 
 // 比对服务节点UID是否一致，
-func (self Service) Equal(to *Service) bool {
-	if len(self.Nodes) == len(to.Nodes) {
+func (self *Service) Equal(to *Service) bool {
+	// noop 会返回nil 这里需要判断
+	if self != nil && len(self.Nodes) == len(to.Nodes) {
 		var macth bool
 		for _, node := range self.Nodes {
 			macth = false

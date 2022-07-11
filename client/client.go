@@ -34,6 +34,7 @@ type (
 		//Endpoint() string
 		// The content type
 		ContentType() string
+		Header() header.Header
 		// The unencoded request body
 		Body() *body.TBody
 		// Write to the encoded request writer. This is nil before a call is made

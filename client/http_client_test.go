@@ -60,8 +60,8 @@ func TestPostRequest(t *testing.T) {
 		panic(err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header().Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111")
+	req.Header().Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: "ABC", Value: "U"})
 	resp, err := client.Call(req)
 	if err != nil {
@@ -97,9 +97,9 @@ func TestOrderHeader(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Host", u.Host)
+	req.Header().Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111")
+	req.Header().Set("Accept", "*/*")
+	req.Header().Set("Host", u.Host)
 	resp, err := client.Call(req)
 	if err != nil {
 		t.Fatal(err)

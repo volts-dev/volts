@@ -15,13 +15,13 @@ type (
 )
 
 func (self *registrySelector) newCache() cacher.ICacher {
-	ropts := []cacher.Option{}
+	opts := []registry.Option{}
 	if self.config.Context != nil {
 		if t, ok := self.config.Context.Value("selector_ttl").(time.Duration); ok {
-			ropts = append(ropts, cacher.WithTTL(t))
+			opts = append(opts, registry.RegisterTTL(t))
 		}
 	}
-	return cacher.New(self.config.Registry, ropts...)
+	return cacher.New(self.config.Registry, opts...)
 }
 
 func (self *registrySelector) Init(opts ...Option) error {

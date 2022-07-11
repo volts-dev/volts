@@ -8,4 +8,4 @@ import (
 //
 // The keys should be in canonical form, as returned by
 // CanonicalHeaderKey.
-type Header http.Header
+type Header = http.Header

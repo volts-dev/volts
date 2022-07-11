@@ -148,17 +148,20 @@ func (self TSubNodes) Less(i, j int) bool {
 	//return i < j
 }
 
-func NewRouteTree(config_fn ...ConfigOption) *TTree {
+func NewRouteTree(opts ...ConfigOption) *TTree {
 	tree := &TTree{
 		root:          make(map[string]*TNode),
 		__DelimitChar: 0, // !NOTE! 默认为未定义 以便区分RPC
 		PrefixChar:    '/',
 	}
-
-	for _, cfg := range config_fn {
-		cfg(tree)
-	}
+	tree.Init(opts...)
 	return tree
+}
+
+func (self *TTree) Init(opts ...ConfigOption) {
+	for _, cfg := range opts {
+		cfg(self)
+	}
 }
 
 // 解析Path为Node

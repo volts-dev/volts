@@ -14,11 +14,11 @@ import (
 
 	"github.com/asim/go-micro/v3/metadata"
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/errors"
 	"github.com/volts-dev/volts/util/pool"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/proxy"
@@ -278,7 +278,7 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 
 	// set the address
 	//address := node.Address
-	header := req.Header // make(http.Header)
+	header := req.Header() // make(http.Header)
 	if md, ok := metadata.FromContext(ctx); ok {
 		for k, v := range md {
 			header.Set(k, v)

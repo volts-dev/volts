@@ -1,8 +1,6 @@
 package router
 
 import (
-	"reflect"
-
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -42,19 +40,6 @@ func (self RoutePosition) String() string {
 }
 
 type (
-	// 路由节点绑定的控制器 func(Handler)
-	handler struct {
-		Name       string        // 名称
-		Func       reflect.Value // 方法本体
-		FuncType   reflect.Type  // 方法类型
-		ArgType    reflect.Type  // 参数组类型
-		ReplyType  reflect.Type  // TODO 返回多结果
-		Controller reflect.Value // TODO 待定 控制器
-		//ArgType   []reflect.Type // 参数组类型
-		//ReplyType []reflect.Type //TODO 返回多结果
-		Type     HandlerType         // Route 类型 决定合并的形式
-		Services []*registry.Service // 该路由服务线路 提供网关等特殊服务用// Versions of this service
-	}
 
 	// route 路,表示一个Link 连接地址"../webgo/"
 	// 提供基础数据参数供Handler处理
@@ -68,18 +53,13 @@ type (
 		handlers        []handler // 最终处理器 合并主处理器+次处理器 代理处理器
 		Methods         []string  // 方法
 		Host            []string
-		Url             *TUrl // 提供Restful 等Controller.Action
+		Url             *TUrl  // 提供Restful 等Controller.Action
+		isReverseProxy  bool   //# 是反向代理
+		Action          string // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
+		___isDynRoute   bool   // 是否*动态路由   /base/*.html
 		// 废弃
 		//HookCtrl map[string][]handler // 次控制器 map[*][]handler 匹配所有  Hook的Ctrl会在主的Ctrl执行完后执行
 		//handlers    map[string][]handler // 最终控制器 合并主控制器+次控制器
-
-		isReverseProxy bool    //# 是反向代理
-		___Model       string  // 模型/对象/模块名称 Tmodule/Tmodel, "Model.Action", "404"
-		Action         string  // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
-		___isDynRoute  bool    // 是否*动态路由   /base/*.html
-		__FileName     string  //
-		___MainCtrl    handler // 主控制器 每个Route都会有一个主要的Ctrl,其他为Hook的Ctrl
-
 	}
 )
 
@@ -114,28 +94,6 @@ func EndpiontToRoute(ep *registry.Endpoint) *route {
 	return r
 }
 
-/*
-@controller:本地服务会自行本地控制程序 其他代理远程服务为nil
-*/
-func newHandler(hanadlerType HandlerType, controller interface{}, services []*registry.Service) handler {
-	h := handler{
-		Type:     hanadlerType,
-		Services: services,
-	}
-
-	// init Value and Type
-	if controller != nil {
-		ctrl_value, ok := controller.(reflect.Value)
-		if !ok {
-			ctrl_value = reflect.ValueOf(controller)
-		}
-		h.Func = ctrl_value
-		h.FuncType = ctrl_value.Type()
-	}
-
-	return h
-}
-
 func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, action string) *route {
 	r := &route{
 		group:           group,
@@ -144,14 +102,9 @@ func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, 
 		Path:            path,
 		PathDelimitChar: '/',
 		FilePath:        filePath,
-		___Model:        name,
 		Action:          action, //
 		Methods:         methods,
-		//Type:     rt,
-		handlers: make([]handler, 0),
-		//HookCtrl: make([]handler, 0),
-		//Host:     host,
-		//Scheme:   scheme,
+		handlers:        make([]handler, 0),
 	}
 
 	if url != nil {

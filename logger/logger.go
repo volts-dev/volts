@@ -149,6 +149,10 @@ func Dbg(err ...interface{}) {
 	defualt.Dbg(err...)
 }
 
+func Dbgf(fmt string, arg ...interface{}) {
+	defualt.Dbgf(fmt, arg...)
+}
+
 func Err(err ...interface{}) error {
 	return defualt.Err(err...)
 }

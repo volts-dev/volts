@@ -8,9 +8,6 @@ import (
 	"github.com/volts-dev/volts/logger"
 )
 
-// use a .volts domain rather than .local
-var mdnsDomain = "volts"
-
 type (
 	Option       func(*Config)
 	WatchOptions func(*WatchConfig) error
@@ -58,10 +55,16 @@ type (
 )
 
 // new and init a config
-func newConfig() *Config {
+func ___newConfig() *Config {
 	return &Config{
 		Context: context.Background(),
 		Timeout: time.Millisecond * 100,
+	}
+}
+
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-var log = logger.New("Registry.Cacher")
+var log = registry.Logger()
 
 // Cache is the registry cache interface
 type (
@@ -26,7 +26,7 @@ type (
 
 	cache struct {
 		registry.IRegistry
-		config *Config
+		config *registry.Config
 
 		// registry cache
 		sync.RWMutex
@@ -51,6 +51,25 @@ type (
 var (
 	DefaultTTL = time.Minute
 )
+
+// New returns a new cache
+func New(r registry.IRegistry, opts ...registry.Option) ICacher {
+	rand.Seed(time.Now().UnixNano())
+	cfg := &registry.Config{
+		TTL: DefaultTTL,
+	}
+
+	cfg.Init(opts...)
+
+	return &cache{
+		IRegistry: r,
+		config:    cfg,
+		watched:   make(map[string]bool),
+		cache:     make(map[string][]*registry.Service),
+		ttls:      make(map[string]time.Time),
+		exit:      make(chan bool),
+	}
+}
 
 func backoff(attempts int) time.Duration {
 	if attempts == 0 {
@@ -462,26 +481,5 @@ func (c *cache) Stop() {
 }
 
 func (c *cache) String() string {
-	return "cache"
-}
-
-// New returns a new cache
-func New(r registry.IRegistry, opts ...Option) ICacher {
-	rand.Seed(time.Now().UnixNano())
-	cfg := &Config{
-		TTL: DefaultTTL,
-	}
-
-	for _, o := range opts {
-		o(cfg)
-	}
-
-	return &cache{
-		IRegistry: r,
-		config:    cfg,
-		watched:   make(map[string]bool),
-		cache:     make(map[string][]*registry.Service),
-		ttls:      make(map[string]time.Time),
-		exit:      make(chan bool),
-	}
+	return "Registry Cache"
 }

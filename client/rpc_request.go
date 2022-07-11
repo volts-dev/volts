@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/header"
 )
 
 type (
@@ -12,6 +13,7 @@ type (
 		method        string
 		endpoint      string
 		ContentLength int64
+		header        header.Header
 		body          *body.TBody
 		opts          RequestOptions
 	}
@@ -87,4 +89,10 @@ func (self *rpcRequest) Body() *body.TBody {
 
 func (*rpcRequest) Stream() bool {
 	return false
+}
+func (self *rpcRequest) Header() header.Header {
+	if self.header == nil {
+		self.header = make(header.Header)
+	}
+	return self.header
 }

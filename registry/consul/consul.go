@@ -39,15 +39,21 @@ func init() {
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
+	cfg := &registry.Config{
+		Timeout: time.Millisecond * 100,
+	}
+
+	cfg.Init(opts...)
+
 	cr := &consulRegistry{
-		opts:        &registry.Config{},
+		opts:        cfg,
 		register:    make(map[string]uint64),
 		lastChecked: make(map[string]time.Time),
 		queryOptions: &consul.QueryOptions{
 			AllowStale: true,
 		},
 	}
-	configure(cr, opts...)
+	configure(cr)
 	return cr
 }
 
@@ -86,12 +92,7 @@ func newTransport(config *tls.Config) *http.Transport {
 	return t
 }
 
-func configure(c *consulRegistry, opts ...registry.Option) {
-	// set opts
-	for _, o := range opts {
-		o(c.opts)
-	}
-
+func configure(c *consulRegistry) {
 	// use default non pooled config
 	config := consul.DefaultNonPooledConfig()
 
@@ -162,7 +163,8 @@ func configure(c *consulRegistry, opts ...registry.Option) {
 }
 
 func (c *consulRegistry) Init(opts ...registry.Option) error {
-	configure(c, opts...)
+	c.opts.Init(opts...)
+	configure(c)
 	return nil
 }
 

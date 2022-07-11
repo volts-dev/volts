@@ -53,7 +53,7 @@ func newConfig(opts ...Option) *Config {
 	}
 
 	if cfg.Registry == nil {
-		cfg.Registry = registry.New()
+		cfg.Registry = registry.Default()
 	}
 
 	return cfg

@@ -8,11 +8,12 @@ import (
 	"strings"
 
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/header"
 )
 
 type httpRequest struct {
 	URL    *_url.URL
-	Header http.Header
+	header header.Header
 	url    string
 	method string
 	//contentType   string
@@ -20,6 +21,7 @@ type httpRequest struct {
 	body          *body.TBody
 	opts          RequestOptions
 }
+type aaa = httpRequest
 
 /*
 	@service: 目标URL地址
@@ -52,14 +54,14 @@ func newHttpRequest(method, url string, data interface{}, opts ...RequestOption)
 
 	req := &httpRequest{
 		URL:    u,
-		Header: make(http.Header),
+		header: make(header.Header), // TODO 不初始化
 		body:   body.New(reqOpts.Codec),
 		url:    url,
 		method: strings.ToUpper(method),
 		opts:   reqOpts,
 	}
-	req.Header.Set("Accept", "*/*") // TODO 检测是否已经重复实现
-	req.Header.Set("Host", u.Host)
+	req.header.Set("Accept", "*/*") // TODO 检测是否已经重复实现
+	req.header.Set("Host", u.Host)
 	err = req.write(data)
 	if err != nil {
 		return nil, err
@@ -90,15 +92,15 @@ func (self *httpRequest) write(data interface{}) error {
 
 func (r *httpRequest) AddCookie(c *http.Cookie) {
 	s := c.String()
-	if c := r.Header.Get("Cookie"); c != "" {
-		r.Header.Set("Cookie", c+"; "+s)
+	if c := r.header.Get("Cookie"); c != "" {
+		r.header.Set("Cookie", c+"; "+s)
 	} else {
-		r.Header.Set("Cookie", s)
+		r.header.Set("Cookie", s)
 	}
 }
 
 func (r *httpRequest) Referer() string {
-	return r.Header.Get("Referer")
+	return r.header.Get("Referer")
 }
 
 func (self *httpRequest) ContentType() string {
@@ -123,4 +125,11 @@ func (self *httpRequest) Body() *body.TBody {
 
 func (h *httpRequest) Stream() bool {
 	return h.opts.Stream
+}
+
+func (self *httpRequest) Header() header.Header {
+	if self.header == nil {
+		self.header = make(header.Header)
+	}
+	return self.header
 }

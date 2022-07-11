@@ -20,6 +20,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var log = registry.Logger()
+
 var (
 	prefix = "/volts/registry/"
 )
@@ -34,23 +36,25 @@ type etcdRegistry struct {
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
+	cfg := &registry.Config{
+		Timeout: time.Millisecond * 100,
+	}
+
+	cfg.Init(opts...)
+
 	reg := &etcdRegistry{
-		config:   &registry.Config{},
+		config:   cfg,
 		register: make(map[string]uint64),
 		leases:   make(map[string]clientv3.LeaseID),
 	}
 
-	configure(reg, opts...)
+	configure(reg)
 	return reg
 }
 
-func configure(e *etcdRegistry, opts ...registry.Option) error {
+func configure(e *etcdRegistry) error {
 	config := clientv3.Config{
 		Endpoints: []string{"127.0.0.1:2379"}, // etcd 默认地址
-	}
-
-	for _, o := range opts {
-		o(e.config)
 	}
 
 	if e.config.Timeout == 0 {
@@ -118,7 +122,7 @@ func decode(ds []byte) *registry.Service {
 	var s *registry.Service
 	err := json.Unmarshal(ds, &s)
 	if err != nil {
-		registry.Logger().Errf("decode service failed with error %s :%s", err.Error(), string(ds))
+		log.Errf("decode service failed with error %s :%s", err.Error(), string(ds))
 	}
 	return s
 }
@@ -134,7 +138,8 @@ func servicePath(s string) string {
 }
 
 func (e *etcdRegistry) Init(opts ...registry.Option) error {
-	return configure(e, opts...)
+	e.config.Init(opts...)
+	return configure(e)
 }
 
 func (e *etcdRegistry) Config() *registry.Config {
@@ -195,7 +200,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	// renew the lease if it exists
 	if leaseID > 0 {
 		//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-		registry.Logger().Dbgf("Renewing existing lease for %s %d", s.Name, leaseID)
+		log.Dbgf("Renewing existing lease for %s %d", s.Name, leaseID)
 		//}
 		if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
 			if err != rpctypes.ErrLeaseNotFound {
@@ -203,7 +208,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 			}
 
 			//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-			registry.Logger().Dbgf("Lease not found for %s %d", s.Name, leaseID)
+			log.Dbgf("Lease not found for %s %d", s.Name, leaseID)
 			//}
 			// lease not found do register
 			leaseNotFound = true
@@ -224,7 +229,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	// the service is unchanged, skip registering
 	if ok && v == h && !leaseNotFound {
 		//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-		registry.Logger().Dbgf("Service %s node %s unchanged skipping registration", s.Name, node.Uid)
+		log.Dbgf("Service %s node %s unchanged skipping registration", s.Name, node.Uid)
 		//}
 		return nil
 	}
@@ -255,7 +260,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	}
 
 	//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-	registry.Logger().Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Uid, lgr, lgr.ID, options.TTL)
+	log.Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Uid, lgr, lgr.ID, options.TTL)
 	//}
 	// create an entry for the node
 	if lgr != nil {
@@ -296,7 +301,7 @@ func (e *etcdRegistry) Deregister(s *registry.Service, opts ...registry.Option) 
 		defer cancel()
 
 		//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-		registry.Logger().Dbgf("Deregistering %s id %s", s.Name, node.Uid)
+		log.Dbgf("Deregistering %s id %s", s.Name, node.Uid)
 		//}
 		_, err := e.client.Delete(ctx, nodePath(s.Name, node.Uid))
 		if err != nil {

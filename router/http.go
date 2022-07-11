@@ -32,6 +32,7 @@ import (
 */
 
 var (
+	HttpContext          = "HttpContext" // 标识用于判断String()
 	WebHandlerType       = reflect.TypeOf(THttpContext{})
 	cookieNameSanitizer  = strings.NewReplacer("\n", "-", "\r", "-")
 	cookieValueSanitizer = strings.NewReplacer("\n", " ", "\r", " ", ";", " ")
@@ -280,7 +281,7 @@ func (self *THttpContext) PathParams() *TParamsSet {
 }
 
 func (self *THttpContext) String() string {
-	return "HttpContext"
+	return HttpContext
 }
 
 // 值由Router 赋予

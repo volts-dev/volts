@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/errors"
 	"github.com/volts-dev/volts/util/metadata"
-	vnet "github.com/volts-dev/volts/util/net"
+	"github.com/volts-dev/volts/util/net"
 	"github.com/volts-dev/volts/util/pool"
 )
 
@@ -74,6 +74,13 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	address := node.Address
 
 	msg := transport.GetMessageFromPool()
+	msg.SetMessageType(transport.MT_REQUEST)
+	msg.SetSerializeType(self.config.SerializeType)
+
+	// init header
+	for k, v := range req.Header() {
+		msg.Header[k] = v[0]
+	}
 	md, ok := metadata.FromContext(ctx)
 	if ok {
 		for k, v := range md {
@@ -85,8 +92,6 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 			msg.Header[k] = v
 		}
 	}
-	msg.SetMessageType(transport.MT_REQUEST)
-	msg.SetSerializeType(self.config.SerializeType)
 
 	// set timeout in nanoseconds
 	msg.Header["Timeout"] = fmt.Sprintf("%d", opts.RequestTimeout)
@@ -302,7 +307,7 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 // next returns an iterator for the next nodes to call
 func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, error) {
 	// try get the proxy
-	service, address, _ := vnet.Proxy(request.Service(), opts.Address)
+	service, address, _ := net.Proxy(request.Service(), opts.Address)
 
 	// return remote address
 	if len(address) > 0 {

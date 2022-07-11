@@ -133,7 +133,7 @@ func New() *TRouter {
 	router := &TRouter{
 		TGroup:     *NewGroup(),
 		config:     cfg,
-		middleware: NewMiddlewareManager(),
+		middleware: newMiddlewareManager(),
 		objectPool: newPool(),
 		exit:       make(chan bool),
 	}
@@ -172,8 +172,9 @@ func (self *TRouter) isClosed() bool {
 
 // 过滤自己
 func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
-	if service.Name == self.config.Registry.CurrentService().Name {
-		node := self.config.Registry.CurrentService().Nodes[0]
+	curSrv := self.config.Registry.CurrentService()
+	if curSrv != nil && service.Name == curSrv.Name {
+		node := curSrv.Nodes[0]
 		nodes := make([]*registry.Node, 0)
 		for _, n := range service.Nodes {
 			if n.Uid == node.Uid {
@@ -193,10 +194,6 @@ func (self *TRouter) store(services []*registry.Service) {
 	// services
 	//names := map[string]bool{}
 
-	//var method string
-	//var path string
-	var r *route
-	var err error
 	// create a new endpoint mapping
 	for _, service := range services {
 		// set names we need later
@@ -207,14 +204,14 @@ func (self *TRouter) store(services []*registry.Service) {
 			for _, sep := range service.Endpoints {
 				//method = sep.Metadata["method"]
 				//path = sep.Metadata["path"]
-				r = EndpiontToRoute(sep)
+				r := EndpiontToRoute(sep)
 				if utils.InStrings("CONNECT", sep.Method...) > 0 {
 					r.handlers = append(r.handlers, newHandler(ProxyHandler, RpcReverseProxy, []*registry.Service{service}))
 				} else {
 					r.handlers = append(r.handlers, newHandler(ProxyHandler, HttpReverseProxy, []*registry.Service{service}))
 				}
 
-				err = self.tree.AddRoute(r)
+				err := self.tree.AddRoute(r)
 				if err != nil {
 					log.Err(err)
 				}
@@ -333,9 +330,7 @@ func (self *TRouter) refresh() {
 }
 
 func (self *TRouter) Init(opts ...Option) {
-	for _, opt := range opts {
-		opt(self.config)
-	}
+	self.config.Init(opts...)
 }
 
 func (self *TRouter) Config() *Config {
@@ -393,10 +388,17 @@ func (self *TRouter) RegisterGroup(grp ...IGroup) {
 }
 
 func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest) {
+	// 使用defer保证错误也打印
+	if self.config.PrintRequest {
+		defer func() {
+			log.Infof("[Path]%v", r.URL.Path)
+		}()
+	}
+
 	if r.Method == "CONNECT" { // serve as a raw network server
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
-			log.Infof("rpc hijacking %v:%v", r.RemoteAddr, ": ", err.Error())
+			log.Errf("rpc hijacking %v:%v", r.RemoteAddr, ": ", err.Error())
 		}
 		io.WriteString(conn, "HTTP/1.0 200 Connected to RPC\n\n")
 		/*
@@ -406,7 +408,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		*/
 		msg, err := transport.ReadMessage(conn)
 		if err != nil {
-			log.Info("rpc Read ", err.Error())
+			log.Errf("rpc Read %s", err.Error())
 		}
 		sock := transport.NewTcpTransportSocket(conn, 0, 0)
 		req := transport.NewRpcRequest(r.Context(), msg, sock)
@@ -417,20 +419,14 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		rsp := self.respPool.Get().(*transport.THttpResponse)
 		rsp.Connect(w)
 
-		path := r.URL.Path //获得的地址
-
+		//获得的地址
 		// # match route from tree
-		route, params := self.tree.Match(r.Method, path)
+		route, params := self.tree.Match(r.Method, r.URL.Path)
 		if route == nil {
 			rsp.WriteHeader(http.StatusNotFound)
 			return
 		}
 
-		defer func() {
-			if self.config.PrintRequest {
-				log.Infof("[Path]%v [Route]%v", path, route.FilePath)
-			}
-		}()
 		/*
 			if route.isReverseProxy {
 				self.routeProxy(route, params, req, w)
@@ -445,6 +441,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 				return NewHttpContext(self)
 			}
 		}
+
 		ctx := p.Get().(*THttpContext)
 		if !ctx.inited {
 			ctx.router = self
@@ -460,11 +457,11 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 
 		// 结束Route并返回内容
 		ctx.Apply()
-		p.Put(ctx) // Pool 回收Handler
 
-		// Pool 回收TResponseWriter
+		// 回收资源
+		p.Put(ctx) // Pool Handler
 		rsp.ResponseWriter = nil
-		self.respPool.Put(rsp)
+		self.respPool.Put(rsp) // Pool 回收TResponseWriter
 	}
 }
 
@@ -494,8 +491,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	res := transport.GetMessageFromPool()
 	res.SetMessageType(transport.MT_RESPONSE)
 	res.SetSerializeType(reqMessage.SerializeType())
-	// 匹配路由树
-	//route, _ := self.tree.Match("HEAD", msg.ServicePath+"."+msg.ServiceMethod)
+
 	var coder codec.ICodec
 	var ctx *TRpcContext
 	// 获取支持的序列模式
@@ -505,20 +501,12 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 		//handleError(res, err)
 	} else {
-		route, _ := self.tree.Match("CONNECT", reqMessage.Path)
+		route, _ := self.tree.Match("CONNECT", reqMessage.Path) // 匹配路由树
 		if route == nil {
 			err = errors.New("rpc: can't match route " + serviceName)
 			handleError(res, err)
 		} else {
-			// 获取RPC参数
-			// 获取控制器参数类型
-			///var argv = self.objectPool.Get(route.handlers[0].ArgType)
-			///err = coder.Decode(reqMessage.Payload, argv.Interface()) //反序列化获得参数值
-
-			///if err != nil {
-			///	handleError(res, err)
-			///} else {
-
+			// 初始化Context
 			p, has := self.rpcHandlerPool[route.Id]
 			if !has { // TODO 优化
 				p.New = func() interface{} {
@@ -531,14 +519,10 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 				ctx.route = *route
 				ctx.inited = true
 			}
-
 			ctx.reset(w, r, self, route)
-			//	ctx.argv = argv
-			//	ctx.replyv = self.objectPool.Get(route.handlers[0].ReplyType)
 
 			// 执行控制器
 			self.route(route, ctx)
-			///}
 		}
 	}
 
@@ -658,10 +642,6 @@ func (self *TRouter) routeMiddleware(method string, route *route, ctx IContext, 
 					m.Response(ctrl.Interface(), ctx)
 				}
 
-			} else if method == "panic" {
-				if m, ok := mid_val.Interface().(IMiddlewarePanic); ok {
-					m.Panic(ctrl.Interface(), ctx)
-				}
 			}
 		}
 	}
@@ -745,7 +725,7 @@ func (self *TRouter) route(route *route, ctx IContext) {
 
 func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *route, ctx IContext, handler reflect.Value) {
 	defer func() {
-		if self.config.Recover {
+		if self.config.Recover && self.config.RecoverHandler != nil {
 			self.config.RecoverHandler(ctx)
 		}
 	}()

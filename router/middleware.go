@@ -21,10 +21,6 @@ Sample:
 
 */
 
-var (
-	___Middleware = TMiddlewareManager{}
-)
-
 type (
 	IMiddleware interface{}
 
@@ -55,18 +51,23 @@ type (
 		Response(controller interface{}, ctx IContext)
 	}
 
-	IMiddlewarePanic interface {
-		Panic(controller interface{}, ctx IContext)
-	}
-
 	TMiddlewareManager struct {
 		middlewares map[string]IMiddleware
 		names       []string     //
 		lock        sync.RWMutex // 同步性不重要暂时不加锁
 	}
+
+	Middleware struct {
+	}
 )
 
-func NewMiddlewareManager() *TMiddlewareManager {
+// middleware 中间件对象
+// urls 不执行中间件名称
+func (self *Middleware) BlackList(middleware interface{}, urls ...string) {
+
+}
+
+func newMiddlewareManager() *TMiddlewareManager {
 	return &TMiddlewareManager{
 		middlewares: make(map[string]IMiddleware),
 	}

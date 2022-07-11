@@ -32,6 +32,10 @@ func (self *RpcResponse) WriteHeader(code MessageType) {
 }
 
 func (self *RpcResponse) Write(b []byte) (int, error) {
+	if self.Request.Message.IsOneway() {
+		return 0, nil // errors.New("This is one way request!")
+	}
+
 	self.WriteHeader(MT_RESPONSE)
 
 	msg := newMessage()
@@ -42,6 +46,10 @@ func (self *RpcResponse) Write(b []byte) (int, error) {
 
 // write data as stream
 func (self *RpcResponse) WriteStream(data interface{}) error {
+	if self.Request.Message.IsOneway() {
+		return nil // errors.New("This is one way request!")
+	}
+
 	self.WriteHeader(MT_RESPONSE)
 
 	msg := self.Request.Message
