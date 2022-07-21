@@ -34,8 +34,9 @@ type (
 		// can be stored in a context
 		Context context.Context
 
-		Metadata  map[string]string
-		Name      string
+		Metadata map[string]string
+		Name     string
+		//  host address ":35999"
 		Address   string
 		Advertise string
 		Uid       string

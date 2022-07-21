@@ -32,7 +32,7 @@ type (
 		Deregister(ep *registry.Endpoint) error
 		// list all endpiont from router
 		Endpoints() []*registry.Endpoint
-		RegisterMiddleware(middlewares ...IMiddleware)
+		RegisterMiddleware(middlewares ...func() IMiddleware)
 		RegisterGroup(grp ...IGroup)
 		PrintRoutes()
 	}
@@ -43,12 +43,12 @@ type (
 		TGroup // router is a group set
 		config *Config
 
-		middleware       *TMiddlewareManager // 中间件
-		template         *template.TTemplateSet
-		objectPool       *pool
-		respPool         sync.Pool
-		httpbHandlerPool map[int]sync.Pool //根据Route缓存
-		rpcHandlerPool   map[int]sync.Pool
+		middleware *TMiddlewareManager // 中间件
+		template   *template.TTemplateSet
+		//objectPool  *pool
+		respPool    sync.Pool
+		httpCtxPool map[int]sync.Pool //根据Route缓存
+		rpcCtxPool  map[int]sync.Pool
 
 		// compiled regexp for host and path
 		exit chan bool
@@ -134,8 +134,8 @@ func New() *TRouter {
 		TGroup:     *NewGroup(),
 		config:     cfg,
 		middleware: newMiddlewareManager(),
-		objectPool: newPool(),
-		exit:       make(chan bool),
+		//objectPool: newPool(),
+		exit: make(chan bool),
 	}
 
 	router.respPool.New = func() interface{} {
@@ -144,6 +144,7 @@ func New() *TRouter {
 
 	go router.watch()   // 实时订阅
 	go router.refresh() // 定时刷新
+
 	return router
 }
 
@@ -206,9 +207,9 @@ func (self *TRouter) store(services []*registry.Service) {
 				//path = sep.Metadata["path"]
 				r := EndpiontToRoute(sep)
 				if utils.InStrings("CONNECT", sep.Method...) > 0 {
-					r.handlers = append(r.handlers, newHandler(ProxyHandler, RpcReverseProxy, []*registry.Service{service}))
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, []interface{}{RpcReverseProxy}, []*registry.Service{service}))
 				} else {
-					r.handlers = append(r.handlers, newHandler(ProxyHandler, HttpReverseProxy, []*registry.Service{service}))
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, []interface{}{HttpReverseProxy}, []*registry.Service{service}))
 				}
 
 				err := self.tree.AddRoute(r)
@@ -237,6 +238,12 @@ func (self *TRouter) watch() {
 			log.Errf("error watching endpoints: %v", err)
 			//}
 			//time.Sleep(time.Duration(attempts) * time.Second)
+			continue
+		}
+
+		// 无监视者等待
+		if w == nil {
+			time.After(60 * time.Second)
 			continue
 		}
 
@@ -290,6 +297,7 @@ func (self *TRouter) refresh() {
 	var attempts int
 
 	for {
+
 		services, err := self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
@@ -297,6 +305,11 @@ func (self *TRouter) refresh() {
 			log.Errf("unable to list services: %v", err)
 			//}
 			time.Sleep(time.Duration(attempts) * time.Second)
+			continue
+		}
+		// 无监视者等待
+		if len(services) == 0 {
+			time.After(60 * time.Second)
 			continue
 		}
 
@@ -365,17 +378,19 @@ func (self *TRouter) Endpoints() []*registry.Endpoint {
 }
 
 // 注册中间件
-func (self *TRouter) RegisterMiddleware(middlewares ...IMiddleware) {
-	for _, m := range middlewares {
-		if mm, ok := m.(IMiddlewareName); ok {
-			self.middleware.Add(mm.Name(), m)
+func (self *TRouter) RegisterMiddleware(middlewares ...func() IMiddleware) {
+	for _, creator := range middlewares {
+		// 新建中间件
+		middleware := creator()
+		if mm, ok := middleware.(IMiddlewareName); ok {
+			self.middleware.Add(mm.Name(), creator)
 		} else {
-			typ := reflect.TypeOf(m)
+			typ := reflect.TypeOf(middleware)
 			if typ.Kind() == reflect.Ptr {
 				typ = typ.Elem()
 			}
 			name := typ.String()
-			self.middleware.Add(name, m)
+			self.middleware.Add(name, creator)
 		}
 	}
 }
@@ -434,8 +449,8 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 				return
 			}
 		*/
-		// # get the new Handler from pool
-		p, has := self.httpbHandlerPool[route.Id]
+		// # get the new context from pool
+		p, has := self.httpCtxPool[route.Id]
 		if !has {
 			p.New = func() interface{} {
 				return NewHttpContext(self)
@@ -507,7 +522,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 			handleError(res, err)
 		} else {
 			// 初始化Context
-			p, has := self.rpcHandlerPool[route.Id]
+			p, has := self.rpcCtxPool[route.Id]
 			if !has { // TODO 优化
 				p.New = func() interface{} {
 					return NewRpcHandler(self)
@@ -655,82 +670,27 @@ func (self *TRouter) routeMiddleware(method string, route *route, ctx IContext, 
 }
 
 func (self *TRouter) route(route *route, ctx IContext) {
-	var (
-		ctrl_val reflect.Value
-		ctrl_typ reflect.Type
-		parm     reflect.Type
-	)
-
-	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	for idx, handler := range route.handlers {
-		ctx.setControllerIndex(idx)
-		// stop runing ctrl
-		if ctx.IsDone() {
-			return
-		}
-
-		var args []reflect.Value
-		if handler.Type == LocalHandler {
-		}
-
-		//handler.HandlerIndex = index //index
-		// STEP#: 获取<Ctrl.Func()>方法的参数
-		for i := 0; i < handler.FuncType.NumIn(); i++ {
-			parm = handler.FuncType.In(i) // 获得参数
-
-			switch parm { //arg0.Elem() { //获得Handler的第一个参数类型.
-			case ctx.TypeModel(): // TODO 优化调用 这里只检测指针类型// if is a pointer of TWebHandler
-				{
-					args = append(args, ctx.ValueModel()) // 这里将传递本函数先前创建的handle 给请求函数
-				}
-			default:
-				{
-					//
-					if i == 0 && parm.Kind() == reflect.Struct { // 第一个 //第一个是方法的结构自己本身 例：(self TMiddleware) ProcessRequest（）的 self
-						ctrl_typ = parm
-						ctrl_val = self.objectPool.Get(parm)
-
-						// ctrl_val 由类生成实体值,必须指针转换而成才是Addressable  错误：lVal := reflect.Zero(aHandleType)
-						if ctrl_val.Kind() == reflect.Ptr {
-							args = append(args, ctrl_val.Elem()) //插入该类型空值
-						}
-						break
-					}
-					// by default append a zero value
-					args = append(args, reflect.Zero(parm)) //插入该类型空值
-				}
-			}
-		}
-
-		CtrlValidable := ctrl_val.IsValid()
-		if CtrlValidable {
-			self.routeMiddleware("request", route, ctx, ctrl_val)
-		}
-
-		if !ctx.IsDone() {
-			// execute Handler or Panic Event
-			self.safelyCall(handler.Func, args, route, ctx, ctrl_val) //传递参数给函数.<<<
-		}
-
-		if !ctx.IsDone() && CtrlValidable {
-			self.routeMiddleware("response", route, ctx, ctrl_val)
-		}
-
-		if CtrlValidable {
-			self.objectPool.Put(ctrl_typ, ctrl_val)
-		}
-
-	}
-}
-
-func (self *TRouter) safelyCall(function reflect.Value, args []reflect.Value, route *route, ctx IContext, handler reflect.Value) {
 	defer func() {
 		if self.config.Recover && self.config.RecoverHandler != nil {
-			self.config.RecoverHandler(ctx)
+			if err := recover(); err != nil {
+				log.Err(err)
+				self.config.RecoverHandler(ctx)
+			}
 		}
 	}()
 
-	// TODO 优化速度GO2
-	// Invoke the method, providing a new value for the reply.
-	function.Call(args)
+	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
+	var handler *handler
+	for _, h := range route.handlers {
+		handler = h.New(self)
+		ctx.setHandler(handler)
+
+		if handler.Type == LocalHandler {
+		}
+
+		// 执行Handler.next
+		ctx.Next()
+
+		handler.Recycle()
+	}
 }

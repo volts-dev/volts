@@ -51,11 +51,12 @@ type (
 	// 服务模块 每个服务代表一个对象
 	TGroup struct {
 		*TemplateVar
-		config *GroupConfig
-		tree   *TTree
-		rcvr   reflect.Value // receiver of methods for the module
-		typ    reflect.Type  // type of the receiver
-		path   string        // URL 路径
+		config     *GroupConfig
+		middleware *TMiddlewareManager
+		tree       *TTree
+		rcvr       reflect.Value // receiver of methods for the module
+		typ        reflect.Type  // type of the receiver
+		path       string        // URL 路径
 		//modulePath string // 当前模块文件夹路径
 		domain string // 子域名用于区分不同域名不同路由
 	}
@@ -341,18 +342,18 @@ Example: string:id only match "abc"
 '/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
 for details please read tree.go
 */
-func (self *TGroup) Url(method string, path string, controller interface{}) *route {
+func (self *TGroup) Url(method string, path string, handlers ...interface{}) *route {
 	path = _path.Join(self.config.PrefixPath, path)
 	method = strings.ToUpper(method)
 	switch method {
 	case "GET":
-		return self.addRoute(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, controller)
+		return self.addRoute(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, handlers...)
 
 	case "REST", "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE":
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers...)
 
 	case "CONNECT": // RPC or WS
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, controller)
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers...)
 
 	default:
 		log.Panicf("the params in Module.Url() %v:%v is invaild", method, path)
@@ -364,60 +365,90 @@ func (self *TGroup) Url(method string, path string, controller interface{}) *rou
 /*
 pos: true 为插入Before 反之After
 */
-func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, controller interface{}) *route {
+func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, handlers ...interface{}) *route {
 	// check vaild
-	if hanadlerType != ProxyHandler && controller == nil {
+	if hanadlerType != ProxyHandler && len(handlers) == 0 {
 		panic("the route must binding a controller!")
 	}
 
-	// init Value and Type
-	ctrlValue, ok := controller.(reflect.Value)
-	if !ok {
-		ctrlValue = reflect.ValueOf(controller)
-	}
-
-	ctrlType := ctrlValue.Type()
-	v := ctrlType.Kind()
-	switch v {
-	case reflect.Struct, reflect.Ptr:
-		// transfer prt to struct
-		if v == reflect.Ptr {
-			ctrlValue = ctrlValue.Elem()
+	var hd *handler
+	h := handlers[0]
+	switch v := h.(type) {
+	case func(*THttpContext), func(*TRpcContext):
+		hd = generateHandler(hanadlerType, handlers, nil)
+	case func(http.ResponseWriter, http.Request):
+		fn := func(ctx *THttpContext) {
+			v(ctx.response.ResponseWriter, *ctx.request.Request)
 		}
+		hds := append([]interface{}{fn}, handlers[1:])
+		// TODO 支持中间件
+		hd = generateHandler(hanadlerType, hds, nil)
+	default:
+		// init Value and Type
+		ctrlValue, ok := h.(reflect.Value)
+		if !ok {
+			ctrlValue = reflect.ValueOf(h)
+		}
+		ctrlType := ctrlValue.Type()
 
-		objName := utils.DotCasedName(utils.Obj2Name(controller))
-		numMethod := ctrlType.NumMethod()
-		var name string
-		var method reflect.Value
-		isREST := utils.InStrings("REST", methods...) > -1
-		for i := 0; i < numMethod; i++ {
-			// get the method information from the ctrl Type
-			name = ctrlType.Method(i).Name
-			method = ctrlType.Method(i).Func
-
-			// 初始化控制器
-			if strings.ToLower(name) == strings.ToLower("init") { // 保留字符
-				method.Call([]reflect.Value{ctrlValue})
-				continue
+		kind := ctrlType.Kind()
+		switch kind {
+		case reflect.Struct, reflect.Ptr:
+			// transfer prt to struct
+			if kind == reflect.Ptr {
+				ctrlValue = ctrlValue.Elem()
 			}
-			//typ = method.Type()
-			if method.CanInterface() {
-				// 添加注册方法
-				if isREST {
-					// 方法为对象方法名称 url 只注册对象名称
-					self.addRoute(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: objName, Action: name}, method)
-				} else {
-					self.addRoute(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}, method)
+
+			objName := utils.DotCasedName(utils.Obj2Name(h))
+			var name string
+			var method reflect.Value
+			isREST := utils.InStrings("REST", methods...) > -1
+			for i := 0; i < ctrlType.NumMethod(); i++ {
+				// get the method information from the ctrl Type
+				name = ctrlType.Method(i).Name
+				method = ctrlType.Method(i).Func
+
+				// 初始化控制器
+				if strings.ToLower(name) == strings.ToLower("init") { // 保留字符
+					method.Call([]reflect.Value{ctrlValue})
+					continue
+				}
+				//typ = method.Type()
+				if method.CanInterface() {
+					// 添加注册方法
+					if isREST {
+						// 方法为对象方法名称 url 只注册对象名称
+						self.addRoute(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: objName, Action: name}, method)
+					} else {
+						self.addRoute(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}, method)
+					}
 				}
 			}
-		}
 
-		// the end of the struct mapping
-		return nil //TODO 返回路由
-	case reflect.Func:
-		break
-	default:
-		panic("controller must be func or bound method")
+			// the end of the struct mapping
+			return nil //TODO 返回路由
+		case reflect.Func:
+			// Method must be exported.
+			if ctrlType.PkgPath() != "" {
+				log.Panicf("Method %s must be exported", url.Action)
+				return nil
+			}
+
+			// First arg must be context.Context
+			// RPC route validate
+			if utils.InStrings("CONNECT", methods...) > -1 {
+				ctxType := ctrlType.In(1)
+				if ctxType != RpcContextType {
+					log.Panicf("method %s must use context as the first parameter", url.Action)
+					return nil
+				}
+			}
+			//var parm reflect.Type
+			hd = generateHandler(hanadlerType, []interface{}{ctrlValue}, nil)
+			break
+		default:
+			panic("controller must be func or bound method")
+		}
 	}
 
 	// trim the Url to including "/" on begin of path
@@ -434,60 +465,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 		url.Action,
 	)
 
-	mt := newHandler(hanadlerType, ctrlValue, nil)
-
-	// RPC route validate
-	if utils.InStrings("CONNECT", methods...) > -1 {
-		// !NOTE! 修改分隔符
-		//if self.tree.DelimitChar == 0 {
-		//	self.tree.DelimitChar = '.'
-		//}
-		route.PathDelimitChar = '.'
-
-		// Method must be exported.
-		if ctrlType.PkgPath() != "" {
-			return route
-		}
-
-		//logger.Dbg("NumIn", ctrlType.NumIn(), ctrlType.String())
-		// Method needs four ins: receiver, context.Context, *args, *reply.
-		/*if ctrlType.NumIn() != 4 {
-			panic(fmt.Sprintf(`method "%v" has wrong number of ins: %v %v`, url.Action, ctrlType.In(0), ctrlType.NumIn()))
-		}
-		if ctrlType.NumIn() != 3 {
-			panic(fmt.Sprintf(`registerFunction: has wrong number of ins: %s`, ctrlType.NumIn()))
-			return route
-		}
-		if ctrlType.NumOut() != 1 {
-			panic(fmt.Sprintf(`registerFunction: has wrong number of outs: %v`, ctrlType.NumOut()))
-		}*/
-
-		// First arg must be context.Context
-		ctxType := ctrlType.In(1)
-		if ctxType != reflect.TypeOf(new(TRpcContext)) {
-			//log.Info("method", url.Action, " must use context.Context as the first parameter")
-			return nil
-		}
-		/*
-			// Second arg need not be a pointer.
-			argType := ctrlType.In(2)
-			if !isExportedOrBuiltinType(argType) {
-				//log.Info(url.Action, "parameter type not exported:", argType)
-				return nil
-			}
-			// Third arg must be a pointer.
-			replyType := ctrlType.In(3)
-			if replyType.Kind() != reflect.Ptr {
-				//log.Info("method", url.Action, "reply type not a pointer:", replyType)
-				return nil
-			}
-
-			mt.ArgType = argType
-			mt.ReplyType = replyType
-		*/
-	}
-
-	route.handlers = append(route.handlers, mt)
+	route.handlers = append(route.handlers, hd)
 	// register route
 	self.tree.AddRoute(route)
 	return route

@@ -22,15 +22,19 @@ Sample:
 */
 
 type (
-	IMiddleware interface{}
+	// 中间件接口
+	IMiddleware interface {
+		Handler(ctx IContext)
+	}
 
 	// 中间件名称接口
 	IMiddlewareName interface {
 		Name() string
 	}
 
+	// 中间件初始化接口
 	IMiddlewareInit interface {
-		Init(*TRouter)
+		Init()
 	}
 
 	/*
@@ -38,6 +42,9 @@ type (
 		@controller: the action interface which middleware bindding
 		@hd: the Handler interface for controller
 	*/
+	IMiddlewareHandler interface {
+		Handler(ctx IContext)
+	}
 	IMiddlewareRequest interface {
 		Request(controller interface{}, ctx IContext)
 	}
@@ -52,7 +59,7 @@ type (
 	}
 
 	TMiddlewareManager struct {
-		middlewares map[string]IMiddleware
+		middlewares map[string]func() IMiddleware
 		names       []string     //
 		lock        sync.RWMutex // 同步性不重要暂时不加锁
 	}
@@ -69,7 +76,7 @@ func (self *Middleware) BlackList(middleware interface{}, urls ...string) {
 
 func newMiddlewareManager() *TMiddlewareManager {
 	return &TMiddlewareManager{
-		middlewares: make(map[string]IMiddleware),
+		middlewares: make(map[string]func() IMiddleware),
 	}
 
 }
@@ -86,7 +93,7 @@ func (self *TMiddlewareManager) Contain(key string) bool {
 	return ok
 }
 
-func (self *TMiddlewareManager) Add(key string, value IMiddleware) {
+func (self *TMiddlewareManager) Add(key string, value func() IMiddleware) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -98,7 +105,7 @@ func (self *TMiddlewareManager) Add(key string, value IMiddleware) {
 	}
 }
 
-func (self *TMiddlewareManager) Set(key string, value IMiddleware) {
+func (self *TMiddlewareManager) Set(key string, value func() IMiddleware) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -109,7 +116,7 @@ func (self *TMiddlewareManager) Set(key string, value IMiddleware) {
 	}
 }
 
-func (self *TMiddlewareManager) Get(key string) IMiddleware {
+func (self *TMiddlewareManager) Get(key string) func() IMiddleware {
 	self.lock.RLock()
 	defer self.lock.RUnlock()
 	return self.middlewares[key]

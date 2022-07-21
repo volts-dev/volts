@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	RpcHandlerType = reflect.TypeOf(TRpcContext{})
-	RpcContext     = "RpcContext" // 标识用于判断String()
+	RpcContextType = reflect.TypeOf(&TRpcContext{}) // must be a pointer
+	RpcContext     = "RpcContext"                   // 标识用于判断String()
 )
 
 type (
@@ -23,9 +23,11 @@ type (
 		response     *transport.RpcResponse //http.ResponseWriter
 		request      *transport.RpcRequest  //
 		router       *TRouter
-		route        route //执行本次Handle的Route
+		data         *TParamsSet // 数据缓存在各个Controler间调用
+		route        route       //执行本次Handle的Route
 		inited       bool
 		handlerIndex int
+		handler      *handler
 		name         string        // name of service
 		__rcvr       reflect.Value // receiver of methods for the service
 		val          reflect.Value
@@ -80,7 +82,7 @@ func (self *TRpcContext) HandlerIndex() int {
 	return self.handlerIndex
 }
 
-func (self *TRpcContext) Handler(index ...int) handler {
+func (self *TRpcContext) Handler(index ...int) *handler {
 	if index != nil {
 		return self.route.handlers[index[0]]
 	}
@@ -108,6 +110,7 @@ func (self *TRpcContext) TypeModel() reflect.Type {
 func (self *TRpcContext) reset(rw *transport.RpcResponse, req *transport.RpcRequest, Router IRouter, Route *route) {
 	self.request = req
 	self.response = rw
+	self.data = nil // 清空
 }
 
 func (self *TRpcContext) setData(v interface{}) {
@@ -138,6 +141,21 @@ func (self *TRpcContext) RespondByJson(data interface{}) {
 	}
 
 	self.response.Write(js)
+}
+func (self *TRpcContext) Next() {
+	self.handler.Invoke(self)
+}
+
+func (self *TRpcContext) Data() *TParamsSet {
+	if self.data == nil {
+		self.data = NewParamsSet(self)
+	}
+
+	return self.data
+}
+
+func (self *TRpcContext) setHandler(h *handler) {
+	self.handler = h
 }
 
 func (self *TRpcContext) Abort(body string) {

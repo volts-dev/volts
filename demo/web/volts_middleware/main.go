@@ -40,7 +40,7 @@ func (action ctrls) Panic(hd *router.THttpContext) {
 
 func main() {
 	r := router.New()
-	r.RegisterMiddleware(event.NewEvent())
+	//r.RegisterMiddleware(event.NewEvent())
 	r.Url("GET", "/", ctrls.index)
 
 	srv := server.New(

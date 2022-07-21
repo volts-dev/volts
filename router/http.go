@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/dataset"
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/logger"
@@ -32,8 +31,8 @@ import (
 */
 
 var (
-	HttpContext          = "HttpContext" // 标识用于判断String()
-	WebHandlerType       = reflect.TypeOf(THttpContext{})
+	HttpContext          = "HttpContext"                   // 标识用于判断String()
+	HttpContextType      = reflect.TypeOf(&THttpContext{}) // must be a pointer
 	cookieNameSanitizer  = strings.NewReplacer("\n", "-", "\r", "-")
 	cookieValueSanitizer = strings.NewReplacer("\n", " ", "\r", " ", ";", " ")
 
@@ -73,13 +72,6 @@ type maxLatencyWriter struct {
 	done chan bool
 }
 type (
-	TParamsSet struct {
-		dataset.TRecordSet
-		handler *THttpContext
-		//params  map[string]string
-		//name   string
-	}
-
 	// THttpContext 负责所有请求任务,每个Handle表示有一个请求
 	THttpContext struct {
 		logger.ILogger
@@ -102,26 +94,17 @@ type (
 		TemplateSrc string                 // 模板名称
 
 		// 返回
-		ContentType string
-		Result      []byte // 最终返回数据由Apply提交
-
-		handlerIndex int  // -- 提示目前控制器Index
-		isDone       bool // -- 已经提交过
-		inited       bool // 初始化固定值保存进POOL
-		finalCall    func(handler *THttpContext)
-		//finalCall reflect.Value // -- handler 结束执行的动作处理器
-		val reflect.Value
-		typ reflect.Type
+		ContentType  string
+		Result       []byte // 最终返回数据由Apply提交
+		handler      *handler
+		handlerIndex int                         // -- 提示目前控制器Index
+		isDone       bool                        // -- 已经提交过
+		inited       bool                        // 初始化固定值保存进POOL
+		finalCall    func(handler *THttpContext) // 废弃
+		val          reflect.Value
+		typ          reflect.Type
 	}
 )
-
-func NewParamsSet(hd *THttpContext) *TParamsSet {
-	return &TParamsSet{
-		TRecordSet: *dataset.NewRecordSet(),
-		handler:    hd,
-		//params:  make(map[string]string),
-	}
-}
 
 func NewHttpContext(router *TRouter) *THttpContext {
 	hd := &THttpContext{
@@ -145,28 +128,6 @@ func NewHttpContext(router *TRouter) *THttpContext {
 	return hd
 }
 
-/*
-func (self *TParamsSet) AsString(name string) string {
-	return self.params[name]
-}
-
-func (self *TParamsSet) AsInteger(name string) int64 {
-	return utils.StrToInt64(self.params[name])
-}
-
-func (self *TParamsSet) AsBoolean(name string) bool {
-	return utils.StrToBool(self.params[name])
-}
-
-func (self *TParamsSet) AsDateTime(name string) (t time.Time) {
-	t, _ = time.Parse(time.RFC3339, self.params[name])
-	return
-}
-
-func (self *TParamsSet) AsFloat(name string) float64 {
-	return utils.StrToFloat(self.params[name])
-}
-*/
 func (self *THttpContext) Router() IRouter {
 	return self.router
 }
@@ -210,6 +171,13 @@ func (self *THttpContext) ValueModel() reflect.Value {
 // the reflect model of Type
 func (self *THttpContext) TypeModel() reflect.Type {
 	return self.typ
+}
+func (self *THttpContext) Next() {
+	self.handler.Invoke(self)
+}
+
+func (self *THttpContext) setHandler(h *handler) {
+	self.handler = h
 }
 
 //TODO 添加验证Request 防止多次解析
@@ -363,7 +331,7 @@ func (self *THttpContext) Route() route {
 	return self.route
 }
 
-func (self *THttpContext) Handler(index ...int) handler {
+func (self *THttpContext) Handler(index ...int) *handler {
 	if index != nil {
 		return self.route.handlers[index[0]]
 	}

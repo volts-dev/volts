@@ -2,16 +2,38 @@ package test
 
 import (
 	"github.com/volts-dev/volts/router"
+	"github.com/volts-dev/volts/router/middleware/event"
 )
 
 type (
 	ArithCtrl struct {
 	}
 
-//	Arith interface {
-//		Mul(hd *router.TRpcContext, args *test.Args, reply *test.Reply) error
-//	}
+	CtrlWithMiddleware struct {
+		event.TEvent
+		Session *TestSession
+	}
 )
+
+func (ctrl CtrlWithMiddleware) Init(cfg *router.ControllerConfig) {
+	cfg.AddFilter("session", "WithoutMiddlware")
+}
+
+func (ctrl CtrlWithMiddleware) Before(ctx *router.THttpContext) {
+	ctx.Write([]byte("event:Before"))
+}
+
+func (ctrl CtrlWithMiddleware) After(ctx *router.THttpContext) {
+	ctx.Write([]byte("event:After"))
+}
+
+func (ctrl CtrlWithMiddleware) HelloWorld(ctx *router.THttpContext) {
+	ctx.Write([]byte("Hello World!"))
+}
+
+func (ctrl CtrlWithMiddleware) WithoutMiddlware(ctx *router.THttpContext) {
+	ctx.Write([]byte("WithoutMiddlware"))
+}
 
 func (t ArithCtrl) Mul(ctx *router.TRpcContext) {
 	log.Info("IP:")

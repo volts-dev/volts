@@ -26,7 +26,7 @@ func (self SerializeType) String() string {
 
 // RegisterCodec register customized codec.
 func RegisterCodec(name string, codec ICodec) SerializeType {
-	h := hashName(name)
+	h := HashName(name)
 	codecs[h] = codec
 	names[name] = h
 	return h
@@ -41,7 +41,7 @@ func IdentifyCodec(st SerializeType) ICodec {
 	return codecs[st]
 }
 
-func hashName(s string) SerializeType {
+func HashName(s string) SerializeType {
 	v := int(crc32.ChecksumIEEE([]byte(s))) // 输入一个字符等到唯一标识
 	if v >= 0 {
 		return SerializeType(v)

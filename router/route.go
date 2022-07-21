@@ -4,19 +4,6 @@ import (
 	"github.com/volts-dev/volts/registry"
 )
 
-const (
-	// type of handler
-	LocalHandler HandlerType = iota
-	ProxyHandler
-
-	Normal RoutePosition = iota
-	Before
-	After
-	Replace // the route replace orgin
-)
-
-type HandlerType byte
-
 func (self HandlerType) String() string {
 	return [...]string{"LocalHandler", "ProxyHandler"}[self]
 }
@@ -32,6 +19,13 @@ func ___ToRouteType(name string) HandlerType {
 
 	return m[name]
 }
+
+const (
+	Normal RoutePosition = iota
+	Before
+	After
+	Replace // the route replace orgin
+)
 
 type RoutePosition byte
 
@@ -50,8 +44,8 @@ type (
 		PathDelimitChar byte   // URL分割符 "/"或者"."
 		FilePath        string // 短存储路径
 		Position        RoutePosition
-		handlers        []handler // 最终处理器 合并主处理器+次处理器 代理处理器
-		Methods         []string  // 方法
+		handlers        []*handler // 最终处理器 合并主处理器+次处理器 代理处理器
+		Methods         []string   // 方法
 		Host            []string
 		Url             *TUrl  // 提供Restful 等Controller.Action
 		isReverseProxy  bool   //# 是反向代理
@@ -104,7 +98,7 @@ func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, 
 		FilePath:        filePath,
 		Action:          action, //
 		Methods:         methods,
-		handlers:        make([]handler, 0),
+		handlers:        make([]*handler, 0),
 	}
 
 	if url != nil {
