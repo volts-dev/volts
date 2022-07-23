@@ -442,13 +442,6 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			return
 		}
 
-		/*
-			if route.isReverseProxy {
-				self.routeProxy(route, params, req, w)
-
-				return
-			}
-		*/
 		// # get the new context from pool
 		p, has := self.httpCtxPool[route.Id]
 		if !has {
@@ -574,101 +567,6 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	return
 }
 
-// the order is according by controller for modular register middleware.
-// TODO 优化遍历 缓存中间件列表
-// TODO 优化 route the midware request,response,panic
-func (self *TRouter) routeMiddleware(method string, route *route, ctx IContext, ctrl reflect.Value) {
-	var (
-		mid_val, mid_ptr_val reflect.Value
-		mid_typ              reflect.Type
-		mid_name             string // name of middleware
-		controller           reflect.Value
-	)
-
-	// [指针值]转为[结构值]
-	if ctrl.Kind() == reflect.Ptr {
-		controller = ctrl.Elem()
-	}
-
-	// the minddleware list from the controller
-	name_lst := make(map[string]bool)            // TODO　不用MAP list of midware found it ctrl
-	for i := 0; i < controller.NumField(); i++ { // middlewares under controller
-		// @:直接返回 放弃剩下的Handler
-		if ctx.IsDone() {
-			name_lst = nil // not report
-			break          // igonre the following any controls
-		}
-
-		mid_val = controller.Field(i) // get the middleware value
-		mid_typ = mid_val.Type()      // get the middleware type
-
-		if mid_typ.Kind() == reflect.Ptr {
-			mid_typ = mid_typ.Elem()
-		}
-
-		// get the name of middleware from the Type or Name()
-		mid_name = mid_typ.String()
-		if mid_val.Kind() == reflect.Ptr {
-			if m, ok := mid_val.Interface().(IMiddlewareName); ok {
-				mid_name = m.Name()
-			}
-		} else if mid_val.Kind() == reflect.Struct {
-			if m, ok := ctrl.Interface().(IMiddlewareName); ok {
-				mid_name = m.Name()
-			}
-		}
-
-		ml := self.middleware.Get(mid_name)
-		if ml == nil {
-			// normall only struct and pointer could be a middleware
-			if mid_val.Kind() == reflect.Struct || mid_val.Kind() == reflect.Ptr {
-				name_lst[mid_name] = false
-			}
-		} else {
-			name_lst[mid_name] = true
-
-			if mid_val.Kind() == reflect.Ptr {
-				/***	!过滤指针中间件!
-					type Controller struct {
-						Session *TSession
-					}
-				***/
-				// all middleware are nil at first time on the controller
-				if mid_val.IsNil() {
-					mid_ptr_val = cloneInterfacePtrFeild(ml) // TODO 优化克隆
-
-					// set back the middleware pointer to the controller
-					if mid_val.Kind() == mid_ptr_val.Kind() {
-						mid_val.Set(mid_ptr_val) // TODO Warm: Field must exportable
-					}
-				}
-			} else if mid_val.Kind() == reflect.Struct {
-				mid_val = ctrl
-			}
-
-			// call api
-			if method == "request" {
-				if m, ok := mid_val.Interface().(IMiddlewareRequest); ok {
-					m.Request(ctrl.Interface(), ctx)
-				}
-
-			} else if method == "response" {
-				if m, ok := mid_val.Interface().(IMiddlewareResponse); ok {
-					m.Response(ctrl.Interface(), ctx)
-				}
-
-			}
-		}
-	}
-
-	// report the name of midware which on controller but not register in the server
-	for name, found := range name_lst {
-		if !found {
-			log.Errf("%v isn't be register in controller %v", name, ctrl.String())
-		}
-	}
-}
-
 func (self *TRouter) route(route *route, ctx IContext) {
 	defer func() {
 		if self.config.Recover && self.config.RecoverHandler != nil {
@@ -688,9 +586,9 @@ func (self *TRouter) route(route *route, ctx IContext) {
 		if handler.Type == LocalHandler {
 		}
 
-		// 执行Handler.next
 		ctx.Next()
 
+		// TODO 回收需要特殊通道 直接调用占用了处理时间
 		handler.Recycle()
 	}
 }

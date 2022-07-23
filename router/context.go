@@ -18,10 +18,7 @@ type (
 
 	IContext interface {
 		// pravite
-		//setControllerIndex(num int)
 		setHandler(*handler)
-		//reset(rw IResponse, req IRequest, Router *TRouter, Route *route)
-		//setData(v interface{}) // TODO 修改API名称  设置response数据
 
 		// public
 		Next()

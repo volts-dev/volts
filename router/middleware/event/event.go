@@ -16,12 +16,11 @@ type (
 	}
 
 	TEvent struct {
-		Test string
 	}
 )
 
 func NewEvent() router.IMiddleware {
-	return &TEvent{"test"}
+	return &TEvent{}
 }
 
 func (self *TEvent) Name() string {
@@ -30,7 +29,6 @@ func (self *TEvent) Name() string {
 
 func (self *TEvent) Handler(ctx router.IContext) {
 	ctrl := ctx.Data().FieldByName("controller").AsInterface()
-	self.Test = "fdfd"
 	switch v := ctx.(type) {
 	case *router.THttpContext:
 		if c, ok := ctrl.(httpEvent); ok {

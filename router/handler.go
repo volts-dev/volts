@@ -1,5 +1,6 @@
 package router
 
+// TODO 修改主控制器对应Handler名称让其可以转为统一接口完全规避反射缓慢缺陷
 import (
 	"hash/crc32"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/volts-dev/volts/registry"
 )
+
+var deflautHandlerManager = newHandlerManager()
 
 type HandlerType byte
 type TransportType byte
@@ -42,7 +45,7 @@ type (
 
 	handle struct {
 		IsFunc     bool
-		Middleware IMiddlewareHandler // 使用接口调用以达到直接调用的效率
+		Middleware IMiddleware // 使用接口调用以达到直接调用的效率
 		HttpFunc   func(*THttpContext)
 		RpcFunc    func(*TRpcContext)
 	}
@@ -71,7 +74,9 @@ type (
 	}
 )
 
-var deflautHandlerManager = newHandlerManager()
+func (self HandlerType) String() string {
+	return [...]string{"LocalHandler", "ProxyHandler"}[self]
+}
 
 // add which middleware name blocked handler name
 func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
@@ -316,7 +321,6 @@ func (self *handler) New(router *TRouter) *handler {
 				log.Panicf("Controller %s need middleware %s to be registered!", h.CtrlName, midName)
 			}
 
-			// TODO 区别继承无名称和定义名称
 			midNewVal := reflect.ValueOf(ml())
 			/***	!过滤指针中间件!
 				type Controller struct {
@@ -324,7 +328,7 @@ func (self *handler) New(router *TRouter) *handler {
 				}
 			***/
 			if midVal.Kind() == reflect.Ptr {
-				midVal.Set(midNewVal) // TODO Warm: Field must exportable
+				midVal.Set(midNewVal) // WARM: Field must exportable
 			} else if midVal.Kind() == reflect.Struct {
 				midVal.Set(midNewVal.Elem())
 			}

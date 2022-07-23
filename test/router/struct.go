@@ -1,6 +1,9 @@
 package router
 
-import "fmt"
+import (
+	"fmt"
+	"unsafe"
+)
 
 type (
 	midWare struct {
@@ -21,8 +24,23 @@ type (
 		ctrl interface{}
 		hds  func() string
 	}
+
+	emptyInterface struct {
+		typ  *rtype
+		word unsafe.Pointer
+	}
+
+	iwrapper interface {
+		String(...interface{}) string
+	}
+	wrapper struct {
+		Func func(...interface{}) string
+	}
 )
 
+func (w wrapper) String(s ...interface{}) string {
+	return w.Func(s...)
+}
 func (a ctrl) String(s ...interface{}) string {
 	a.Name = fmt.Sprintf("%s%v", a.Name, s)
 	return a.Name

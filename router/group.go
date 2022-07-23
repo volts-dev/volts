@@ -63,7 +63,6 @@ type (
 
 	TemplateVar struct {
 		templateVar map[string]interface{} // TODO 全局变量. 需改进
-
 	}
 )
 

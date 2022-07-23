@@ -5,22 +5,6 @@ import (
 	"sync"
 )
 
-/**
-中间件控制器
-
-Sample:
-
-		TWebCtrl struct {
-			event.TEvent
-		}
-
-		// 传递的必须为非指针的值(self TWebCtrl)
-		func (self TWebCtrl) Before(hd *web.THandler) {
-
-		}
-
-*/
-
 type (
 	// 中间件接口
 	IMiddleware interface {
@@ -37,42 +21,12 @@ type (
 		Init()
 	}
 
-	/*
-		this will call before current ruote
-		@controller: the action interface which middleware bindding
-		@hd: the Handler interface for controller
-	*/
-	IMiddlewareHandler interface {
-		Handler(ctx IContext)
-	}
-	IMiddlewareRequest interface {
-		Request(controller interface{}, ctx IContext)
-	}
-
-	/*
-		this will call after current ruote
-		@controller: the action interface which middleware bindding
-		@hd: the Handler interface for controller
-	*/
-	IMiddlewareResponse interface {
-		Response(controller interface{}, ctx IContext)
-	}
-
 	TMiddlewareManager struct {
 		middlewares map[string]func() IMiddleware
 		names       []string     //
 		lock        sync.RWMutex // 同步性不重要暂时不加锁
 	}
-
-	Middleware struct {
-	}
 )
-
-// middleware 中间件对象
-// urls 不执行中间件名称
-func (self *Middleware) BlackList(middleware interface{}, urls ...string) {
-
-}
 
 func newMiddlewareManager() *TMiddlewareManager {
 	return &TMiddlewareManager{

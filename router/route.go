@@ -4,22 +4,6 @@ import (
 	"github.com/volts-dev/volts/registry"
 )
 
-func (self HandlerType) String() string {
-	return [...]string{"LocalHandler", "ProxyHandler"}[self]
-}
-
-func ___ToRouteType(name string) HandlerType {
-	m := map[string]HandlerType{
-		"CommomRoute": LocalHandler,
-		//"HookBeforeRoute": HookBeforeRoute,
-		//"HookAfterRoute":  HookAfterRoute,
-		//"ReplaceRoute":    ReplaceRoute,
-		"ProxyHandler": ProxyHandler,
-	}
-
-	return m[name]
-}
-
 const (
 	Normal RoutePosition = iota
 	Before
@@ -39,18 +23,17 @@ type (
 	// 提供基础数据参数供Handler处理
 	route struct {
 		group           *TGroup
-		Id              int    // 用于定位
-		Path            string // !NOTE! Path存储路由绑定的URL 网络路径
-		PathDelimitChar byte   // URL分割符 "/"或者"."
-		FilePath        string // 短存储路径
-		Position        RoutePosition
-		handlers        []*handler // 最终处理器 合并主处理器+次处理器 代理处理器
-		Methods         []string   // 方法
-		Host            []string
-		Url             *TUrl  // 提供Restful 等Controller.Action
-		isReverseProxy  bool   //# 是反向代理
-		Action          string // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
-		___isDynRoute   bool   // 是否*动态路由   /base/*.html
+		Id              int           // 用于定位
+		Path            string        // !NOTE! Path存储路由绑定的URL 网络路径
+		PathDelimitChar byte          // URL分割符 "/"或者"."
+		FilePath        string        // 短存储路径
+		Position        RoutePosition //
+		handlers        []*handler    // 最终处理器 合并主处理器+次处理器 代理处理器
+		Methods         []string      // 方法
+		Host            []string      //
+		Url             *TUrl         // 提供Restful 等Controller.Action
+		Action          string        // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
+		___isDynRoute   bool          // 是否*动态路由   /base/*.html
 		// 废弃
 		//HookCtrl map[string][]handler // 次控制器 map[*][]handler 匹配所有  Hook的Ctrl会在主的Ctrl执行完后执行
 		//handlers    map[string][]handler // 最终控制器 合并主控制器+次控制器

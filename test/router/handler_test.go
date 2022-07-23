@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/volts-dev/volts/router"
 )
@@ -34,19 +35,19 @@ func TestHandlerReflectInterfaceChangedMetohd(t *testing.T) {
 	var aa interface{}
 	aa = &ctrl{Name: "111"}
 	val := reflect.ValueOf(aa)
-	fmt.Println(val == val.Elem())
-	fn := val.MethodByName("String")
-	/*
-		field, _ := reflect.TypeOf(struct_).Elem().FieldByName("field1")
-		field1Ptr := uintptr(val.Pointer()) + field.Offset
-		*((*string)(unsafe.Pointer(field1Ptr))) = "hello"
-	*/
-	fmt.Println(fn.Call([]reflect.Value{}))
-	aa = &ctrl{Name: "222"}
-	val.Elem().Set(reflect.ValueOf(aa).Elem())
-	fmt.Println(fn.Call([]reflect.Value{}))
 
+	p := val.Interface()
+	ei := (*emptyInterface)(unsafe.Pointer(&p))
+	ptr0 := uintptr(ei.word)
+	fmt.Println(ptr0)
+
+	fn := val.MethodByName("String")
+	wrapper := &wrapper{
+		Func: fn.Interface().(func(...interface{}) string),
+	}
+	fmt.Println(wrapper.String())
 }
+
 func BenchmarkCreatByMakeFunc(b *testing.B) {
 	var creator func() interface{}
 	// swap is the implementation passed to MakeFunc.
