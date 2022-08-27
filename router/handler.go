@@ -28,6 +28,7 @@ const (
 )
 
 type (
+	// 让控制器提供基本配置能力
 	controllerInit interface {
 		Init(*ControllerConfig)
 	}
@@ -166,10 +167,10 @@ func generateHandler(hanadlerType HandlerType, handlers []interface{}, services 
 		handlerType := val.Type()
 		numIn := handlerType.NumIn()
 		if numIn == 1 && (handlerType.In(0) != HttpContextType && handlerType.In(0) != RpcContextType) {
-			log.Panicf("the handler must including Context!")
+			log.Panicf("the handler %s must including Context!", h.Name)
 		}
 		if handlerType.In(0).Kind() != reflect.Struct || (handlerType.In(1) != HttpContextType && handlerType.In(1) != RpcContextType) {
-			log.Panicf("the handler receiver must not be a pointer and with HTTP/RPC context!")
+			log.Panicf("the handler %s receiver must not be a pointer and with HTTP/RPC context!", h.Name)
 		}
 		// 这是控制器上的某个方法 提取控制器和中间件
 		h.CtrlType = handlerType.In(0)
@@ -446,11 +447,11 @@ func (self *handler) Reset() {
 	self.Pos = -1
 
 	// 执行中间件初始化
-	for self.Pos < len(self.Funcs) {
-		hd := self.Funcs[self.Pos]
+	for i := 0; i < len(self.Funcs); i++ {
+		hd := self.Funcs[i]
 		if !hd.IsFunc {
-			if m, ok := hd.Middleware.(IMiddlewareInit); ok {
-				m.Init()
+			if m, ok := hd.Middleware.(IMiddlewareRest); ok {
+				m.Rest()
 			}
 		}
 	}

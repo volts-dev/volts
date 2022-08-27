@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"sync"
 	"testing"
-	"unsafe"
 
 	"github.com/volts-dev/volts/router"
 )
@@ -34,18 +33,23 @@ func init() {
 func TestHandlerReflectInterfaceChangedMetohd(t *testing.T) {
 	var aa interface{}
 	aa = &ctrl{Name: "111"}
-	val := reflect.ValueOf(aa)
+	val := ValueOf(aa)
 
 	p := val.Interface()
-	ei := (*emptyInterface)(unsafe.Pointer(&p))
-	ptr0 := uintptr(ei.word)
-	fmt.Println(ptr0)
-
-	fn := val.MethodByName("String")
-	wrapper := &wrapper{
-		Func: fn.Interface().(func(...interface{}) string),
+	if n, ok := p.(iwrapper); ok {
+		fmt.Println(n.String())
 	}
-	fmt.Println(wrapper.String())
+	/*
+		ei := (*emptyInterface)(unsafe.Pointer(&p))
+		ptr0 := uintptr(ei.word)
+		fmt.Println(ptr0)
+
+		fn := val.MethodByName("String")
+		wrapper := &wrapper{
+			Func: fn.Interface().(func(...interface{}) string),
+		}
+		fmt.Println(wrapper.String())
+	*/
 }
 
 func BenchmarkCreatByMakeFunc(b *testing.B) {

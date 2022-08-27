@@ -396,6 +396,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			// transfer prt to struct
 			if kind == reflect.Ptr {
 				ctrlValue = ctrlValue.Elem()
+				ctrlType = ctrlType.Elem()
 			}
 
 			objName := utils.DotCasedName(utils.Obj2Name(h))
@@ -407,16 +408,16 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 				name = ctrlType.Method(i).Name
 				method = ctrlType.Method(i).Func
 
-				// 初始化控制器
-				if strings.ToLower(name) == strings.ToLower("init") { // 保留字符
-					method.Call([]reflect.Value{ctrlValue})
+				// 忽略非handler方法
+				if method.Type().In(1) != HttpContextType && method.Type().In(1) != RpcContextType {
 					continue
 				}
-				//typ = method.Type()
+
 				if method.CanInterface() {
 					// 添加注册方法
 					if isREST {
 						// 方法为对象方法名称 url 只注册对象名称
+						// name 为GET POST DELETE等
 						self.addRoute(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: objName, Action: name}, method)
 					} else {
 						self.addRoute(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}, method)
@@ -438,7 +439,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			if utils.InStrings("CONNECT", methods...) > -1 {
 				ctxType := ctrlType.In(1)
 				if ctxType != RpcContextType {
-					log.Panicf("method %s must use context as the first parameter", url.Action)
+					log.Panicf("method %s must use context pointer as the first parameter", url.Action)
 					return nil
 				}
 			}

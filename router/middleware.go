@@ -16,9 +16,11 @@ type (
 		Name() string
 	}
 
-	// 中间件初始化接口
-	IMiddlewareInit interface {
-		Init()
+	// 中间件重置接口
+	// 重置接口用于实现特定成员手动清空
+	// NOTE:改函数被调用有当Handler执行完毕并回收中
+	IMiddlewareRest interface {
+		Rest()
 	}
 
 	TMiddlewareManager struct {

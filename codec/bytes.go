@@ -2,11 +2,11 @@ package codec
 
 import (
 	"fmt"
-	"reflect"
 )
 
 type byteCodec struct{}
 
+// Bytes only support []byte and string data type
 var Bytes SerializeType = RegisterCodec("Bytes", &byteCodec{})
 
 // Encode returns raw slice of bytes.
@@ -27,10 +27,22 @@ func (c byteCodec) Encode(i interface{}) ([]byte, error) {
 }
 
 // Decode returns raw slice of bytes.
-func (c byteCodec) Decode(data []byte, i interface{}) error {
-	reflect.Indirect(reflect.ValueOf(i)).SetBytes(data)
+func (c byteCodec) Decode(data []byte, out interface{}) error {
+	// #1 reflect method but is slow
+	//reflect.Indirect(reflect.ValueOf(i)).SetBytes(data)
 
-	return nil
+	// #2
+	switch v := out.(type) {
+	case *[]byte:
+		*v = *&data
+		return nil
+	case *string:
+		*v = string(data)
+		return nil
+
+	default:
+		return fmt.Errorf("%T is not a []byte", out)
+	}
 }
 
 func (c byteCodec) String() string {
