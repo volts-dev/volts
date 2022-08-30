@@ -46,7 +46,7 @@ type (
 	HttpClient struct {
 		config   *Config
 		client   *http.Client
-		pool     pool.Pool // connect pool
+		pool     pool.Pool // TODO connect pool
 		closing  bool      // user has called Close
 		shutdown bool      // server has told us to stop
 	}

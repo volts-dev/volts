@@ -9,7 +9,10 @@ func TestByted(t *testing.T) {
 	str := []byte("你好！")
 	codec := IdentifyCodec(Bytes)
 	out := make([]byte, 0)
-	codec.Decode(str, &out)
+	err := codec.Decode(str, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Log(string(out))
 }
 

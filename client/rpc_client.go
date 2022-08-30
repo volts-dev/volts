@@ -122,6 +122,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	if err != nil {
 		return nil, errors.InternalServerError("volts.client", "connection error: %v", err)
 	}
+	defer self.pool.Release(conn, nil)
 
 	msg.Path = req.Service()
 	//data, err := msgCodece.Encode(req.Body())

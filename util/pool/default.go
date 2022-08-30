@@ -22,11 +22,11 @@ type poolConn struct {
 	created time.Time
 }
 
-func newPool(options Options) *pool {
+func newPool(cfg Config) *pool {
 	return &pool{
-		size:  options.Size,
-		tr:    options.Transport,
-		ttl:   options.TTL,
+		size:  cfg.Size,
+		tr:    cfg.Transport,
+		ttl:   cfg.TTL,
 		conns: make(map[string][]*poolConn),
 	}
 }

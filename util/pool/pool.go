@@ -27,9 +27,9 @@ type Conn interface {
 }
 
 func NewPool(opts ...Option) Pool {
-	var options Options
+	var cfg Config
 	for _, o := range opts {
-		o(&options)
+		o(&cfg)
 	}
-	return newPool(options)
+	return newPool(cfg)
 }
