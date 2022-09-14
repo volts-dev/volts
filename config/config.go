@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/volts-dev/utils"
@@ -9,6 +10,8 @@ import (
 )
 
 var log = logger.New("Config")
+var fmt = newFormat() // 配置主要文件格式读写实现
+var cfgs sync.Map
 
 var (
 	// App settings.
@@ -19,16 +22,27 @@ var (
 	AppPath       string
 	AppFilePath   string
 	AppDir        string
+	DefaultPrefix = "volts"
 	defaultConfig = New()
 )
 
 type (
+	Option func(*Config)
+
 	Config struct {
-		fmt         *format
-		Mode        ModeType
-		AppFilePath string
-		AppPath     string
-		AppDir      string
+		fmt      *format
+		Mode     ModeType
+		Prefix   string `json:"Prefix"`
+		FileName string
+		//AppFilePath string
+		//AppPath     string
+		//AppDir      string
+	}
+
+	IConfig interface {
+		Init(...Option)
+		Load() error
+		Save() error
 	}
 )
 
@@ -38,24 +52,46 @@ func init() {
 	AppDir = utils.AppDir()
 }
 
-func New() *Config {
-	return &Config{
-		fmt:         newFormat(),
-		Mode:        MODE_NORMAL,
-		AppFilePath: AppFilePath,
-		AppPath:     AppPath,
-		AppDir:      AppDir,
-	}
-}
-
 func Default() *Config {
 	return defaultConfig
 }
 
+func New(opts ...Option) *Config {
+	cfg := &Config{
+		fmt:    fmt,
+		Mode:   MODE_NORMAL,
+		Prefix: DefaultPrefix,
+		//AppFilePath: AppFilePath,
+		//AppPath:     AppPath,
+		//AppDir:      AppDir,
+	}
+	cfg.Init(opts...)
+
+	// 如果无文件则创建新的
+	if !utils.FileExists(cfg.FileName) {
+		cfg.fmt.v.WriteConfig()
+	}
+
+	// 取缓存
+	if c, ok := cfgs.Load(cfg.Prefix); ok {
+		return c.(*Config)
+	}
+
+	cfgs.Store(cfg.Prefix, cfg)
+	return cfg
+}
+
+// config: the config struct with binding the options
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self)
+	}
+}
+
 // default is CONFIG_FILE_NAME = "config.json"
 func (self *Config) Load(fileName ...string) error {
-	if fileName != nil {
-		self.fmt.v.SetConfigFile(filepath.Join(AppPath, fileName[0]))
+	if self.FileName != "" {
+		self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.FileName))
 	} else {
 		self.fmt.v.SetConfigFile(filepath.Join(AppPath, CONFIG_FILE_NAME))
 	}
@@ -67,7 +103,17 @@ func (self *Config) Load(fileName ...string) error {
 	return nil
 }
 
-func (self *Config) Save() error {
+func (self *Config) Save(opts ...Option) error {
+	for _, opt := range opts {
+		opt(self)
+	}
+
+	if self.FileName != "" {
+		self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.FileName))
+	} else {
+		self.fmt.v.SetConfigFile(filepath.Join(AppPath, CONFIG_FILE_NAME))
+	}
+
 	if err := self.fmt.v.WriteConfig(); err != nil {
 		return err
 	}

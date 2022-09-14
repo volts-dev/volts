@@ -5,6 +5,7 @@ import (
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/util/header"
 )
 
 type RpcRequest struct {
@@ -23,7 +24,7 @@ type RpcRequest struct {
 	contentType string
 	socket      ISocket //
 	Codec       codec.ICodec
-	header      map[string]string
+	header      header.Header
 	body        *body.TBody //
 	rawBody     interface{}
 	stream      bool
@@ -31,62 +32,70 @@ type RpcRequest struct {
 }
 
 // 提供给Router的context使用
-func NewRpcRequest(ctx context.Context, msg *Message, socket ISocket) *RpcRequest {
+func NewRpcRequest(ctx context.Context, message *Message, socket ISocket) *RpcRequest {
 	// new a body
-	body := body.New(codec.IdentifyCodec(msg.SerializeType()))
-	body.Data.Write(msg.Payload)
+	body := body.New(codec.IdentifyCodec(message.SerializeType()))
+	body.Data.Write(message.Payload)
 
-	return &RpcRequest{
-		Message: msg,
+	req := &RpcRequest{
+		Message: message,
 		Context: ctx,
 		socket:  socket,
 		body:    body,
-		Codec:   codec.IdentifyCodec(msg.SerializeType()), // TODO 判断合法
+		Codec:   codec.IdentifyCodec(message.SerializeType()), // TODO 判断合法
 	}
+
+	return req
 }
 
-func (r *RpcRequest) Body() *body.TBody {
-	return r.body
+func (self *RpcRequest) Body() *body.TBody {
+	return self.body
 }
 
-func (r *RpcRequest) ContentType() string {
-	return r.contentType
+func (self *RpcRequest) ContentType() string {
+	return self.contentType
 }
 
-func (r *RpcRequest) Service() string {
-	return r.service
+func (self *RpcRequest) Service() string {
+	return self.service
 }
 
-func (r *RpcRequest) Method() string {
-	return r.method
+func (self *RpcRequest) Method() string {
+	return self.method
 }
 
-func (r *RpcRequest) Endpoint() string {
-	return r.endpoint
+func (self *RpcRequest) Endpoint() string {
+	return self.endpoint
 }
 
-func (r *RpcRequest) Header() map[string]string {
-	return r.header
+func (self *RpcRequest) Header() header.Header {
+	if self.header == nil {
+		for k, v := range self.Message.Header {
+			self.header.Add(k, v)
+		}
+	}
+
+	return self.header
 }
 
-func (r *RpcRequest) ___Read() ([]byte, error) {
+func (self *RpcRequest) ___Read() ([]byte, error) {
 	// got a body
-	if r.first {
-		b := r.Body()
-		r.first = false
+	if self.first {
+		b := self.Body()
+		self.first = false
 		return b.AsBytes(), nil
 	}
 
 	var msg Message
-	err := r.socket.Recv(&msg)
+	err := self.socket.Recv(&msg)
 	if err != nil {
 		return nil, err
 	}
-	r.header = msg.Header
+	//self.header = msg.Header
 
 	return msg.Body, nil
 }
 
-func (r *RpcRequest) Stream() bool {
-	return r.stream
+func (self *RpcRequest) Stream() bool {
+	return self.stream
 }

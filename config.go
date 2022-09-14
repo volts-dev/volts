@@ -11,6 +11,7 @@ import (
 
 type (
 	Option func(*Config)
+
 	Config struct {
 		Client    client.IClient
 		Server    server.IServer
@@ -59,10 +60,16 @@ func newConfig(opts ...Option) *Config {
 	return cfg
 }
 
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		opt(self)
+	}
+}
+
 // Name of the service
 func Name(name string) Option {
 	return func(cfg *Config) {
-		cfg.Server.Init(server.Name(name))
+		cfg.Server.Config().Init(server.Name(name))
 	}
 }
 
@@ -104,7 +111,7 @@ func Registry(r registry.IRegistry) Option {
 		}
 
 		if cfg.Server != nil {
-			cfg.Server.Init(server.Registry(r))
+			cfg.Server.Config().Init(server.Registry(r))
 		}
 		// Update Broker
 		//cfg.Broker.Init(broker.Registry(r))
@@ -123,7 +130,7 @@ func Transport(t transport.ITransport) Option {
 		}
 
 		if cfg.Server != nil {
-			cfg.Server.Init(server.Transport(t))
+			cfg.Server.Config().Init(server.Transport(t))
 		}
 
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/bus"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
@@ -21,8 +22,10 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		Codecs map[string]codec.ICodec
-		Bus    bus.IBus // 实例
+		*config.Config
+
+		___Codecs map[string]codec.ICodec
+		Bus       bus.IBus // 实例
 		//Tracer    trace.Tracer
 		Registry  registry.IRegistry   // 实例
 		Transport transport.ITransport // 实例
@@ -77,7 +80,7 @@ func newConfig(opts ...Option) *Config {
 		Logger:           log,
 		Bus:              bus.DefaultBus,
 		Registry:         registry.Default(),
-		Codecs:           make(map[string]codec.ICodec),
+		___Codecs:        make(map[string]codec.ICodec),
 		Metadata:         map[string]string{},
 		Address:          DefaultAddress,
 		RegisterInterval: DefaultRegisterInterval,
@@ -120,6 +123,19 @@ func (self *Config) Init(opts ...Option) {
 			//log.Warn("Registry is NIL")
 		}
 	}
+}
+
+func (self *Config) Load() error {
+	self.Router.Config().Load()
+	//self.Registry.Config().Load()
+
+	self.Config.UnmarshalField("server", &self)
+	return nil
+}
+
+func (self *Config) Save() error {
+	self.Router.Config().Save()
+	return nil
 }
 
 // under debug mode the port will keep at 35999
@@ -167,7 +183,7 @@ func Router(router vrouter.IRouter) Option {
 // Codec to use to encode/decode requests for a given content type
 func Codec(contentType string, c codec.ICodec) Option {
 	return func(cfg *Config) {
-		cfg.Codecs[contentType] = c
+		cfg.___Codecs[contentType] = c
 	}
 }
 

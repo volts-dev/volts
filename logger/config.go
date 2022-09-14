@@ -1,7 +1,5 @@
 package logger
 
-import "sync"
-
 type (
 	Option func(*TConfig)
 
@@ -14,8 +12,7 @@ type (
 
 var (
 	creators = make(map[string]IWriterType) // 注册的Writer类型函数接口
-	defualt  = New("LOG")
-	loggers  sync.Map
+	defualt  = New("volts")
 )
 
 func newConfig(opts ...Option) *TConfig {

@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+var loggers sync.Map
+
 type (
 	ILogger interface {
 		GetLevel() Level
@@ -39,6 +41,7 @@ type (
 
 // the output like: 2035/01/01 00:00:00 [Prefix][Action] message...
 func New(Prefix string, opts ...Option) *TLogger {
+	Prefix = strings.ToLower(Prefix)
 	if l, ok := loggers.Load(Prefix); ok {
 		return l.(*TLogger)
 	}

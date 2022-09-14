@@ -92,6 +92,7 @@ func (self *format) Unmarshal(rawVal interface{}) error {
 	return self.v.Unmarshal(rawVal)
 }
 
+// key 可以整个config结构
 func (self *format) UnmarshalKey(key string, rawVal interface{}) error {
 	return self.v.UnmarshalKey(key, rawVal)
 }

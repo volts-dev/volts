@@ -12,6 +12,7 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/transport"
@@ -342,7 +343,8 @@ func (self *TRouter) refresh() {
 	}
 }
 
-func (self *TRouter) Init(opts ...Option) {
+// TODO 废弃
+func (self *TRouter) ___Init(opts ...config.Option) {
 	self.config.Init(opts...)
 }
 

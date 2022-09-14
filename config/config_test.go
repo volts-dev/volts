@@ -12,7 +12,7 @@ func TestBuildJsonConfigAndSet(t *testing.T) {
 	cfg.SetValue("project.struct", 11)
 	cfg.SetValue("project2.struct", 11)
 
-	err = cfg.Save()
+	err = cfg.Save(nil)
 	if err != nil {
 		t.Log(err)
 	}

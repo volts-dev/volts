@@ -32,8 +32,8 @@ var (
 type (
 	// Server is a simple micro server abstraction
 	IServer interface {
-		Init(...Option) error // Initialise options
-		Config() *Config      // Retrieve the options
+		//Init(...Option) error // Initialise options
+		Config() *Config // Retrieve the options
 
 		Name() string
 		// Register a handler
@@ -98,21 +98,10 @@ func Default(opts ...Option) *TServer {
 	if defaultServer == nil {
 		defaultServer = New(opts...)
 	} else {
-		defaultServer.Init(opts...)
+		defaultServer.Config().Init(opts...)
 	}
 
 	return defaultServer
-}
-
-func (self *TServer) Init(opts ...Option) error {
-	self.Lock()
-	defer self.Unlock()
-
-	for _, opt := range opts {
-		opt(self.config)
-	}
-
-	return nil
 }
 
 // 注册到服务发现
@@ -417,6 +406,7 @@ func (self *TServer) Start() error {
 	self.RUnlock()
 
 	config := self.config
+	config.Load()
 	config.Router.PrintRoutes()
 
 	// start listening on the transport

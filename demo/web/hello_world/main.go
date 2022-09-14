@@ -36,7 +36,7 @@ func main() {
 	r.Url("GET", "/(:all)", ctrls.macth_all)
 	r.Url("GET", "/(:all)/(:all2)/1", ctrls.macth_all)
 
-	r.Init(
+	r.Config().Init(
 		router.PrintRoutesTree(),
 		router.PrintRequest(),
 	)

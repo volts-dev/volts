@@ -17,9 +17,7 @@ type (
 	IService interface {
 		// The service name
 		Name() string
-		// Init initialises options
-		Init(opts ...Option)
-		// Options returns the current options
+		// Config returns the current options
 		Config() *Config
 		// Client is used to call services
 		Client() client.IClient
@@ -27,7 +25,7 @@ type (
 		Server() server.IServer
 		// Run the service
 		Run() error
-
+		//
 		Stop() error
 		// The service implementation
 		String() string
@@ -42,12 +40,6 @@ type (
 func New(opts ...Option) IService {
 	return &service{
 		config: newConfig(opts...),
-	}
-}
-
-func (self *service) Init(opts ...Option) {
-	for _, opt := range opts {
-		opt(self.config)
 	}
 }
 
@@ -156,5 +148,5 @@ func (self *service) Server() server.IServer {
 }
 
 func (self *service) String() string {
-	return "Volts Service"
+	return "volts service"
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"time"
 
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 )
 
@@ -32,6 +33,8 @@ type (
 	}
 
 	Config struct {
+		*config.Config
+
 		Service   *Service // current service information
 		Addrs     []string
 		Timeout   time.Duration
