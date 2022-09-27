@@ -67,8 +67,8 @@ func newExtMap() map[string]utls.TLSExtension {
 		//"22": &utls.GenericExtension{Id: 0x16, Data: []uint8{}},
 		"23": &utls.UtlsExtendedMasterSecretExtension{},
 		//"27": &utls.FakeCertCompressionAlgsExtension{},
-		"27": &utls.FakeCertCompressionAlgsExtension{
-			Methods: []utls.CertCompressionAlgo{utls.CertCompressionBrotli},
+		"27": &utls.UtlsCompressCertExtension{
+			Algorithms: []utls.CertCompressionAlgo{utls.CertCompressionBrotli},
 		},
 		"28": &utls.FakeRecordSizeLimitExtension{}, //Limit: 0x4001
 		"35": &utls.SessionTicketExtension{},
@@ -144,8 +144,8 @@ func extsMapping(token string) utls.TLSExtension {
 		return &utls.UtlsExtendedMasterSecretExtension{}
 		//"27": &utls.FakeCertCompressionAlgsExtension{},
 	case "27":
-		return &utls.FakeCertCompressionAlgsExtension{
-			Methods: []utls.CertCompressionAlgo{utls.CertCompressionBrotli},
+		return &utls.UtlsCompressCertExtension{
+			Algorithms: []utls.CertCompressionAlgo{utls.CertCompressionBrotli},
 		}
 	case "28":
 		return &utls.FakeRecordSizeLimitExtension{} //Limit: 0x4001

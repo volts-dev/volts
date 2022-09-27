@@ -228,7 +228,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 					str := path[startOffset : i-bracket] // #like /abc1(string|upper:var)
 					idx := strings.Index(str, string(LBracket))
 					if idx == -1 {
-						panic(fmt.Sprintf("expect a %v near position %d~%d", LBracket, startOffset, i))
+						log.Fatalf("expect a %v near position %d~%d", LBracket, startOffset, i)
 					}
 					nodes = append(nodes, &TNode{Type: StaticNode, Text: str[:idx]})
 					str = str[idx+1:]

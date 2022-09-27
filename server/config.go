@@ -75,6 +75,7 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Config:           config.New(),
 		Uid:              uuid.New().String(),
 		Name:             DefaultName,
 		Logger:           log,

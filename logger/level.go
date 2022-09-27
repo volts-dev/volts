@@ -76,5 +76,5 @@ func (l Level) String() string {
 	case LevelDebug:
 		return "debug"
 	}
-	return ""
+	return "unknow"
 }

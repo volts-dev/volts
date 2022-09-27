@@ -2,8 +2,8 @@ package config
 
 import "testing"
 
-func TestBuildJsonConfigAndSet(t *testing.T) {
-	cfg := defaultConfig
+func TestLoadAndSave(t *testing.T) {
+	cfg := Default()
 	err := cfg.Load("config.json")
 	if err != nil {
 		t.Log(err)
@@ -12,7 +12,7 @@ func TestBuildJsonConfigAndSet(t *testing.T) {
 	cfg.SetValue("project.struct", 11)
 	cfg.SetValue("project2.struct", 11)
 
-	err = cfg.Save(nil)
+	err = cfg.Save()
 	if err != nil {
 		t.Log(err)
 	}

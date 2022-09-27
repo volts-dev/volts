@@ -13,6 +13,7 @@ import (
 
 	consul "github.com/hashicorp/consul/api"
 	hash "github.com/mitchellh/hashstructure"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/registry"
 	mnet "github.com/volts-dev/volts/util/net"
 )
@@ -40,6 +41,7 @@ func init() {
 
 func New(opts ...registry.Option) registry.IRegistry {
 	cfg := &registry.Config{
+		Config:  config.New(),
 		Timeout: time.Millisecond * 100,
 	}
 

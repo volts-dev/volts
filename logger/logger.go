@@ -3,6 +3,7 @@ package logger
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 )
@@ -17,6 +18,7 @@ type (
 		Assert(cnd bool, format string, args ...interface{})
 
 		Panicf(format string, v ...interface{})
+		Fatalf(string, ...interface{})
 		Dbgf(format string, v ...interface{})
 		Atkf(format string, v ...interface{})
 		Errf(format string, v ...interface{}) error
@@ -25,6 +27,7 @@ type (
 
 		//Panic(v ...interface{})
 		Panic(v ...interface{})
+		Fatal(...interface{})
 		Dbg(v ...interface{})
 		Atk(v ...interface{})
 		Err(v ...interface{}) error
@@ -168,6 +171,14 @@ func Panicf(format string, args ...interface{}) {
 	panic(fmt.Sprintf(format, args...))
 }
 
+func Fatal(args ...interface{}) {
+	defualt.Fatal(args...)
+}
+
+func Fatalf(format string, args ...interface{}) {
+	defualt.Fatalf(format, args...)
+}
+
 func PanicErr(err error, title ...string) bool {
 	if err != nil {
 		defualt.Dbg(err)
@@ -303,36 +314,44 @@ func (self *TLogger) Critical(format string, v ...interface{}) {
 
 // Log INFORMATIONAL level message.
 func (self *TLogger) Infof(format string, v ...interface{}) {
-	msg := fmt.Sprintf("[Info]: "+format, v...)
+	msg := fmt.Sprintf("[INFO] "+format, v...)
 	self.manager.write(LevelInfo, msg)
 }
 
 func (self *TLogger) Panicf(format string, args ...interface{}) {
-	panic(fmt.Sprintf(format, args...))
+	msg := fmt.Sprintf("[PANIC] "+format, args...)
+	self.manager.write(LevelAlert, msg)
+	panic(msg)
+}
+
+func (self *TLogger) Fatalf(format string, args ...interface{}) {
+	msg := fmt.Sprintf("[FATAL] "+format, args...)
+	self.manager.write(LevelAlert, msg)
+	os.Exit(1)
 }
 
 // Log WARNING level message.
 func (self *TLogger) Warnf(format string, v ...interface{}) {
-	msg := fmt.Sprintf("[WARM]: "+format, v...)
+	msg := fmt.Sprintf("[WARM] "+format, v...)
 	self.manager.write(LevelWarn, msg)
 }
 
 // Log ERROR level message.
 func (self *TLogger) Errf(format string, v ...interface{}) error {
-	msg := fmt.Errorf("[ERR]: "+format, v...)
+	msg := fmt.Errorf("[ERR] "+format, v...)
 	self.manager.write(LevelError, msg.Error())
 	return msg
 }
 
 // Log DEBUG level message.
 func (self *TLogger) Dbgf(format string, v ...interface{}) {
-	msg := fmt.Sprintf("[DBG]: "+format, v...)
+	msg := fmt.Sprintf("[DBG] "+format, v...)
 	self.manager.write(LevelDebug, msg)
 }
 
 // Log Attack level message.
 func (self *TLogger) Atkf(format string, v ...interface{}) {
-	msg := fmt.Sprintf("[ATK]: "+format, v...)
+	msg := fmt.Sprintf("[ATK] "+format, v...)
 	self.manager.write(LevelAttack, msg)
 }
 
@@ -361,7 +380,15 @@ func (self *TLogger) Err(v ...interface{}) error {
 }
 
 func (self *TLogger) Panic(args ...interface{}) {
-	panic(args)
+	msg := fmt.Sprint(args...)
+	self.manager.write(LevelWarn, "[PANIC] "+msg)
+	panic(msg)
+}
+
+func (self *TLogger) Fatal(v ...interface{}) {
+	msg := fmt.Sprint(v...)
+	self.manager.write(LevelAlert, "[FATAL] "+msg)
+	os.Exit(1)
 }
 
 // Log DEBUG level message.

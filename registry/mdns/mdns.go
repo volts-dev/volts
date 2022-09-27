@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/util/mdns"
 )
@@ -59,6 +60,7 @@ type (
 //NewMdnsRegistry
 func New(opts ...registry.Option) registry.IRegistry {
 	cfg := &registry.Config{
+		Config:  config.New(),
 		Timeout: time.Millisecond * 100,
 	}
 

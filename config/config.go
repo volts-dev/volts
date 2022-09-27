@@ -1,29 +1,28 @@
 package config
 
 import (
-	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/logger"
 )
 
-var log = logger.New("Config")
-var fmt = newFormat() // 配置主要文件格式读写实现
-var cfgs sync.Map
-
 var (
 	// App settings.
-	AppVer        string
-	AppName       string
-	AppUrl        string
-	AppSubUrl     string
-	AppPath       string
-	AppFilePath   string
-	AppDir        string
-	DefaultPrefix = "volts"
-	defaultConfig = New()
+	AppVer         string
+	AppName        string
+	AppUrl         string
+	AppSubUrl      string
+	AppPath        string
+	AppFilePath    string
+	AppDir         string
+	cfgs           sync.Map
+	log            = logger.New("Config")
+	fmt            = newFormat() // 配置主要文件格式读写实现
+	DEFAULT_PREFIX = "volts"
+	defaultConfig  = New()
 )
 
 type (
@@ -32,11 +31,8 @@ type (
 	Config struct {
 		fmt      *format
 		Mode     ModeType
-		Prefix   string `json:"Prefix"`
-		FileName string
-		//AppFilePath string
-		//AppPath     string
-		//AppDir      string
+		Prefix   string `json:"prefix"`
+		FileName string `json:"file_name"`
 	}
 
 	IConfig interface {
@@ -58,24 +54,25 @@ func Default() *Config {
 
 func New(opts ...Option) *Config {
 	cfg := &Config{
-		fmt:    fmt,
-		Mode:   MODE_NORMAL,
-		Prefix: DefaultPrefix,
-		//AppFilePath: AppFilePath,
-		//AppPath:     AppPath,
-		//AppDir:      AppDir,
+		fmt:      fmt,
+		Mode:     MODE_NORMAL,
+		Prefix:   DEFAULT_PREFIX,
+		FileName: CONFIG_FILE_NAME,
 	}
 	cfg.Init(opts...)
 
-	// 如果无文件则创建新的
-	if !utils.FileExists(cfg.FileName) {
-		cfg.fmt.v.WriteConfig()
-	}
-
 	// 取缓存
 	if c, ok := cfgs.Load(cfg.Prefix); ok {
-		return c.(*Config)
+		cfg := c.(*Config)
+		cfg.Init(opts...)
+		return cfg
 	}
+
+	// 监视文件
+	cfg.fmt.v.WatchConfig()
+	cfg.fmt.v.OnConfigChange(func(e fsnotify.Event) {
+		log.Info("config file changed:", e.Name)
+	})
 
 	cfgs.Store(cfg.Prefix, cfg)
 	return cfg
@@ -90,11 +87,15 @@ func (self *Config) Init(opts ...Option) {
 
 // default is CONFIG_FILE_NAME = "config.json"
 func (self *Config) Load(fileName ...string) error {
-	if self.FileName != "" {
-		self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.FileName))
-	} else {
-		self.fmt.v.SetConfigFile(filepath.Join(AppPath, CONFIG_FILE_NAME))
+	if self.FileName == "" {
+		self.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
 	}
+	self.fmt.v.SetConfigFile(self.FileName)
+	// 如果无文件则创建新的
+	if !utils.FileExists(self.FileName) {
+		return self.fmt.v.WriteConfig()
+	}
+
 	err := self.fmt.v.ReadInConfig() // Find and read the config file
 	if err != nil {                  // Handle errors reading the config file
 		return err
@@ -108,12 +109,11 @@ func (self *Config) Save(opts ...Option) error {
 		opt(self)
 	}
 
-	if self.FileName != "" {
-		self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.FileName))
-	} else {
-		self.fmt.v.SetConfigFile(filepath.Join(AppPath, CONFIG_FILE_NAME))
+	if self.FileName == "" {
+		self.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
 	}
 
+	self.fmt.v.SetConfigFile(self.FileName)
 	if err := self.fmt.v.WriteConfig(); err != nil {
 		return err
 	}
