@@ -1,12 +1,15 @@
 package logger
 
-type (
-	Option func(*TConfig)
+import "github.com/volts-dev/volts/config"
 
-	TConfig struct {
-		Level     Level  `json:"Level"`
-		Prefix    string `json:"Prefix"`
-		WriteName string
+type (
+	Option func(*Config)
+
+	Config struct {
+		*config.Config `field:"-"`
+		Level          Level
+		Prefix         string
+		WriteName      string
 	}
 )
 
@@ -15,38 +18,50 @@ var (
 	defualt  = New("volts")
 )
 
-func newConfig(opts ...Option) *TConfig {
-	config := &TConfig{
+func newConfig(opts ...Option) *Config {
+	cfg := &Config{
 		Level:  LevelDebug,
 		Prefix: "LOG",
 	}
-	config.Init(opts...)
-	return config
+	cfg.Init(opts...)
+	config.Default().Register(cfg)
+	return cfg
 }
 
 // init options
-func (self *TConfig) Init(opts ...Option) {
+func (self *Config) String() string {
+	return "logger"
+}
+
+func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt(self)
 		}
 	}
 }
+func (self *Config) Load() error {
+	return self.LoadToModel(self)
+}
+
+func (self *Config) Save() error {
+	return self.Config.Save(config.WithConfig(self))
+}
 
 func WithWrite(name string) Option {
-	return func(cfg *TConfig) {
+	return func(cfg *Config) {
 		cfg.WriteName = name
 	}
 }
 
 func WithPrefix(name string) Option {
-	return func(cfg *TConfig) {
+	return func(cfg *Config) {
 		cfg.Prefix = name
 	}
 }
 
 func WithLevel(lvl Level) Option {
-	return func(cfg *TConfig) {
+	return func(cfg *Config) {
 		cfg.Level = lvl
 	}
 }

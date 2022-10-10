@@ -3,6 +3,7 @@ package selector
 import (
 	"context"
 
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -10,12 +11,12 @@ type (
 	// OptionFn configures options of server.
 	Option func(*Config) error
 	Config struct {
-		Registry registry.IRegistry
-		Strategy Strategy
-
+		*config.Config `field:"-"`
 		// Other options for implementations of the interface
 		// can be stored in a context
-		Context context.Context
+		Context  context.Context    `field:"-"`
+		Registry registry.IRegistry `field:"-"`
+		Strategy Strategy           `field:"-"`
 	}
 
 	// SelectOption used when making a select call
@@ -29,6 +30,26 @@ type (
 		Context context.Context
 	}
 )
+
+func (self *Config) String() string {
+	return "selector"
+}
+
+func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(self)
+		}
+	}
+}
+
+func (self *Config) Load() error {
+	return self.LoadToModel(self)
+}
+
+func (self *Config) Save() error {
+	return self.Config.Save(config.WithConfig(self))
+}
 
 // Registry sets the registry used by the selector
 func Registry(r registry.IRegistry) Option {

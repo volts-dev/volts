@@ -51,15 +51,6 @@ type (
 		String() string // Server implementation
 	}
 
-	___IModule interface {
-		// 返回Module所有Routes 理论上只需被调用一次
-		//GetRoutes() *TTree
-		GetPath() string
-		GetFilePath() string
-		GetModulePath() string
-		GetTemplateVar() map[string]interface{}
-	}
-
 	TServer struct {
 		//*router
 		sync.RWMutex
@@ -77,13 +68,9 @@ type (
 
 // new a server for the service node
 func New(opts ...Option) *TServer {
-	cfg := newConfig(opts...)
-
-	//router.hdlrWrappers = options.HdlrWrappers
-	//router.subWrappers = options.SubWrappers
 	// inite HandlerPool New function
 	return &TServer{
-		config:     cfg,
+		config:     newConfig(opts...),
 		RWMutex:    sync.RWMutex{},
 		started:    false,
 		registered: false,

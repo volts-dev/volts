@@ -27,14 +27,14 @@ type (
 
 	// Manager all object and API function
 	TWriterManager struct {
+		config *Config
 		//prefix string // prefix to write at beginning of each line
 		flag int // properties
 		//level      int
 		writer       map[string]IWriter // destination for output
 		level_writer map[Level]IWriter  // destination for output
-		config       *TConfig
-		writerName   string       // 现在使用的Writer
-		buf          bytes.Buffer // for accumulating text to write
+		writerName   string             // 现在使用的Writer
+		buf          bytes.Buffer       // for accumulating text to write
 		levelStats   [6]int64
 
 		enableFuncCallDepth bool //report detail of the path,row

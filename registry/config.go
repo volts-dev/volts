@@ -33,18 +33,16 @@ type (
 	}
 
 	Config struct {
-		*config.Config
-
-		Service   *Service // current service information
-		Addrs     []string
-		Timeout   time.Duration
-		Secure    bool
-		TLSConfig *tls.Config
+		*config.Config `field:"-"`
+		Context        context.Context `field:"-"`
+		Service        *Service        `field:"-"` // current service information
+		Addrs          []string
+		Timeout        time.Duration
+		Secure         bool
+		TLSConfig      *tls.Config
 		// Other options for implementations of the interface
 		// can be stored in a context
 		TTL time.Duration
-
-		Context context.Context
 	}
 
 	WatchConfig struct {
@@ -58,17 +56,33 @@ type (
 )
 
 // new and init a config
-func ___newConfig() *Config {
-	return &Config{
+func NewConfig(opts ...Option) *Config {
+	cfg := &Config{
 		Context: context.Background(),
 		Timeout: time.Millisecond * 100,
 	}
+	cfg.Init(opts...)
+	return cfg
+}
+
+func (self *Config) String() string {
+	return "registry"
 }
 
 func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
-		opt(self)
+		if opt != nil {
+			opt(self)
+		}
 	}
+}
+
+func (self *Config) Load() error {
+	return self.LoadToModel(self)
+}
+
+func (self *Config) Save() error {
+	return self.Config.Save(config.WithConfig(self))
 }
 
 func Logger() logger.ILogger {
