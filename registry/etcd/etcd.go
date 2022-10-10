@@ -14,7 +14,6 @@ import (
 	"time"
 
 	hash "github.com/mitchellh/hashstructure"
-	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/registry"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -37,15 +36,10 @@ type etcdRegistry struct {
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
-	cfg := &registry.Config{
-		Config:  config.New(),
-		Timeout: time.Millisecond * 100,
-	}
-
-	cfg.Init(opts...)
+	opts = append(opts, registry.Timeout(time.Millisecond*100))
 
 	reg := &etcdRegistry{
-		config:   cfg,
+		config:   registry.NewConfig(opts...),
 		register: make(map[string]uint64),
 		leases:   make(map[string]clientv3.LeaseID),
 	}

@@ -2,6 +2,49 @@ package config
 
 import "testing"
 
+type (
+	testConfig struct {
+		*Config
+		NameValue string `field:"name_value"`
+	}
+)
+
+func newTestConfig() *testConfig {
+	cfg := &testConfig{}
+
+	Default().Register(cfg)
+	Default().Init(
+		WithFileName("config_test.json"),
+		WithWatcher(),
+	)
+	return cfg
+}
+
+func (self *testConfig) String() string {
+	return "testConfig"
+}
+
+func (self *testConfig) Load() error {
+	return self.LoadToModel(self)
+}
+
+func (self *testConfig) Save() error {
+	self.NameValue = "123"
+	return self.Config.Save(
+		WithConfig(self),
+	)
+}
+
+func TestLoad(t *testing.T) {
+	go func() {
+		cfg := newTestConfig()
+		cfg.Config.Load()
+		//cfg.Load()
+		//cfg.Save()
+	}()
+	<-make(chan int)
+}
+
 func TestLoadAndSave(t *testing.T) {
 	cfg := Default()
 	err := cfg.Load("config.json")

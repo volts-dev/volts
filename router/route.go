@@ -33,10 +33,6 @@ type (
 		Host            []string      //
 		Url             *TUrl         // 提供Restful 等Controller.Action
 		Action          string        // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
-		___isDynRoute   bool          // 是否*动态路由   /base/*.html
-		// 废弃
-		//HookCtrl map[string][]handler // 次控制器 map[*][]handler 匹配所有  Hook的Ctrl会在主的Ctrl执行完后执行
-		//handlers    map[string][]handler // 最终控制器 合并主控制器+次控制器
 	}
 )
 
@@ -111,7 +107,7 @@ func (self *route) CombineHandler(from *route) {
 
 // 剥离目标路由
 // TODO 优化
-func (self *route) StripController(target *route) {
+func (self *route) StripHandler(target *route) {
 	srvs := make([]*registry.Service, 0)
 	var match bool
 	for _, ctr := range self.handlers {

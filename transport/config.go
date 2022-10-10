@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"time"
 
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"golang.org/x/net/proxy"
 )
@@ -17,6 +18,7 @@ type (
 	ListenOption func(*ListenConfig)
 
 	Config struct {
+		*config.Config
 		Listener IListener
 		// Addrs is the list of intermediary addresses to connect to
 		Addrs []string
@@ -74,6 +76,7 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Config:         config.New(config.DEFAULT_PREFIX),
 		ConnectTimeout: DefaultTimeout,
 		ReadTimeout:    DefaultTimeout,
 		WriteTimeout:   DefaultTimeout,
@@ -83,12 +86,23 @@ func newConfig(opts ...Option) *Config {
 	return cfg
 }
 
+func (self *Config) String() string {
+	return "transport"
+}
+
 func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt(self)
 		}
 	}
+}
+func (self *Config) Load() error {
+	return self.LoadToModel(self)
+}
+
+func (self *Config) Save() error {
+	return self.Config.Save(config.WithConfig(self))
 }
 
 // Addrs to use for transport

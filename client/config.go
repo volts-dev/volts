@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
@@ -64,42 +65,42 @@ type (
 	}
 
 	Config struct {
-		Client    IClient
-		Transport transport.ITransport
-		logger    logger.ILogger
-
-		// Connection Pool
-		PoolSize    int
-		PoolTTL     time.Duration
-		Retries     int         // Retries retries to send
-		CallOptions CallOptions // Default Call Options
-		// 提供实时变化
-		DialOptions []transport.DialOption // TODO sturct
-
+		*config.Config `field:"-"`
 		// Other options for implementations of the interface
 		// can be stored in a context
-		Context context.Context
+		Context     context.Context        `field:"-"`
+		logger      logger.ILogger         `field:"-"`
+		Client      IClient                `field:"-"`
+		Transport   transport.ITransport   `field:"-"`
+		Registry    registry.IRegistry     `field:"-"`
+		Selector    selector.ISelector     `field:"-"`
+		CallOptions CallOptions            `field:"-"` // Default Call Options
+		DialOptions []transport.DialOption `field:"-"` // TODO 		// 提供实时变化sturct
+		// Breaker is used to config CircuitBreaker
+		///Breaker Breaker
+
+		// Connection Pool
+		PoolSize int
+		PoolTTL  time.Duration
+		Retries  int // Retries retries to send
 
 		// Used to select codec
 		ContentType string
 
-		Registry registry.IRegistry
-		Selector selector.ISelector
-
-		conn     net.Conn
-		protocol string
+		_conn     net.Conn
+		_protocol string
 
 		// Group is used to select the services in the same group. Services set group info in their meta.
 		// If it is empty, clients will ignore group.
 		Group string
 
 		// TLSConfig for tcp and quic
-		TLSConfig *tls.Config
+		TLSConfig *tls.Config `field:"-"`
 
 		// kcp.BlockCrypt
-		Block interface{}
+		_Block interface{}
 		// RPCPath for http connection
-		RPCPath string
+		_RPCPath string
 		//ConnectTimeout sets timeout for dialing
 		ConnectTimeout time.Duration
 		// ReadTimeout sets readdeadline for underlying net.Conns
@@ -110,16 +111,13 @@ type (
 		// BackupLatency is used for Failbackup mode. rpc will sends another request if the first response doesn't return in BackupLatency time.
 		BackupLatency time.Duration
 
-		// Breaker is used to config CircuitBreaker
-		///Breaker Breaker
-
 		SerializeType codec.SerializeType
 		CompressType  transport.CompressType
 
 		Heartbeat         bool
 		HeartbeatInterval time.Duration
 
-		Ja3      transport.Ja3
+		Ja3      transport.Ja3 `field:"-"`
 		ProxyURL string
 		// http options
 		UserAgent     string
@@ -160,7 +158,12 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	}
 
 	cfg.Init(opts...)
+	config.Default().Register(cfg)
 	return cfg
+}
+
+func (self *Config) String() string {
+	return "client"
 }
 
 // init options
@@ -172,10 +175,14 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
-func __WithContentType(c string) RequestOption {
-	return func(cfg *RequestOptions) {
-		cfg.ContentType = c
-	}
+func (self *Config) Load() error {
+	return self.LoadToModel(self)
+}
+
+func (self *Config) Save() error {
+	return self.Config.Save(
+		config.WithConfig(self),
+	)
 }
 
 func WithCodec(c codec.SerializeType) RequestOption {

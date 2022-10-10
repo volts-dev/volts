@@ -34,7 +34,7 @@ type (
 	}
 
 	handlerManager struct {
-		handlerPool map[int]sync.Pool
+		handlerPool map[int]*sync.Pool
 		router      *TRouter
 	}
 
@@ -115,7 +115,7 @@ func GetFuncName(i interface{}, seps ...rune) string {
 
 func newHandlerManager() *handlerManager {
 	return &handlerManager{
-		handlerPool: make(map[int]sync.Pool),
+		handlerPool: make(map[int]*sync.Pool),
 	}
 }
 

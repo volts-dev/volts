@@ -1,28 +1,27 @@
 package config
 
 import (
+	"log"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/volts-dev/utils"
-	"github.com/volts-dev/volts/logger"
 )
 
 var (
 	// App settings.
-	AppVer         string
-	AppName        string
-	AppUrl         string
-	AppSubUrl      string
-	AppPath        string
-	AppFilePath    string
-	AppDir         string
-	cfgs           sync.Map
-	log            = logger.New("Config")
-	fmt            = newFormat() // 配置主要文件格式读写实现
-	DEFAULT_PREFIX = "volts"
-	defaultConfig  = New()
+	AppVer        string
+	AppName       string
+	AppUrl        string
+	AppSubUrl     string
+	AppPath       string
+	AppFilePath   string
+	AppDir        string
+	cfgs          sync.Map
+	defaultConfig = New(DEFAULT_PREFIX)
 )
 
 type (
@@ -30,15 +29,20 @@ type (
 
 	Config struct {
 		fmt      *format
+		models   sync.Map
 		Mode     ModeType
-		Prefix   string `json:"prefix"`
-		FileName string `json:"file_name"`
+		Prefix   string
+		fileName string
 	}
 
 	IConfig interface {
-		Init(...Option)
+		String() string // the Prefix name
 		Load() error
 		Save() error
+	}
+
+	iConfig interface {
+		checkSelf(c *Config, cfg IConfig) // 检测自己是否被赋值
 	}
 )
 
@@ -52,34 +56,48 @@ func Default() *Config {
 	return defaultConfig
 }
 
-func New(opts ...Option) *Config {
-	cfg := &Config{
-		fmt:      fmt,
-		Mode:     MODE_NORMAL,
-		Prefix:   DEFAULT_PREFIX,
-		FileName: CONFIG_FILE_NAME,
-	}
-	cfg.Init(opts...)
-
+func New(prefix string, opts ...Option) *Config {
 	// 取缓存
-	if c, ok := cfgs.Load(cfg.Prefix); ok {
+	if c, ok := cfgs.Load(prefix); ok {
 		cfg := c.(*Config)
 		cfg.Init(opts...)
 		return cfg
 	}
 
-	// 监视文件
-	cfg.fmt.v.WatchConfig()
-	cfg.fmt.v.OnConfigChange(func(e fsnotify.Event) {
-		log.Info("config file changed:", e.Name)
-	})
+	cfg := &Config{
+		fmt:      newFormat(), // 配置主要文件格式读写实现,
+		Mode:     MODE_NORMAL,
+		Prefix:   prefix,
+		fileName: CONFIG_FILE_NAME,
+	}
+	cfg.Init(opts...)
 
 	cfgs.Store(cfg.Prefix, cfg)
 	return cfg
 }
 
+func (self *Config) checkSelf(c *Config, cfg IConfig) {
+	if self == nil {
+		val := reflect.ValueOf(cfg).Elem()
+		val.FieldByName("Config").Set(reflect.ValueOf(c))
+	}
+}
+
+// 添加其他配置
+func (self *Config) Register(cfg IConfig) {
+	if c, ok := cfg.(iConfig); ok {
+		c.checkSelf(self, cfg)
+	}
+
+	self.models.Store(cfg.String(), cfg)
+}
+
 // config: the config struct with binding the options
 func (self *Config) Init(opts ...Option) {
+	if self == nil {
+		*self = *New(DEFAULT_PREFIX)
+	}
+
 	for _, opt := range opts {
 		opt(self)
 	}
@@ -87,20 +105,40 @@ func (self *Config) Init(opts ...Option) {
 
 // default is CONFIG_FILE_NAME = "config.json"
 func (self *Config) Load(fileName ...string) error {
-	if self.FileName == "" {
-		self.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
-	}
-	self.fmt.v.SetConfigFile(self.FileName)
-	// 如果无文件则创建新的
-	if !utils.FileExists(self.FileName) {
-		return self.fmt.v.WriteConfig()
+	if self.fileName == "" {
+		self.fileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
 	}
 
-	err := self.fmt.v.ReadInConfig() // Find and read the config file
-	if err != nil {                  // Handle errors reading the config file
-		return err
+	self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.fileName))
+	// Find and read the config file
+	// Handle errors reading the config file
+	return self.fmt.v.ReadInConfig()
+}
+
+// save settings data from the config model
+func (self *Config) LoadToModel(model IConfig) error {
+	mapper := utils.NewStructMapper(model)
+	for _, field := range mapper.Fields() {
+		// 过滤自己
+		if strings.ToLower("config") == strings.ToLower(field.Name()) {
+			continue
+		}
+
+		// 字段赋值
+		key := strings.Join([]string{model.String(), utils.SnakeCasedName(field.Name())}, ".")
+		if val := self.fmt.v.Get(key); val != nil {
+			err := field.Set(val)
+			if err != nil {
+				log.Fatalf("load to model failed! %s %v", key, self.fmt.v.Get(key))
+			}
+		}
+
 	}
 
+	// 保存但不覆盖注册的Model
+	if _, ok := self.models.Load(model.String()); !ok {
+		self.models.Store(model.String(), model)
+	}
 	return nil
 }
 
@@ -109,13 +147,26 @@ func (self *Config) Save(opts ...Option) error {
 		opt(self)
 	}
 
-	if self.FileName == "" {
-		self.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
+	if self.fileName == "" {
+		self.fileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
 	}
 
-	self.fmt.v.SetConfigFile(self.FileName)
-	if err := self.fmt.v.WriteConfig(); err != nil {
-		return err
+	self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.fileName))
+	return self.fmt.v.WriteConfig()
+}
+
+// 从数据类型加载数据
+// 只支持map[string]any 和struct
+func (self *Config) SaveFromModel(model IConfig) error {
+	opts := utils.Struct2ItfMap(model)
+
+	for k, v := range opts {
+		// 过滤自己
+		if strings.ToLower("config") == strings.ToLower(k) {
+			continue
+		}
+
+		self.SetValue(strings.Join([]string{model.String(), k}, "."), v)
 	}
 
 	return nil
@@ -163,11 +214,11 @@ func (self *Config) SetValue(field string, value interface{}) {
 	self.fmt.SetValue(field, value)
 }
 
-func (self *Config) Unmarshal(rawVal interface{}) error {
+func (self *Config) xUnmarshal(rawVal interface{}) error {
 	return self.fmt.Unmarshal(rawVal)
 }
 
 // 反序列字段映射到数据类型
-func (self *Config) UnmarshalField(field string, rawVal interface{}) error {
+func (self *Config) xUnmarshalField(field string, rawVal interface{}) error {
 	return self.fmt.UnmarshalKey(field, rawVal)
 }

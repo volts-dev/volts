@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -15,6 +16,8 @@ type (
 	SubscribeOption func(*SubscribeConfig)
 
 	Config struct {
+		*config.Config
+
 		Addrs []string
 
 		// Handler executed when error happens in broker mesage

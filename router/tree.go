@@ -75,13 +75,13 @@ type (
 	ConfigOption func(*TTree)
 
 	// 使用Sort 接口自动排序
-	TSubNodes []*TNode
+	subNodes []*treeNode
 
-	TNode struct {
+	treeNode struct {
 		Route       *route
 		Type        NodeType
 		ContentType ContentType
-		Children    TSubNodes
+		Children    subNodes
 		Text        string // Path string /web/
 		Path        string
 		Level       int // #动态Node排序等级 /.../ 之间的Nodes越多等级越高
@@ -91,7 +91,7 @@ type (
 	// safely tree
 	TTree struct {
 		sync.RWMutex  // lock for conbine action
-		root          map[string]*TNode
+		root          map[string]*treeNode
 		Text          string
 		IgnoreCase    bool
 		__DelimitChar byte // Delimit Char xxx<.>xxx
@@ -121,17 +121,17 @@ func (p *Params) SetParams(params []param) {
 	*p = params
 }
 
-func (self TSubNodes) Len() int {
+func (self subNodes) Len() int {
 	return len(self)
 }
 
-func (self TSubNodes) Swap(i, j int) {
+func (self subNodes) Swap(i, j int) {
 	self[i], self[j] = self[j], self[i]
 }
 
 // static route will be put the first, so it will be match first.
 // two static route, content longer is first.
-func (self TSubNodes) Less(i, j int) bool {
+func (self subNodes) Less(i, j int) bool {
 	if self[i].Type == StaticNode {
 		if self[j].Type == StaticNode {
 			return len(self[i].Text) > len(self[j].Text)
@@ -150,7 +150,7 @@ func (self TSubNodes) Less(i, j int) bool {
 
 func NewRouteTree(opts ...ConfigOption) *TTree {
 	tree := &TTree{
-		root:          make(map[string]*TNode),
+		root:          make(map[string]*treeNode),
 		__DelimitChar: 0, // !NOTE! 默认为未定义 以便区分RPC
 		PrefixChar:    '/',
 	}
@@ -170,7 +170,7 @@ func (self *TTree) Init(opts ...ConfigOption) {
 	Result: @ Nodes List
 	        @ is it dyn route
 */
-func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn bool) {
+func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isDyn bool) {
 	if path == "" {
 		panic("path cannot be empty")
 	}
@@ -183,12 +183,12 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 		i, startOffset int // i 游标 J 上次标记
 
 		bracket int
-		level   int    // #Node的 排序等级
-		target  *TNode // 记录等级的Node 一般为/ 开始的第一个动态
-		node    *TNode
+		level   int       // #Node的 排序等级
+		target  *treeNode // 记录等级的Node 一般为/ 开始的第一个动态
+		node    *treeNode
 	)
 	// 默认
-	nodes = make([]*TNode, 0)
+	nodes = make([]*treeNode, 0)
 	isDyn = false
 	l := len(path)
 	//j = i - 1 // 当i==0时J必须小于它
@@ -198,10 +198,10 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 			{ // 创建Text:'/' Node
 				if bracket == 0 && i > startOffset {
 					//if path[j] == '/' {
-					//	nodes = append(nodes, &TNode{Type: StaticNode, Text: string(path[j])})
+					//	nodes = append(nodes, &treeNode{Type: StaticNode, Text: string(path[j])})
 					//}
 					//j++
-					nodes = append(nodes, &TNode{Type: StaticNode, Level: 0, Text: path[startOffset:i]})
+					nodes = append(nodes, &treeNode{Type: StaticNode, Level: 0, Text: path[startOffset:i]})
 					startOffset = i
 				}
 
@@ -221,7 +221,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 				var typ ContentType = AllType
 				if path[i-1] == LBracket { //#like (:var)
 					// 添加变量前的静态字符节点
-					nodes = append(nodes, &TNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
+					nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
 					bracket = 1
 				} else {
 					// #为变量区分数据类型
@@ -230,7 +230,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 					if idx == -1 {
 						log.Fatalf("expect a %v near position %d~%d", LBracket, startOffset, i)
 					}
-					nodes = append(nodes, &TNode{Type: StaticNode, Text: str[:idx]})
+					nodes = append(nodes, &treeNode{Type: StaticNode, Text: str[:idx]})
 					str = str[idx+1:]
 					switch str {
 					case "int":
@@ -271,10 +271,10 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 				}
 
 				if len(regex) > 0 { // 正则
-					node = &TNode{Type: RegexpNode, regexp: regexp.MustCompile("(" + regex + ")"), Text: path[startOffset : i-len(regex)]}
+					node = &treeNode{Type: RegexpNode, regexp: regexp.MustCompile("(" + regex + ")"), Text: path[startOffset : i-len(regex)]}
 					nodes = append(nodes, node)
 				} else { // 变量
-					node = &TNode{Type: VariantNode, Level: level + 1, ContentType: typ, Text: path[startOffset:i]}
+					node = &treeNode{Type: VariantNode, Level: level + 1, ContentType: typ, Text: path[startOffset:i]}
 					nodes = append(nodes, node)
 				}
 
@@ -312,7 +312,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 			}
 		case '*':
 			{
-				nodes = append(nodes, &TNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
+				nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
 				startOffset = i
 				//if bracket == 1 {
 				//	for ; i < l && RBracket == path[i]; i++ {
@@ -322,7 +322,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 				for ; i < l && utils.IsAlnumByte(path[i]); i++ {
 				}
 				//}
-				nodes = append(nodes, &TNode{Type: AnyNode, Level: -1, Text: path[startOffset:i]})
+				nodes = append(nodes, &treeNode{Type: AnyNode, Level: -1, Text: path[startOffset:i]})
 				isDyn = true    // 标记 Route 为动态
 				i = i + bracket // bracket=len(“)”)
 				startOffset = i
@@ -338,7 +338,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 		}
 	}
 
-	nodes = append(nodes, &TNode{
+	nodes = append(nodes, &treeNode{
 		Type: StaticNode,
 		Text: path[startOffset:i],
 	})
@@ -346,7 +346,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*TNode, isDyn 
 	return //nodes, isDyn
 }
 
-func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *Params) *TNode {
+func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams *Params) *treeNode {
 	var retnil bool
 	if node.Type == StaticNode { // 静态节点
 		// match static node
@@ -485,8 +485,8 @@ func (r *TTree) matchNode(node *TNode, path string, delimitChar byte, aParams *P
 func (self *TTree) Endpoints() []*registry.Endpoint {
 	eps := make([]*registry.Endpoint, 0)
 	checker := make(map[string]*route)
-	var match func(method string, i int, node *TNode)
-	match = func(method string, i int, node *TNode) {
+	var match func(method string, i int, node *treeNode)
+	match = func(method string, i int, node *treeNode) {
 		for _, c := range node.Children {
 			if c.Route != nil {
 				// TODO 检测
@@ -533,43 +533,6 @@ func (r *TTree) Match(method string, path string) (*route, Params) {
 	return nil, nil
 }
 
-func validType(content string, typ ContentType) bool {
-	switch typ {
-	case NumberType:
-		for i := 0; i < len(content); i++ {
-			if !utils.IsDigitByte(content[i]) {
-				return false
-			}
-		}
-	case CharType:
-		for i := 0; i < len(content); i++ {
-			if !utils.IsAlphaByte(content[i]) {
-				return false
-			}
-		}
-	default:
-		// 所有字符串
-		return true
-	}
-
-	return true
-}
-
-// validate parsed nodes, all non-static route should have static route children.
-func validNodes(nodes []*TNode) bool {
-	if len(nodes) == 0 {
-		return false
-	}
-	var lastTp = nodes[0]
-	for _, node := range nodes[1:] {
-		if lastTp.Type != StaticNode && node.Type != StaticNode {
-			return false
-		}
-		lastTp = node
-	}
-	return true
-}
-
 // 添加路由到Tree
 func (self *TTree) AddRoute(route *route) error {
 	if route == nil {
@@ -582,10 +545,7 @@ func (self *TTree) AddRoute(route *route) error {
 		delimitChar := route.PathDelimitChar
 
 		// to parse path as a List node
-		nodes, is_dyn := self.parsePath(route.Path, delimitChar)
-
-		// marked as a dynamic route
-		route.___isDynRoute = is_dyn // 即将Hook的新Route是动态地址
+		nodes, _ := self.parsePath(route.Path, delimitChar)
 
 		// 绑定Route到最后一个Node
 		node := nodes[len(nodes)-1]
@@ -624,7 +584,7 @@ func (self *TTree) DelRoute(path string, route *route) error {
 		// to parse path as a List node
 		nodes, _ := self.parsePath(path, delimitChar)
 
-		var p *TNode = n // 复制方法对应的Root
+		var p *treeNode = n // 复制方法对应的Root
 
 		// 层级插入Nodes的Node到Root
 		for idx := range nodes {
@@ -635,8 +595,8 @@ func (self *TTree) DelRoute(path string, route *route) error {
 }
 
 // conbine 2 node together
-func (self *TTree) conbine(target, from *TNode) {
-	var exist_node *TNode
+func (self *TTree) conbine(target, from *treeNode) {
+	var exist_node *treeNode
 
 	// 是否目标Node有该Node
 	for _, n := range target.Children {
@@ -695,10 +655,45 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 	return self
 }
 
+// add nodes to trees
+func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
+	//fmt.Println("self.Root", self.Root)
+	// 获得对应方法[POST,GET...]
+	cn := self.root[method]
+	if cn == nil {
+
+		// 初始化Root node
+		cn = &treeNode{
+			Children: subNodes{},
+		}
+		self.root[method] = cn
+	}
+
+	var p *treeNode = cn // 复制方法对应的Root
+
+	// 层级插入Nodes的Node到Root
+	for idx := range nodes {
+		p = cn.addNode(p, nodes, idx, isHook)
+	}
+}
+
+func (self *TTree) PrintTrees() {
+	buf := bytes.NewBufferString("")
+	buf.WriteString("\n")
+	for method, node := range self.root {
+		if len(node.Children) > 0 {
+			buf.WriteString(method + "\n")
+			printNode(buf, 1, node)
+			buf.WriteString("\n")
+		}
+	}
+	log.Info(buf.String())
+}
+
 // add node nodes[i] to parent node p
-func (self *TNode) addNode(parent *TNode, nodes []*TNode, i int, isHook bool) *TNode {
+func (self *treeNode) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bool) *treeNode {
 	if len(parent.Children) == 0 {
-		parent.Children = make([]*TNode, 0)
+		parent.Children = make([]*treeNode, 0)
 	}
 
 	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
@@ -723,14 +718,14 @@ func (self *TNode) addNode(parent *TNode, nodes []*TNode, i int, isHook bool) *T
 	return nodes[i]
 }
 
-func (self *TNode) delNode(parent *TNode, nodes []*TNode, i int) *TNode {
+func (self *treeNode) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode {
 	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
 	for _, n := range parent.Children {
 		if n.Equal(nodes[i]) {
 			// 如果:插入的节点层级已经到末尾,则为该节点注册路由
 			if i == len(nodes)-1 {
 				// 剥离目标控制器
-				n.Route.StripController(nodes[i].Route)
+				n.Route.StripHandler(nodes[i].Route)
 			}
 			return n
 		}
@@ -740,29 +735,51 @@ func (self *TNode) delNode(parent *TNode, nodes []*TNode, i int) *TNode {
 	return nodes[i]
 }
 
-// add nodes to trees
-func (self *TTree) addNodes(method string, nodes []*TNode, isHook bool) {
-	//fmt.Println("self.Root", self.Root)
-	// 获得对应方法[POST,GET...]
-	cn := self.root[method]
-	if cn == nil {
-
-		// 初始化Root node
-		cn = &TNode{
-			Children: TSubNodes{},
-		}
-		self.root[method] = cn
+func (self *treeNode) Equal(node *treeNode) bool {
+	if self.Type != node.Type || self.Text != node.Text || self.ContentType != node.ContentType {
+		return false
 	}
-
-	var p *TNode = cn // 复制方法对应的Root
-
-	// 层级插入Nodes的Node到Root
-	for idx := range nodes {
-		p = cn.addNode(p, nodes, idx, isHook)
-	}
+	return true
 }
 
-func printNode(buf *bytes.Buffer, i int, node *TNode) {
+func validType(content string, typ ContentType) bool {
+	switch typ {
+	case NumberType:
+		for i := 0; i < len(content); i++ {
+			if !utils.IsDigitByte(content[i]) {
+				return false
+			}
+		}
+	case CharType:
+		for i := 0; i < len(content); i++ {
+			if !utils.IsAlphaByte(content[i]) {
+				return false
+			}
+		}
+	default:
+		// 所有字符串
+		return true
+	}
+
+	return true
+}
+
+// validate parsed nodes, all non-static route should have static route children.
+func validNodes(nodes []*treeNode) bool {
+	if len(nodes) == 0 {
+		return false
+	}
+	var lastTp = nodes[0]
+	for _, node := range nodes[1:] {
+		if lastTp.Type != StaticNode && node.Type != StaticNode {
+			return false
+		}
+		lastTp = node
+	}
+	return true
+}
+
+func printNode(buf *bytes.Buffer, i int, node *treeNode) {
 	for _, c := range node.Children {
 		for j := 0; j < i; j++ { // 空格距离ss
 			buf.WriteString("  ")
@@ -783,24 +800,4 @@ func printNode(buf *bytes.Buffer, i int, node *TNode) {
 		buf.WriteString("\n")
 		printNode(buf, i+1, c)
 	}
-}
-
-func (self *TTree) PrintTrees() {
-	buf := bytes.NewBufferString("")
-	buf.WriteString("\n")
-	for method, node := range self.root {
-		if len(node.Children) > 0 {
-			buf.WriteString(method + "\n")
-			printNode(buf, 1, node)
-			buf.WriteString("\n")
-		}
-	}
-	log.Info(buf.String())
-}
-
-func (self *TNode) Equal(node *TNode) bool {
-	if self.Type != node.Type || self.Text != node.Text || self.ContentType != node.ContentType {
-		return false
-	}
-	return true
 }

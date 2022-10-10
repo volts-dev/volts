@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/bus"
-	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
@@ -22,39 +21,30 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		*config.Config
-
-		___Codecs map[string]codec.ICodec
-		Bus       bus.IBus // 实例
+		*config.Config `field:"-"`
+		Bus            bus.IBus `field:"-"` // 实例
 		//Tracer    trace.Tracer
-		Registry  registry.IRegistry   // 实例
-		Transport transport.ITransport // 实例
-		Router    vrouter.IRouter      // 实例 The router for requests
-		Logger    logger.ILogger       // 实例
-		TLSConfig *tls.Config          // TLSConfig specifies tls.Config for secure serving
+		Registry  registry.IRegistry   `field:"-"` // 实例
+		Transport transport.ITransport `field:"-"` // 实例
+		Router    vrouter.IRouter      `field:"-"` // 实例 The router for requests
+		Logger    logger.ILogger       `field:"-"` // 实例
+		TLSConfig *tls.Config          `field:"-"` // TLSConfig specifies tls.Config for secure serving
 
 		// Other options for implementations of the interface
 		// can be stored in a context
-		Context context.Context
+		Context       context.Context             `field:"-"`
+		Metadata      map[string]string           `field:"-"`
+		RegisterCheck func(context.Context) error `field:"-"` // RegisterCheck runs a check function before registering the service
 
-		Metadata map[string]string
-		Name     string
+		Name string
 		//  host address ":35999"
-		Address   string
-		Advertise string
-		Uid       string
-		Version   string
-		//HdlrWrappers []HandlerWrapper
-		//SubWrappers  []SubscriberWrapper
-
-		// RegisterCheck runs a check function before registering the service
-		RegisterCheck func(context.Context) error
-		// The register expiry time
-		RegisterTTL time.Duration
-		// The interval on which to register
-		RegisterInterval time.Duration
-
-		AutoCreate bool //自动创建实例
+		Address          string
+		Advertise        string
+		Uid              string
+		Version          string
+		RegisterTTL      time.Duration // The register expiry time
+		RegisterInterval time.Duration // The interval on which to register
+		AutoCreate       bool          //自动创建实例
 	}
 )
 
@@ -75,13 +65,12 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Config:           config.New(),
+		Config:           config.New(config.DEFAULT_PREFIX),
 		Uid:              uuid.New().String(),
 		Name:             DefaultName,
 		Logger:           log,
 		Bus:              bus.DefaultBus,
 		Registry:         registry.Default(),
-		___Codecs:        make(map[string]codec.ICodec),
 		Metadata:         map[string]string{},
 		Address:          DefaultAddress,
 		RegisterInterval: DefaultRegisterInterval,
@@ -93,6 +82,10 @@ func newConfig(opts ...Option) *Config {
 
 	cfg.Init(opts...)
 	return cfg
+}
+
+func (self *Config) String() string {
+	return "server"
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -127,14 +120,23 @@ func (self *Config) Init(opts ...Option) {
 }
 
 func (self *Config) Load() error {
-	self.Router.Config().Load()
-	//self.Registry.Config().Load()
+	// 如果无文件则创建新的
+	//	if !utils.FileExists(self.FileName) {
+	///		return self.Save()
+	//	}
 
-	self.Config.UnmarshalField("server", &self)
-	return nil
+	self.Bus.Config().Load()
+	self.Router.Config().Load()
+	self.Registry.Config().Load()
+	self.Transport.Config().Load()
+	return self.LoadToModel(self)
 }
 
 func (self *Config) Save() error {
+	self.Bus.Config().Save()
+	self.Router.Config().Save()
+	self.Registry.Config().Save()
+	self.Transport.Config().Save()
 	self.Router.Config().Save()
 	return nil
 }
@@ -178,13 +180,6 @@ func Router(router vrouter.IRouter) Option {
 		if _, ok := router.(*vrouter.TRouter); ok {
 			cfg.Router = router
 		}
-	}
-}
-
-// Codec to use to encode/decode requests for a given content type
-func Codec(contentType string, c codec.ICodec) Option {
-	return func(cfg *Config) {
-		cfg.___Codecs[contentType] = c
 	}
 }
 

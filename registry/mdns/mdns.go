@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/util/mdns"
 )
@@ -59,13 +58,8 @@ type (
 
 //NewMdnsRegistry
 func New(opts ...registry.Option) registry.IRegistry {
-	cfg := &registry.Config{
-		Config:  config.New(),
-		Timeout: time.Millisecond * 100,
-	}
-
-	cfg.Init(opts...)
-
+	opts = append(opts, registry.Timeout(time.Millisecond*100))
+	cfg := registry.NewConfig(opts...)
 	// set the domain
 	domain := mdnsDomain
 	d, ok := cfg.Context.Value("mdns.domain").(string)

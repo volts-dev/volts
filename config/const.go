@@ -4,6 +4,7 @@ type ModeType int
 
 const (
 	CONFIG_FILE_NAME = "config.json"
+	DEFAULT_PREFIX   = "volts"
 
 	MODE_NORMAL ModeType = iota
 	MODE_DEBUG

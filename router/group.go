@@ -26,9 +26,8 @@ type (
 
 	// [scheme:][//[userinfo@]host][/[path]/controller.action][?query][#fragment]
 	TUrl struct {
-		Scheme string
-		Opaque string // encoded opaque data
-		//User       *Userinfo // username and password information
+		Scheme     string
+		Opaque     string // encoded opaque data
 		Host       string // host or host:port
 		Path       string // path (relative paths may omit leading slash)
 		Controller string
@@ -355,7 +354,7 @@ func (self *TGroup) Url(method string, path string, handlers ...interface{}) *ro
 		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers...)
 
 	default:
-		log.Panicf("the params in Module.Url() %v:%v is invaild", method, path)
+		log.Fatalf("the params in Module.Url() %v:%v is invaild", method, path)
 	}
 
 	return nil
@@ -418,9 +417,12 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 					if isREST {
 						// 方法为对象方法名称 url 只注册对象名称
 						// name 为GET POST DELETE等
-						self.addRoute(position, hanadlerType, []string{name}, &TUrl{Path: url.Path, Controller: objName, Action: name}, method)
+						ul := &TUrl{Path: url.Path, Controller: objName, Action: name}
+						self.addRoute(position, hanadlerType, []string{name}, ul, method)
 					} else {
-						self.addRoute(position, hanadlerType, methods, &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}, method)
+						name = NameMapper(name)
+						ul := &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}
+						self.addRoute(position, hanadlerType, methods, ul, method)
 					}
 				}
 			}
@@ -430,7 +432,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 		case reflect.Func:
 			// Method must be exported.
 			if ctrlType.PkgPath() != "" {
-				log.Panicf("Method %s must be exported", url.Action)
+				log.Fatalf("Method %s must be exported", url.Action)
 				return nil
 			}
 
@@ -439,7 +441,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			if utils.InStrings("CONNECT", methods...) > -1 {
 				ctxType := ctrlType.In(1)
 				if ctxType != RpcContextType {
-					log.Panicf("method %s must use context pointer as the first parameter", url.Action)
+					log.Fatalf("method %s must use context pointer as the first parameter", url.Action)
 					return nil
 				}
 			}
@@ -447,7 +449,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			hd = generateHandler(hanadlerType, []interface{}{ctrlValue}, nil)
 			break
 		default:
-			panic("controller must be func or bound method")
+			log.Fatal("controller must be func or bound method")
 		}
 	}
 

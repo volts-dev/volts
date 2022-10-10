@@ -37,7 +37,7 @@ type (
 
 	// Supply API to user
 	TLogger struct {
-		Config  *TConfig
+		Config  *Config
 		manager *TWriterManager
 	}
 )
@@ -274,8 +274,8 @@ func (self *TLogger) Async(aSwitch ...bool) *TLogger {
 }
 
 // 断言如果结果和条件不一致就错误
-func (self *TLogger) Assert(cnd bool, format string, args ...interface{}) {
-	if !cnd {
+func (self *TLogger) Assert(condition bool, format string, args ...interface{}) {
+	if condition {
 		panic(fmt.Sprintf(format, args...))
 	}
 }

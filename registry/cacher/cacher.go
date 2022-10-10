@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	util "github.com/volts-dev/volts/util/registry"
@@ -56,16 +55,12 @@ var (
 // New returns a new cache
 func New(r registry.IRegistry, opts ...registry.Option) ICacher {
 	rand.Seed(time.Now().UnixNano())
-	cfg := &registry.Config{
-		Config: config.New(),
-		TTL:    DefaultTTL,
-	}
 
-	cfg.Init(opts...)
+	opts = append(opts, registry.RegisterTTL(DefaultTTL))
 
 	return &cache{
 		IRegistry: r,
-		config:    cfg,
+		config:    registry.NewConfig(opts...),
 		watched:   make(map[string]bool),
 		cache:     make(map[string][]*registry.Service),
 		ttls:      make(map[string]time.Time),

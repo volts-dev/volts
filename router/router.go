@@ -12,7 +12,6 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/transport"
@@ -48,8 +47,8 @@ type (
 		template   *template.TTemplateSet
 		//objectPool  *pool
 		respPool    sync.Pool
-		httpCtxPool map[int]sync.Pool //根据Route缓存
-		rpcCtxPool  map[int]sync.Pool
+		httpCtxPool map[int]*sync.Pool //根据Route缓存
+		rpcCtxPool  map[int]*sync.Pool
 
 		// compiled regexp for host and path
 		exit chan bool
@@ -341,11 +340,6 @@ func (self *TRouter) refresh() {
 			return
 		}
 	}
-}
-
-// TODO 废弃
-func (self *TRouter) ___Init(opts ...config.Option) {
-	self.config.Init(opts...)
 }
 
 func (self *TRouter) Config() *Config {
