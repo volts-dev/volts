@@ -16,12 +16,12 @@ type (
 	}
 )
 
-func (self ctrls) hello_world(hd *router.THttpContext) {
+func (self ctrls) HelloWorld(hd *router.THttpContext) {
 	hd.Infof("hello %v", 11)
 	hd.Respond([]byte("Hello World (Controler)!"))
 }
 
-func (self ctrls) macth_all(hd *router.THttpContext) {
+func (self ctrls) MacthAll(hd *router.THttpContext) {
 	p := hd.PathParams()
 	c := fmt.Sprintf(`Hello World (Controler/Router Matching "%v":"%v" %v)!`, hd.Route().Path, p.FieldByName("all").AsString(), p.FieldByName("all2").AsString())
 	hd.Respond([]byte(c))
@@ -32,9 +32,9 @@ func main() {
 	r.Url("GET", "/", func(hd *router.THttpContext) {
 		hd.Respond([]byte("Hello World"))
 	})
-	r.Url("GET", "/1", ctrls.hello_world)
-	r.Url("GET", "/(:all)", ctrls.macth_all)
-	r.Url("GET", "/(:all)/(:all2)/1", ctrls.macth_all)
+	r.Url("GET", "/1", ctrls.HelloWorld)
+	r.Url("GET", "/<:all>", ctrls.MacthAll)
+	r.Url("GET", "/<:all>/<:all2>/1", ctrls.MacthAll)
 
 	r.Config().Init(
 		router.PrintRoutesTree(),

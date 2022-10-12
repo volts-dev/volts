@@ -16,7 +16,7 @@ func (c ModeType) String() string {
 		return "Normal"
 	case MODE_DEBUG:
 		return "Debug"
+	default:
+		return "UNKNOW"
 	}
-
-	return "UNKNOW"
 }

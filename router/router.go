@@ -135,7 +135,9 @@ func New() *TRouter {
 		config:     cfg,
 		middleware: newMiddlewareManager(),
 		//objectPool: newPool(),
-		exit: make(chan bool),
+		httpCtxPool: make(map[int]*sync.Pool),
+		rpcCtxPool:  make(map[int]*sync.Pool),
+		exit:        make(chan bool),
 	}
 
 	router.respPool.New = func() interface{} {
@@ -280,9 +282,7 @@ func (self *TRouter) watch() {
 			// get entry from cache
 			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
 			if err != nil {
-				//if log.V(log.ErrorLevel, log.DefaultLogger) {
 				log.Errf("unable to get service: %v", err)
-				//}
 				break
 			}
 
@@ -324,9 +324,7 @@ func (self *TRouter) refresh() {
 
 			service, err := self.config.RegistryCacher.GetService(s.Name)
 			if err != nil {
-				//if log.V(log.ErrorLevel, log.DefaultLogger) {
 				log.Errf("unable to get service: %v", err)
-				//}
 				continue
 			}
 			self.store(service)
@@ -441,9 +439,11 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		// # get the new context from pool
 		p, has := self.httpCtxPool[route.Id]
 		if !has {
-			p.New = func() interface{} {
+			p = &sync.Pool{New: func() interface{} {
 				return NewHttpContext(self)
-			}
+			}}
+
+			self.httpCtxPool[route.Id] = p
 		}
 
 		ctx := p.Get().(*THttpContext)
@@ -513,10 +513,13 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 			// 初始化Context
 			p, has := self.rpcCtxPool[route.Id]
 			if !has { // TODO 优化
-				p.New = func() interface{} {
+				p = &sync.Pool{New: func() interface{} {
 					return NewRpcHandler(self)
-				}
+				}}
+				self.rpcCtxPool[route.Id] = p
+
 			}
+
 			ctx = p.Get().(*TRpcContext)
 			if !ctx.inited {
 				ctx.router = self

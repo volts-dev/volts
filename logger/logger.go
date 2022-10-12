@@ -24,6 +24,7 @@ type (
 		Errf(format string, v ...interface{}) error
 		Warnf(format string, v ...interface{})
 		Infof(format string, v ...interface{})
+		Tracef(format string, v ...interface{})
 
 		//Panic(v ...interface{})
 		Panic(v ...interface{})
@@ -33,6 +34,7 @@ type (
 		Err(v ...interface{}) error
 		Warn(v ...interface{})
 		Info(v ...interface{})
+		Trace(v ...interface{})
 	}
 
 	// Supply API to user
@@ -349,6 +351,11 @@ func (self *TLogger) Dbgf(format string, v ...interface{}) {
 	self.manager.write(LevelDebug, msg)
 }
 
+func (self *TLogger) Tracef(format string, v ...interface{}) {
+	msg := fmt.Sprintf("[DBG] "+format, v...)
+	self.manager.write(LevelTrace, msg)
+}
+
 // Log Attack level message.
 func (self *TLogger) Atkf(format string, v ...interface{}) {
 	msg := fmt.Sprintf("[ATK] "+format, v...)
@@ -395,6 +402,12 @@ func (self *TLogger) Fatal(v ...interface{}) {
 func (self *TLogger) Dbg(v ...interface{}) {
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelDebug, "[DBG] "+msg)
+}
+
+// Log Trace level message.
+func (self *TLogger) Trace(v ...interface{}) {
+	msg := fmt.Sprint(v...)
+	self.manager.write(LevelTrace, "[TRACE] "+msg)
 }
 
 // Log Attack level message.

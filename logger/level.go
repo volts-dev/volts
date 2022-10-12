@@ -17,24 +17,25 @@ var White = "\033[97m"
 
 // RFC5424 log message levels.
 const (
-	LevelAttack Level = iota //# under attack
-	LevelCritical
-	LevelAlert
-	LevelEmergency
-	LevelNone  //# logger is close
-	LevelInfo  //
-	LevelWarn  //
-	LevelError //
-	LevelDebug //# under debug mode
+	LevelAttack    Level = iota // under attack
+	LevelCritical               //
+	LevelAlert                  //
+	LevelEmergency              //
+	LevelNone                   // logger is close
+	LevelInfo                   //
+	LevelWarn                   //
+	LevelError                  //
+	LevelTrace                  // 跟踪
+	LevelDebug                  // under debug mode
 )
 
-func (l Level) Color(msg string) string {
+func (lv Level) Color(msg string) string {
 	if runtime.GOOS == "windows" {
 		return ""
 	}
 
 	color := ""
-	switch l {
+	switch lv {
 	case LevelAttack:
 		color = Red
 	case LevelCritical:
@@ -51,14 +52,16 @@ func (l Level) Color(msg string) string {
 		color = Red
 	case LevelDebug:
 		color = Purple
+	case LevelTrace:
+		color = Blue
 	default:
 		color = White
 	}
 	return color + msg + Reset
 }
 
-func (l Level) String() string {
-	switch l {
+func (lv Level) String() string {
+	switch lv {
 	case LevelAttack:
 		return "attack"
 	case LevelCritical:
@@ -75,6 +78,8 @@ func (l Level) String() string {
 		return "error"
 	case LevelDebug:
 		return "debug"
+	case LevelTrace:
+		return "trace"
 	}
 	return "unknow"
 }

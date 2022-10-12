@@ -31,6 +31,13 @@ type (
 	}
 )
 
+func newConfig(opts ...Option) *Config {
+	cfg := &Config{Strategy: Random}
+	cfg.Init(opts...)
+	config.Default().Register(cfg)
+	return cfg
+}
+
 func (self *Config) String() string {
 	return "selector"
 }

@@ -393,7 +393,7 @@ func (self *TServer) Start() error {
 	self.RUnlock()
 
 	config := self.config
-	config.Load()
+	config.Config.Load()
 	config.Router.PrintRoutes()
 
 	// start listening on the transport
@@ -402,7 +402,7 @@ func (self *TServer) Start() error {
 		return err
 	}
 
-	log.Infof("Transport [%s] Listening on %s", config.Transport.String(), ts.Addr())
+	log.Infof("Listening on %s - %s", ts.Addr(), config.Transport.String())
 
 	// swap address
 	self.Lock()

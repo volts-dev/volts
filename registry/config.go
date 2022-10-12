@@ -62,6 +62,7 @@ func NewConfig(opts ...Option) *Config {
 		Timeout: time.Millisecond * 100,
 	}
 	cfg.Init(opts...)
+	config.Default().Register(cfg)
 	return cfg
 }
 

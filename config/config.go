@@ -28,11 +28,12 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		fmt      *format
-		models   sync.Map
-		Mode     ModeType
-		Prefix   string
-		fileName string
+		fmt        *format
+		models     sync.Map
+		CreateFile bool `field:"-"`
+		Mode       ModeType
+		Prefix     string
+		FileName   string
 	}
 
 	IConfig interface {
@@ -65,10 +66,11 @@ func New(prefix string, opts ...Option) *Config {
 	}
 
 	cfg := &Config{
-		fmt:      newFormat(), // 配置主要文件格式读写实现,
-		Mode:     MODE_NORMAL,
-		Prefix:   prefix,
-		fileName: CONFIG_FILE_NAME,
+		fmt:        newFormat(), // 配置主要文件格式读写实现,
+		CreateFile: true,
+		Mode:       MODE_NORMAL,
+		Prefix:     prefix,
+		FileName:   CONFIG_FILE_NAME,
 	}
 	cfg.Init(opts...)
 
@@ -103,13 +105,16 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
-// default is CONFIG_FILE_NAME = "config.json"
 func (self *Config) Load(fileName ...string) error {
-	if self.fileName == "" {
-		self.fileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
+	if self.FileName == "" {
+		self.FileName = CONFIG_FILE_NAME
 	}
+	filePath := filepath.Join(AppPath, self.FileName)
+	self.fmt.v.SetConfigFile(filePath)
 
-	self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.fileName))
+	if self.CreateFile && !utils.FileExists(filePath) {
+		return self.fmt.v.WriteConfig()
+	}
 	// Find and read the config file
 	// Handle errors reading the config file
 	return self.fmt.v.ReadInConfig()
@@ -147,11 +152,11 @@ func (self *Config) Save(opts ...Option) error {
 		opt(self)
 	}
 
-	if self.fileName == "" {
-		self.fileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
+	if self.FileName == "" {
+		self.FileName = CONFIG_FILE_NAME
 	}
 
-	self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.fileName))
+	self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.FileName))
 	return self.fmt.v.WriteConfig()
 }
 

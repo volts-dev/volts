@@ -48,10 +48,6 @@ type (
 	}
 )
 
-const (
-	CONFIG_FILE_NAME = "config.ini"
-)
-
 var (
 	// App settings.
 	AppVer      string                             // 程序版本
@@ -81,6 +77,7 @@ func newConfig(opts ...Option) *Config {
 	}
 
 	cfg.Init(opts...)
+	config.Default().Register(cfg)
 	return cfg
 }
 
@@ -120,24 +117,10 @@ func (self *Config) Init(opts ...Option) {
 }
 
 func (self *Config) Load() error {
-	// 如果无文件则创建新的
-	//	if !utils.FileExists(self.FileName) {
-	///		return self.Save()
-	//	}
-
-	self.Bus.Config().Load()
-	self.Router.Config().Load()
-	self.Registry.Config().Load()
-	self.Transport.Config().Load()
 	return self.LoadToModel(self)
 }
 
 func (self *Config) Save() error {
-	self.Bus.Config().Save()
-	self.Router.Config().Save()
-	self.Registry.Config().Save()
-	self.Transport.Config().Save()
-	self.Router.Config().Save()
 	return nil
 }
 

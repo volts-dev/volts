@@ -228,7 +228,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isD
 					str := path[startOffset : i-bracket] // #like /abc1(string|upper:var)
 					idx := strings.Index(str, string(LBracket))
 					if idx == -1 {
-						log.Fatalf("expect a %v near position %d~%d", LBracket, startOffset, i)
+						log.Fatalf("expect a %s near path %s position %d~%d", path, string(LBracket), startOffset, i)
 					}
 					nodes = append(nodes, &treeNode{Type: StaticNode, Text: str[:idx]})
 					str = str[idx+1:]

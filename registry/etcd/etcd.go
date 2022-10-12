@@ -14,6 +14,7 @@ import (
 	"time"
 
 	hash "github.com/mitchellh/hashstructure"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -118,7 +119,7 @@ func decode(ds []byte) *registry.Service {
 	var s *registry.Service
 	err := json.Unmarshal(ds, &s)
 	if err != nil {
-		log.Errf("decode service failed with error %s :%s", err.Error(), string(ds))
+		log.Errf("decode service failed with error: %s - %s", err.Error(), string(ds))
 	}
 	return s
 }
@@ -224,9 +225,9 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 
 	// the service is unchanged, skip registering
 	if ok && v == h && !leaseNotFound {
-		//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-		log.Dbgf("Service %s node %s unchanged skipping registration", s.Name, node.Uid)
-		//}
+		if log.GetLevel() == logger.LevelTrace {
+			log.Tracef("Service %s node %s unchanged skipping registration", s.Name, node.Uid)
+		}
 		return nil
 	}
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -181,7 +182,14 @@ func generateHandler(hanadlerType HandlerType, handlers []interface{}, services 
 
 		// 检测获取绑定的handler
 		h.FuncName = GetFuncName(handlers[0], '.')
-		hd, _ := h.CtrlType.MethodByName(h.FuncName)
+		if !utils.IsStartUpper(h.FuncName) {
+			log.Dbgf("the handler %s.%s must start with upper letter!", h.CtrlName, h.FuncName)
+		}
+
+		hd, ok := h.CtrlType.MethodByName(h.FuncName)
+		if !ok {
+			log.Dbgf("handler %s not exist in controller %s!", h.FuncName, h.CtrlType.Name())
+		}
 		switch hd.Type.In(1) {
 		case HttpContextType:
 			h.TransportType = HttpHandler
@@ -268,7 +276,12 @@ func generateHandler(hanadlerType HandlerType, handlers []interface{}, services 
 
 // 缓存或者创建新的
 func (self *handler) New(router *TRouter) *handler {
-	p := self.Manager.handlerPool[self.Id]
+	p, has := self.Manager.handlerPool[self.Id]
+	if !has {
+		p = &sync.Pool{}
+		self.Manager.handlerPool[self.Id] = p
+	}
+
 	itf := p.Get()
 	if itf != nil {
 		return itf.((*handler))

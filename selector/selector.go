@@ -44,13 +44,7 @@ type (
 )
 
 func New(opts ...Option) ISelector {
-	cfg := &Config{
-		Strategy: Random,
-	}
-
-	for _, opt := range opts {
-		opt(cfg)
-	}
+	cfg := newConfig(opts...)
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.Default()
