@@ -4,7 +4,9 @@ import (
 	"context"
 
 	"github.com/volts-dev/volts/config"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/registry/noop"
 )
 
 type (
@@ -12,6 +14,8 @@ type (
 	Option func(*Config) error
 	Config struct {
 		*config.Config `field:"-"`
+		Logger         logger.ILogger `field:"-"` // 实例
+
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context  context.Context    `field:"-"`
@@ -32,7 +36,11 @@ type (
 )
 
 func newConfig(opts ...Option) *Config {
-	cfg := &Config{Strategy: Random}
+	cfg := &Config{
+		Logger:   log,
+		Strategy: Random,
+		Registry: noop.New(),
+	}
 	cfg.Init(opts...)
 	config.Default().Register(cfg)
 	return cfg

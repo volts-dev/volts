@@ -34,6 +34,7 @@ type (
 
 	Config struct {
 		*config.Config `field:"-"`
+		Logger         logger.ILogger  `field:"-"` // 实例
 		Context        context.Context `field:"-"`
 		Service        *Service        `field:"-"` // current service information
 		Addrs          []string
@@ -58,6 +59,7 @@ type (
 // new and init a config
 func NewConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Logger:  log,
 		Context: context.Background(),
 		Timeout: time.Millisecond * 100,
 	}

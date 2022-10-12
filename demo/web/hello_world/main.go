@@ -37,8 +37,9 @@ func main() {
 	r.Url("GET", "/<:all>/<:all2>/1", ctrls.MacthAll)
 
 	r.Config().Init(
-		router.PrintRoutesTree(),
-		router.PrintRequest(),
+		router.WithRoutesTreePrinter(),
+		router.WithRequestPrinter(),
+		router.WithPprof(),
 	)
 
 	srv := server.New(

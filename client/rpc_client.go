@@ -7,6 +7,8 @@ import (
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/registry/noop"
+
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
@@ -37,7 +39,7 @@ func NewRpcClient(opts ...Option) (*RpcClient, error) {
 	}
 
 	if cfg.Registry == nil {
-		cfg.Registry = registry.Default()
+		cfg.Registry = noop.New()
 		cfg.Selector = selector.New(selector.Registry(cfg.Registry))
 	}
 

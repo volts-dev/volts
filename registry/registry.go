@@ -22,7 +22,7 @@ type (
 		Deregister(*Service, ...Option) error // 注销
 		GetService(string) ([]*Service, error)
 		ListServices() ([]*Service, error)
-		Watch(...WatchOptions) (Watcher, error)
+		Watcher(...WatchOptions) (Watcher, error)
 		CurrentService() *Service
 		String() string
 	}
@@ -75,12 +75,12 @@ type (
 	}
 )
 
-func Default(new ...IRegistry) IRegistry {
+func _Default(new ...IRegistry) IRegistry {
 	if new != nil {
 		defaultRegistry = new[0]
 	} else {
 		if defaultRegistry == nil {
-			defaultRegistry = newNoopRegistry()
+			//defaultRegistry = newNoopRegistry()
 		}
 	}
 	return defaultRegistry

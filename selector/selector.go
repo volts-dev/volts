@@ -3,12 +3,13 @@ package selector
 import (
 	"errors"
 
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 )
 
 var (
-	defaultSelector = New()
-
+	defaultSelector  = New()
+	log              = logger.New("selector")
 	ErrNotFound      = errors.New("not found")
 	ErrNoneAvailable = errors.New("none available")
 )
@@ -45,10 +46,6 @@ type (
 
 func New(opts ...Option) ISelector {
 	cfg := newConfig(opts...)
-
-	if cfg.Registry == nil {
-		cfg.Registry = registry.Default()
-	}
 
 	s := &registrySelector{
 		config: cfg,

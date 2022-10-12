@@ -68,8 +68,8 @@ type (
 		*config.Config `field:"-"`
 		// Other options for implementations of the interface
 		// can be stored in a context
+		Logger      logger.ILogger         `field:"-"`
 		Context     context.Context        `field:"-"`
-		logger      logger.ILogger         `field:"-"`
 		Client      IClient                `field:"-"`
 		Transport   transport.ITransport   `field:"-"`
 		Registry    registry.IRegistry     `field:"-"`
@@ -134,8 +134,8 @@ type (
 
 func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
+		Logger:    log,
 		Transport: tr,
-		logger:    log,
 		Retries:   3,
 		//RPCPath:        share.DefaultRPCPath,
 		ConnectTimeout: 10 * time.Second,

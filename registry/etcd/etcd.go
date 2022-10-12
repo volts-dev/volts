@@ -196,17 +196,13 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 
 	// renew the lease if it exists
 	if leaseID > 0 {
-		//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-		log.Dbgf("Renewing existing lease for %s %d", s.Name, leaseID)
-		//}
+		log.Tracef("Renewing existing lease for %s %d", s.Name, leaseID)
 		if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
 			if err != rpctypes.ErrLeaseNotFound {
 				return err
 			}
 
-			//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-			log.Dbgf("Lease not found for %s %d", s.Name, leaseID)
-			//}
+			log.Tracef("Lease not found for %s %d", s.Name, leaseID)
 			// lease not found do register
 			leaseNotFound = true
 		}
@@ -409,7 +405,7 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 	return services, nil
 }
 
-func (e *etcdRegistry) Watch(opts ...registry.WatchOptions) (registry.Watcher, error) {
+func (e *etcdRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watcher, error) {
 	return newEtcdWatcher(e, e.config.Timeout, opts...)
 }
 

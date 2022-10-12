@@ -360,7 +360,7 @@ func (c *cache) run() {
 		time.Sleep(time.Duration(j) * time.Millisecond)
 
 		// create new watcher
-		w, err := c.IRegistry.Watch()
+		w, err := c.IRegistry.Watcher()
 		if err != nil {
 			if c.quit() {
 				return

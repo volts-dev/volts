@@ -352,7 +352,7 @@ func (self *TLogger) Dbgf(format string, v ...interface{}) {
 }
 
 func (self *TLogger) Tracef(format string, v ...interface{}) {
-	msg := fmt.Sprintf("[DBG] "+format, v...)
+	msg := fmt.Sprintf("[TRACE] "+format, v...)
 	self.manager.write(LevelTrace, msg)
 }
 

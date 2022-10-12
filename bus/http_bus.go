@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/volts-dev/volts/registry/noop"
 	maddr "github.com/volts-dev/volts/util/addr"
 	vnet "github.com/volts-dev/volts/util/net"
 	vtls "github.com/volts-dev/volts/util/tls"
@@ -83,7 +84,7 @@ func newTransport(config *tls.Config) *http.Transport {
 func NewHttpBus(opts ...Option) *httpBus {
 	cfg := &Config{
 		Codec:    codec.IdentifyCodec(codec.JSON),
-		Registry: registry.Default(),
+		Registry: noop.New(),
 		Context:  context.TODO(),
 	}
 
@@ -199,13 +200,8 @@ func (self *httpBus) Listen() error { // 开始阻塞监听
 		self.Unlock()
 	}()
 
-	// get registry
-	reg := self.config.Registry
-	if reg == nil {
-		reg = registry.Default()
-	}
 	// set cache
-	//self.r = cache.New(reg)
+	//self.r = cache.New(self.config.Registry)
 
 	// set running
 	self.running = true

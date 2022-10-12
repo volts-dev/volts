@@ -5,6 +5,7 @@ import (
 
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/registry/noop"
 	"github.com/volts-dev/volts/server"
 	"github.com/volts-dev/volts/transport"
 )
@@ -31,7 +32,9 @@ type (
 )
 
 func newConfig(opts ...Option) *Config {
-	cfg := &Config{}
+	cfg := &Config{
+		Registry: noop.New(),
+	}
 
 	for _, opt := range opts {
 		opt(cfg)
@@ -51,10 +54,6 @@ func newConfig(opts ...Option) *Config {
 
 	if cfg.Server == nil {
 		cfg.Server = server.New(server.Transport(cfg.Transport))
-	}
-
-	if cfg.Registry == nil {
-		cfg.Registry = registry.Default()
 	}
 
 	return cfg

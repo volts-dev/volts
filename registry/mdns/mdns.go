@@ -435,7 +435,7 @@ func (m *mdnsRegistry) ListServices() ([]*registry.Service, error) {
 	return services, nil
 }
 
-func (m *mdnsRegistry) Watch(opts ...registry.WatchOptions) (registry.Watcher, error) {
+func (m *mdnsRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watcher, error) {
 	wcfg := &registry.WatchConfig{}
 	for _, opt := range opts {
 		opt(wcfg)

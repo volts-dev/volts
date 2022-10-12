@@ -287,7 +287,7 @@ func TestWatcher(t *testing.T) {
 	// new registry
 	r := New(opts...)
 
-	w, err := r.Watch()
+	w, err := r.Watcher()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
+	"github.com/volts-dev/volts/registry/noop"
 	vrouter "github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
 )
@@ -66,7 +67,6 @@ func newConfig(opts ...Option) *Config {
 		Name:             DefaultName,
 		Logger:           log,
 		Bus:              bus.DefaultBus,
-		Registry:         registry.Default(),
 		Metadata:         map[string]string{},
 		Address:          DefaultAddress,
 		RegisterInterval: DefaultRegisterInterval,
@@ -90,29 +90,17 @@ func (self *Config) Init(opts ...Option) {
 		opt(self)
 	}
 
-	if self.Transport == nil {
-		if self.AutoCreate {
-			self.Transport = transport.NewHTTPTransport()
-		} else {
-			//log.Warn("Transport is NIL")
-		}
+	if self.Transport == nil && self.AutoCreate {
+		self.Transport = transport.NewHTTPTransport()
 	}
 
 	// if not special router use create new
-	if self.Router == nil {
-		if self.AutoCreate {
-			self.Router = vrouter.New()
-		} else {
-			//log.Warn("Router is NIL")
-		}
+	if self.Router == nil && self.AutoCreate {
+		self.Router = vrouter.New()
 	}
 
-	if self.Registry == nil {
-		if self.AutoCreate {
-			self.Registry = registry.Default()
-		} else {
-			//log.Warn("Registry is NIL")
-		}
+	if self.Registry == nil && self.AutoCreate {
+		self.Registry = noop.New()
 	}
 }
 

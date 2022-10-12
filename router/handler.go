@@ -3,6 +3,7 @@ package router
 // TODO 修改主控制器对应Handler名称让其可以转为统一接口完全规避反射缓慢缺陷
 import (
 	"hash/crc32"
+	"net/http"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -75,6 +76,20 @@ type (
 		CtrlModel interface{}   // 提供Ctx特殊调用
 	}
 )
+
+// WrapFn is a helper function for wrapping http.HandlerFunc and returns a HttpContext.
+func WrapFn(fn http.HandlerFunc) func(*THttpContext) {
+	return func(ctx *THttpContext) {
+		fn(ctx.response.ResponseWriter, ctx.request.Request)
+	}
+}
+
+// WrapH is a helper function for wrapping http.Handler and returns a  HttpContext.
+func WrapHd(h http.Handler) func(*THttpContext) {
+	return func(ctx *THttpContext) {
+		h.ServeHTTP(ctx.response.ResponseWriter, ctx.request.Request)
+	}
+}
 
 func (self HandlerType) String() string {
 	return [...]string{"LocalHandler", "ProxyHandler"}[self]

@@ -401,7 +401,7 @@ func (c *consulRegistry) ListServices() ([]*registry.Service, error) {
 	return services, nil
 }
 
-func (c *consulRegistry) Watch(opts ...registry.WatchOptions) (registry.Watcher, error) {
+func (c *consulRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watcher, error) {
 	return newConsulWatcher(c, opts...)
 }
 

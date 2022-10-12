@@ -17,12 +17,6 @@ import (
 )
 
 type (
-	GroupOption func(*GroupConfig)
-	GroupConfig struct {
-		Name       string
-		PrefixPath string
-		FilePath   string // 当前文件夹名称
-	}
 
 	// [scheme:][//[userinfo@]host][/[path]/controller.action][?query][#fragment]
 	TUrl struct {
@@ -64,26 +58,6 @@ type (
 		templateVar map[string]interface{} // TODO 全局变量. 需改进
 	}
 )
-
-func WithCurrentModulePath() GroupOption {
-	return func(cfg *GroupConfig) {
-		cfg.FilePath, cfg.Name = curFilePath(4)
-	}
-}
-
-func GroupName(name string) GroupOption {
-	return func(cfg *GroupConfig) {
-		cfg.Name = name
-	}
-}
-
-// default url"/abc"
-// PrefixPath url "/PrefixPath/abc"
-func GroupPrefixPath(prefixPath string) GroupOption {
-	return func(cfg *GroupConfig) {
-		cfg.PrefixPath = prefixPath
-	}
-}
 
 /*    """Return the path of the given module.
 
@@ -330,6 +304,7 @@ Base: <type:name> if difine type than the route only match the string same to th
 Example: string:id only match "abc"
          int:id only match number "123"
          :id could match all kind of type with name id
+'//' -- 生成"/abc/"而非"/abc"
 '/web/content/<string:xmlid>',
 '/web/content/<string:xmlid>/<string:filename>',
 '/web/content/<int:id>',
@@ -341,7 +316,13 @@ Example: string:id only match "abc"
 for details please read tree.go
 */
 func (self *TGroup) Url(method string, path string, handlers ...interface{}) *route {
-	path = _path.Join(self.config.PrefixPath, path)
+	if self.config.PrefixPath != "" && path == "//" {
+		// 生成"/abc/"而非"/abc"
+		path = _path.Join(self.config.PrefixPath, path) + path
+	} else {
+		path = _path.Join(self.config.PrefixPath, path)
+	}
+
 	method = strings.ToUpper(method)
 	switch method {
 	case "GET":
@@ -374,12 +355,15 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	switch v := h.(type) {
 	case func(*THttpContext), func(*TRpcContext):
 		hd = generateHandler(hanadlerType, handlers, nil)
-	case func(http.ResponseWriter, http.Request):
-		fn := func(ctx *THttpContext) {
-			v(ctx.response.ResponseWriter, *ctx.request.Request)
-		}
-		hds := append([]interface{}{fn}, handlers[1:])
-		// TODO 支持中间件
+	case func(http.ResponseWriter, *http.Request):
+		hds := append([]interface{}{WrapFn(v)}, handlers[1:]...)
+		hd = generateHandler(hanadlerType, hds, nil)
+	case http.HandlerFunc:
+		hds := append([]interface{}{WrapFn(v)}, handlers[1:]...)
+		hd = generateHandler(hanadlerType, hds, nil)
+	case http.Handler:
+
+		hds := append([]interface{}{WrapHd(v)}, handlers[1:]...)
 		hd = generateHandler(hanadlerType, hds, nil)
 	default:
 		// init Value and Type

@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"reflect"
 	"strings"
@@ -139,7 +140,7 @@ func New() *TRouter {
 		rpcCtxPool:  make(map[int]*sync.Pool),
 		exit:        make(chan bool),
 	}
-
+	cfg.Router = router
 	router.respPool.New = func() interface{} {
 		return &transport.THttpResponse{}
 	}
@@ -178,9 +179,24 @@ func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
 	curSrv := self.config.Registry.CurrentService()
 	if curSrv != nil && service.Name == curSrv.Name {
 		node := curSrv.Nodes[0]
+		host, port, err := net.SplitHostPort(node.Address)
+		if err != nil {
+			log.Err(err)
+		}
+
 		nodes := make([]*registry.Node, 0)
 		for _, n := range service.Nodes {
 			if n.Uid == node.Uid {
+				continue
+			}
+
+			h, p, err := net.SplitHostPort(n.Address)
+			if err != nil {
+				log.Err(err)
+			}
+
+			// 同个服务器
+			if host == h && port == p {
 				continue
 			}
 
@@ -233,12 +249,10 @@ func (self *TRouter) watch() {
 		}
 
 		// watch for changes
-		w, err := self.config.Registry.Watch()
+		w, err := self.config.Registry.Watcher()
 		if err != nil {
 			attempts++
-			//if log.V(log.ErrorLevel, log.DefaultLogger) {
 			log.Errf("error watching endpoints: %v", err)
-			//}
 			//time.Sleep(time.Duration(attempts) * time.Second)
 			continue
 		}
@@ -267,9 +281,7 @@ func (self *TRouter) watch() {
 			// process next event
 			res, err := w.Next()
 			if err != nil {
-				//if log.V(log.ErrorLevel, log.DefaultLogger) {
 				log.Errf("error getting next endoint: %v", err)
-				//}
 				close(ch)
 				break
 			}
@@ -297,13 +309,10 @@ func (self *TRouter) refresh() {
 	var attempts int
 
 	for {
-
 		services, err := self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
-			//if log.V(log.ErrorLevel, log.DefaultLogger) {
-			log.Errf("unable to list services: %v", err)
-			//}
+			log.Errf("registry unable to list services: %v", err)
 			time.Sleep(time.Duration(attempts) * time.Second)
 			continue
 		}

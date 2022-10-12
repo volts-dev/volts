@@ -7,6 +7,6 @@ import (
 var Base *router.TGroup
 
 func init() {
-	Base = router.NewGroup(router.GroupPrefixPath("/base"))
+	Base = router.NewGroup(router.WithGroupPathPrefix("/base"))
 	Base.Url("GET", "/", ctrl.index)
 }
