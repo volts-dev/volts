@@ -81,7 +81,7 @@ type (
 
 		// Connection Pool
 		PoolSize int
-		PoolTTL  time.Duration
+		PoolTtl  time.Duration
 		Retries  int // Retries retries to send
 
 		// Used to select codec
@@ -118,7 +118,7 @@ type (
 		HeartbeatInterval time.Duration
 
 		Ja3      transport.Ja3 `field:"-"`
-		ProxyURL string
+		ProxyUrl string
 		// http options
 		UserAgent     string
 		AllowRedirect bool
@@ -151,7 +151,7 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 			DialTimeout:    transport.DefaultTimeout,
 		},
 		PoolSize: DefaultPoolSize,
-		PoolTTL:  DefaultPoolTTL,
+		PoolTtl:  DefaultPoolTTL,
 		//	Broker:    broker.DefaultBroker,
 		//Selector: selector.Default(),
 		//Registry: registry.Default(),
@@ -179,10 +179,8 @@ func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *Config) Save() error {
-	return self.Config.Save(
-		config.WithConfig(self),
-	)
+func (self *Config) Save(immed ...bool) error {
+	return self.SaveFromModel(self, immed...)
 }
 
 func WithCodec(c codec.SerializeType) RequestOption {
@@ -283,7 +281,7 @@ func WithJa3(ja3, userAgent string) Option {
 
 func WithProxyURL(proxyURL string) Option {
 	return func(cfg *Config) {
-		cfg.ProxyURL = proxyURL
+		cfg.ProxyUrl = proxyURL
 		//cfg.DialOptions = append(cfg.DialOptions, transport.WithProxyURL(cfg.ProxyURL))
 	}
 }

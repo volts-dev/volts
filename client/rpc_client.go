@@ -45,7 +45,7 @@ func NewRpcClient(opts ...Option) (*RpcClient, error) {
 
 	p := pool.NewPool(
 		pool.Size(cfg.PoolSize),
-		pool.TTL(cfg.PoolTTL),
+		pool.TTL(cfg.PoolTtl),
 		pool.Transport(cfg.Transport),
 	)
 

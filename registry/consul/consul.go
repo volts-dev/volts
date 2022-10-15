@@ -91,7 +91,7 @@ func newTransport(config *tls.Config) *http.Transport {
 func configure(c *consulRegistry) {
 	// use default non pooled config
 	config := consul.DefaultNonPooledConfig()
-
+	c.opts.Name = c.String()
 	if c.opts.Context != nil {
 		// Use the consul config passed in the options, if available
 		if co, ok := c.opts.Context.Value("consul_config").(*consul.Config); ok {
@@ -137,10 +137,10 @@ func configure(c *consulRegistry) {
 	}
 
 	// requires secure connection?
-	if c.opts.Secure || c.opts.TLSConfig != nil {
+	if c.opts.Secure || c.opts.TlsConfig != nil {
 		config.Scheme = "https"
 		// We're going to support InsecureSkipVerify
-		config.HttpClient.Transport = newTransport(c.opts.TLSConfig)
+		config.HttpClient.Transport = newTransport(c.opts.TlsConfig)
 	}
 
 	// set timeout
@@ -216,7 +216,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// if it's already registered and matches then just pass the check
 	if ok && v == h {
-		if options.TTL == time.Duration(0) {
+		if options.Ttl == time.Duration(0) {
 			// ensure that our service hasn't been deregistered by Consul
 			if time.Since(lastChecked) <= getDeregisterTTL(regInterval) {
 				return nil
@@ -255,11 +255,11 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 		}
 
 		// if the TTL is greater than 0 create an associated check
-	} else if options.TTL > time.Duration(0) {
-		deregTTL := getDeregisterTTL(options.TTL)
+	} else if options.Ttl > time.Duration(0) {
+		deregTTL := getDeregisterTTL(options.Ttl)
 
 		check = &consul.AgentServiceCheck{
-			TTL:                            fmt.Sprintf("%v", options.TTL),
+			TTL:                            fmt.Sprintf("%v", options.Ttl),
 			DeregisterCriticalServiceAfter: fmt.Sprintf("%v", deregTTL),
 		}
 	}
@@ -298,7 +298,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 	c.Unlock()
 
 	// if the TTL is 0 we don't mess with the checks
-	if options.TTL == time.Duration(0) {
+	if options.Ttl == time.Duration(0) {
 		return nil
 	}
 

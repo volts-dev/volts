@@ -160,7 +160,7 @@ func Default() *TRouter {
 }
 
 func (self *TRouter) PrintRoutes() {
-	if self.Config().PrintRouterTree {
+	if self.Config().RouterTreePrinter {
 		self.tree.PrintTrees()
 	}
 }
@@ -259,7 +259,7 @@ func (self *TRouter) watch() {
 
 		// 无监视者等待
 		if w == nil {
-			time.After(60 * time.Second)
+			time.Sleep(60 * time.Second)
 			continue
 		}
 
@@ -318,7 +318,7 @@ func (self *TRouter) refresh() {
 		}
 		// 无监视者等待
 		if len(services) == 0 {
-			time.After(60 * time.Second)
+			time.Sleep(60 * time.Second)
 			continue
 		}
 
@@ -407,7 +407,7 @@ func (self *TRouter) RegisterGroup(grp ...IGroup) {
 
 func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest) {
 	// 使用defer保证错误也打印
-	if self.config.PrintRequest {
+	if self.config.RequestPrinter {
 		defer func() {
 			log.Infof("[Path]%v", r.URL.Path)
 		}()

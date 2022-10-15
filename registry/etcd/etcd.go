@@ -54,12 +54,14 @@ func configure(e *etcdRegistry) error {
 		Endpoints: []string{"127.0.0.1:2379"}, // etcd 默认地址
 	}
 
+	e.config.Name = e.String()
+
 	if e.config.Timeout == 0 {
 		e.config.Timeout = 5 * time.Second
 	}
 
-	if e.config.Secure || e.config.TLSConfig != nil {
-		tlsConfig := e.config.TLSConfig
+	if e.config.Secure || e.config.TlsConfig != nil {
+		tlsConfig := e.config.TlsConfig
 		if tlsConfig == nil {
 			tlsConfig = &tls.Config{
 				InsecureSkipVerify: true,
@@ -82,7 +84,6 @@ func configure(e *etcdRegistry) error {
 	}
 
 	var cAddrs []string
-
 	for _, address := range e.config.Addrs {
 		if len(address) == 0 {
 			continue
@@ -244,16 +245,16 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	defer cancel()
 
 	var lgr *clientv3.LeaseGrantResponse
-	if options.TTL.Seconds() > 0 {
+	if options.Ttl.Seconds() > 0 {
 		// get a lease used to expire keys since we have a ttl
-		lgr, err = e.client.Grant(ctx, int64(options.TTL.Seconds()))
+		lgr, err = e.client.Grant(ctx, int64(options.Ttl.Seconds()))
 		if err != nil {
 			return err
 		}
 	}
 
 	//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-	log.Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Uid, lgr, lgr.ID, options.TTL)
+	log.Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Uid, lgr, lgr.ID, options.Ttl)
 	//}
 	// create an entry for the node
 	if lgr != nil {

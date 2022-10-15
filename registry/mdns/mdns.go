@@ -67,13 +67,15 @@ func New(opts ...registry.Option) registry.IRegistry {
 		domain = d
 	}
 
-	return &mdnsRegistry{
+	reg := &mdnsRegistry{
 		domain:   domain,
 		config:   cfg,
 		services: make(map[string][]*mdnsEntry),
 		watchers: make(map[string]*mdnsWatcher),
 		listener: make(chan *mdns.ServiceEntry),
 	}
+	reg.config.Name = reg.String()
+	return reg
 }
 
 func encode(txt *mdnsTxt) ([]string, error) {

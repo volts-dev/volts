@@ -20,21 +20,20 @@ var (
 
 type (
 	Option func(*Config)
-
 	Config struct {
 		*config.Config `field:"-"`
 		Logger         logger.ILogger     `field:"-"` // 实例
 		Router         *TRouter           `field:"-"`
 		Registry       registry.IRegistry `field:"-"`
 		RegistryCacher cacher.ICacher     `field:"-"` // registry cache
-		StaticDir      []string           `field:"-"` // the static dir allow to visit
-		StaticExt      []string           `field:"-"` // the static file format allow to visit
 
 		// mapping to config file
-		RecoverHandler  func(IContext) `field:"-"`
-		Recover         bool           `field:"recover"`
-		PrintRouterTree bool           `field:"enabled_print_router_tree"`
-		PrintRequest    bool           `field:"print_request"`
+		RecoverHandler    func(IContext) `field:"-"`
+		Recover           bool           `field:"recover"`
+		RouterTreePrinter bool           `field:"router_tree_printer"`
+		RequestPrinter    bool           `field:"request_printer"`
+		StaticDir         []string       `field:"static_dir"` // the static dir allow to visit
+		StaticExt         []string       `field:"static_ext"` // the static file format allow to visit
 	}
 
 	GroupOption func(*GroupConfig)
@@ -79,10 +78,8 @@ func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *Config) Save() error {
-	return self.Config.Save(
-		config.WithConfig(self),
-	)
+func (self *Config) Save(immed ...bool) error {
+	return self.SaveFromModel(self, immed...)
 }
 
 func WithNameMapper(fn func(string) string) config.Option {
@@ -100,7 +97,7 @@ func WithPprof() Option {
 // Register the service with a TTL
 func WithRoutesTreePrinter() Option {
 	return func(cfg *Config) {
-		cfg.PrintRouterTree = true
+		cfg.RouterTreePrinter = true
 		//cfg.SetValue("print_router_tree", true)
 	}
 }
@@ -108,7 +105,7 @@ func WithRoutesTreePrinter() Option {
 // Register the service with a TTL
 func WithRequestPrinter() Option {
 	return func(cfg *Config) {
-		cfg.PrintRequest = true
+		cfg.RequestPrinter = true
 		//cfg.SetValue("print_request", true)
 	}
 }

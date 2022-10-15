@@ -37,13 +37,12 @@ type (
 		Logger         logger.ILogger  `field:"-"` // 实例
 		Context        context.Context `field:"-"`
 		Service        *Service        `field:"-"` // current service information
+		Name           string
 		Addrs          []string
 		Timeout        time.Duration
 		Secure         bool
-		TLSConfig      *tls.Config
-		// Other options for implementations of the interface
-		// can be stored in a context
-		TTL time.Duration
+		TlsConfig      *tls.Config
+		Ttl            time.Duration
 	}
 
 	WatchConfig struct {
@@ -84,8 +83,8 @@ func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *Config) Save() error {
-	return self.Config.Save(config.WithConfig(self))
+func (self *Config) Save(immed ...bool) error {
+	return self.SaveFromModel(self, immed...)
 }
 
 func Logger() logger.ILogger {
@@ -115,12 +114,12 @@ func Secure(b bool) Option {
 // Specify TLS Config
 func TLSConfig(t *tls.Config) Option {
 	return func(cfg *Config) {
-		cfg.TLSConfig = t
+		cfg.TlsConfig = t
 	}
 }
 
 func RegisterTTL(t time.Duration) Option {
-	return func(o *Config) {
-		o.TTL = t
+	return func(cfg *Config) {
+		cfg.Ttl = t
 	}
 }

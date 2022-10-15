@@ -20,6 +20,7 @@ var (
 	AppPath       string
 	AppFilePath   string
 	AppDir        string
+	AppModuleDir  = "module"
 	cfgs          sync.Map
 	defaultConfig = New(DEFAULT_PREFIX)
 )
@@ -39,7 +40,7 @@ type (
 	IConfig interface {
 		String() string // the Prefix name
 		Load() error
-		Save() error
+		Save(immed ...bool) error // immed mean save to file immediately or not.
 	}
 
 	iConfig interface {
@@ -85,7 +86,7 @@ func (self *Config) checkSelf(c *Config, cfg IConfig) {
 	}
 }
 
-// 添加其他配置
+// 注册添加其他配置
 func (self *Config) Register(cfg IConfig) {
 	if c, ok := cfg.(iConfig); ok {
 		c.checkSelf(self, cfg)
@@ -105,6 +106,18 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
+func (self *Config) Reload() {
+	// 重新加载配置
+	self.models.Range(func(key any, value any) bool {
+		v := value.(IConfig)
+		err := v.Load()
+		if err != nil {
+			log.Fatalf("reload %v config failed!", key)
+		}
+		return true
+	})
+}
+
 func (self *Config) Load(fileName ...string) error {
 	if self.FileName == "" {
 		self.FileName = CONFIG_FILE_NAME
@@ -113,6 +126,15 @@ func (self *Config) Load(fileName ...string) error {
 	self.fmt.v.SetConfigFile(filePath)
 
 	if self.CreateFile && !utils.FileExists(filePath) {
+		// 加载默认配置
+		self.models.Range(func(key any, value any) bool {
+			v := value.(IConfig)
+			err := v.Save(false)
+			if err != nil {
+				log.Fatalf("reload %v config failed!", key)
+			}
+			return true
+		})
 		return self.fmt.v.WriteConfig()
 	}
 	// Find and read the config file
@@ -162,7 +184,7 @@ func (self *Config) Save(opts ...Option) error {
 
 // 从数据类型加载数据
 // 只支持map[string]any 和struct
-func (self *Config) SaveFromModel(model IConfig) error {
+func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 	opts := utils.Struct2ItfMap(model)
 
 	for k, v := range opts {
@@ -172,6 +194,14 @@ func (self *Config) SaveFromModel(model IConfig) error {
 		}
 
 		self.SetValue(strings.Join([]string{model.String(), k}, "."), v)
+	}
+
+	if len(immed) > 0 {
+		// 立即保存
+		on := immed[0]
+		if on {
+			return self.Save()
+		}
 	}
 
 	return nil

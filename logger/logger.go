@@ -8,8 +8,6 @@ import (
 	"sync"
 )
 
-var loggers sync.Map
-
 type (
 	ILogger interface {
 		GetLevel() Level
@@ -42,6 +40,11 @@ type (
 		Config  *Config
 		manager *TWriterManager
 	}
+)
+
+var (
+	loggers sync.Map
+	defualt = New("volts")
 )
 
 // the output like: 2035/01/01 00:00:00 [Prefix][Action] message...

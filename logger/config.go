@@ -9,13 +9,12 @@ type (
 		*config.Config `field:"-"`
 		Level          Level
 		Prefix         string
-		WriteName      string
+		WriterName     string
 	}
 )
 
 var (
 	creators = make(map[string]IWriterType) // 注册的Writer类型函数接口
-	defualt  = New("volts")
 )
 
 func newConfig(opts ...Option) *Config {
@@ -30,7 +29,7 @@ func newConfig(opts ...Option) *Config {
 
 // init options
 func (self *Config) String() string {
-	return "logger"
+	return "logger." + self.Prefix
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -44,13 +43,13 @@ func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *Config) Save() error {
-	return self.Config.Save(config.WithConfig(self))
+func (self *Config) Save(immed ...bool) error {
+	return self.SaveFromModel(self, immed...)
 }
 
 func WithWrite(name string) Option {
 	return func(cfg *Config) {
-		cfg.WriteName = name
+		cfg.WriterName = name
 	}
 }
 

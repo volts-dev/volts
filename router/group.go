@@ -318,7 +318,7 @@ for details please read tree.go
 func (self *TGroup) Url(method string, path string, handlers ...interface{}) *route {
 	if self.config.PrefixPath != "" && path == "//" {
 		// 生成"/abc/"而非"/abc"
-		path = _path.Join(self.config.PrefixPath, path) + path
+		path = _path.Join(self.config.PrefixPath, "") + "/"
 	} else {
 		path = _path.Join(self.config.PrefixPath, path)
 	}

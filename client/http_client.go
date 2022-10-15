@@ -65,7 +65,7 @@ func NewHttpClient(opts ...Option) (*HttpClient, error) {
 
 	p := pool.NewPool(
 		pool.Size(cfg.PoolSize),
-		pool.TTL(cfg.PoolTTL),
+		pool.TTL(cfg.PoolTtl),
 		pool.Transport(cfg.Transport),
 	)
 
@@ -78,8 +78,8 @@ func NewHttpClient(opts ...Option) (*HttpClient, error) {
 	// 代理
 	var dialer proxy.Dialer
 	var err error
-	if cfg.ProxyURL != "" {
-		dialer, err = transport.NewProxyDialer(cfg.ProxyURL, "")
+	if cfg.ProxyUrl != "" {
+		dialer, err = transport.NewProxyDialer(cfg.ProxyUrl, "")
 		if err != nil {
 			return nil, err
 		}
@@ -141,8 +141,8 @@ func (self *HttpClient) Init(opts ...Option) error {
 	}
 
 	// 使用代理
-	if cfg.ProxyURL != "" {
-		cfg.DialOptions = append(cfg.DialOptions, transport.WithProxyURL(cfg.ProxyURL))
+	if cfg.ProxyUrl != "" {
+		cfg.DialOptions = append(cfg.DialOptions, transport.WithProxyURL(cfg.ProxyUrl))
 	}
 
 	self.config.Transport.Init()

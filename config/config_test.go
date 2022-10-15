@@ -28,11 +28,9 @@ func (self *testConfig) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *testConfig) Save() error {
+func (self *testConfig) Save(immed ...bool) error {
 	self.NameValue = "123"
-	return self.Config.Save(
-		WithConfig(self),
-	)
+	return self.SaveFromModel(self, immed...)
 }
 
 func TestLoad(t *testing.T) {

@@ -14,7 +14,7 @@ func pprofGroup() *TGroup {
 		WithGroupPathPrefix(DefaultPrefix),
 	)
 
-	group.Url("GET", "//", pprof.Index)
+	group.Url("GET", "//", pprof.Index) //  "//" will tansfer to "/" like "/debug/pprof/"
 	group.Url("GET", "/cmdline", pprof.Cmdline)
 	group.Url("GET", "/profile", pprof.Profile)
 	group.Url("POST", "/symbol", pprof.Symbol)

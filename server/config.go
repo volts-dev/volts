@@ -108,15 +108,15 @@ func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *Config) Save() error {
-	return nil
+func (self *Config) Save(immed ...bool) error {
+	return self.SaveFromModel(self, immed...)
 }
 
 // under debug mode the port will keep at 35999
 func Debug() Option {
 	return func(cfg *Config) {
-		cfg.Router.Config().PrintRequest = true
-		cfg.Router.Config().PrintRouterTree = true
+		cfg.Router.Config().RequestPrinter = true
+		cfg.Router.Config().RouterTreePrinter = true
 		cfg.Address = ":35999"
 		//...
 	}

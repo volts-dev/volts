@@ -10,9 +10,11 @@ type (
 )
 
 func New() *noopRegistry {
-	return &noopRegistry{
+	reg := &noopRegistry{
 		config: &registry.Config{},
 	}
+	reg.config.Name = reg.String()
+	return reg
 }
 
 func (*noopRegistry) Init(...registry.Option) error {

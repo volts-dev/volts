@@ -10,6 +10,17 @@ import (
 )
 
 type (
+	// SelectOption used when making a select call
+	SelectOption func(*SelectConfig)
+	SelectConfig struct {
+		Filters  []Filter
+		Strategy Strategy
+
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Context context.Context
+	}
+
 	// OptionFn configures options of server.
 	Option func(*Config) error
 	Config struct {
@@ -21,17 +32,6 @@ type (
 		Context  context.Context    `field:"-"`
 		Registry registry.IRegistry `field:"-"`
 		Strategy Strategy           `field:"-"`
-	}
-
-	// SelectOption used when making a select call
-	SelectOption func(*SelectConfig)
-	SelectConfig struct {
-		Filters  []Filter
-		Strategy Strategy
-
-		// Other options for implementations of the interface
-		// can be stored in a context
-		Context context.Context
 	}
 )
 
@@ -62,8 +62,8 @@ func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
 
-func (self *Config) Save() error {
-	return self.Config.Save(config.WithConfig(self))
+func (self *Config) Save(immed ...bool) error {
+	return self.SaveFromModel(self, immed...)
 }
 
 // Registry sets the registry used by the selector

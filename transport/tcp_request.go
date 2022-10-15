@@ -68,6 +68,7 @@ func (self *RpcRequest) Endpoint() string {
 	return self.endpoint
 }
 
+// header 这是通讯协议包中附带的数据，有区别于body内
 func (self *RpcRequest) Header() header.Header {
 	if self.header == nil {
 		for k, v := range self.Message.Header {

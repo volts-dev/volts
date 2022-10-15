@@ -210,7 +210,7 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 
 func (c *cache) set(service string, services []*registry.Service) {
 	c.cache[service] = services
-	c.ttls[service] = time.Now().Add(c.config.TTL)
+	c.ttls[service] = time.Now().Add(c.config.Ttl)
 }
 
 func (c *cache) update(res *registry.Result) {

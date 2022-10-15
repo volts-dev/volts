@@ -77,8 +77,8 @@ func Name(name string) Option {
 func Debug() Option {
 	return func(cfg *Config) {
 		srvCfg := cfg.Server.Config()
-		srvCfg.Router.Config().PrintRequest = true
-		srvCfg.Router.Config().PrintRouterTree = true
+		srvCfg.Router.Config().RequestPrinter = true
+		srvCfg.Router.Config().RouterTreePrinter = true
 		srvCfg.Address = ":35999"
 		//...
 	}
