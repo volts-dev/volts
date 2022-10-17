@@ -23,6 +23,7 @@ type (
 
 	Config struct {
 		*config.Config `field:"-"`
+		Uid            string   `field:"-"` // 实例
 		Bus            bus.IBus `field:"-"` // 实例
 		//Tracer    trace.Tracer
 		Registry  registry.IRegistry   `field:"-"` // 实例
@@ -41,9 +42,8 @@ type (
 		//  host address ":35999"
 		Address          string
 		Advertise        string
-		Uid              string
 		Version          string
-		RegisterTTL      time.Duration // The register expiry time
+		RegisterTTL      time.Duration `field:"register_ttl"` // The register expiry time
 		RegisterInterval time.Duration // The interval on which to register
 		AutoCreate       bool          //自动创建实例
 	}
@@ -99,7 +99,7 @@ func (self *Config) Init(opts ...Option) {
 		self.Router = vrouter.New()
 	}
 
-	if self.Registry == nil && self.AutoCreate {
+	if self.Registry == nil {
 		self.Registry = noop.New()
 	}
 }

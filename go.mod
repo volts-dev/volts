@@ -11,11 +11,12 @@ require (
 	github.com/miekg/dns v1.1.50
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/refraction-networking/utls v1.1.2
+	github.com/spf13/cast v1.5.0
 	github.com/spf13/viper v1.13.0
 	github.com/vmihailenco/msgpack/v5 v5.3.5
-	github.com/volts-dev/dataset v0.0.0-20220820110417-fb569fdfcef0
+	github.com/volts-dev/dataset v0.0.0-20221017030057-c957faa1ac94
 	github.com/volts-dev/template v0.0.0-20220923131231-994e9075ae95
-	github.com/volts-dev/utils v0.0.0-20221011112847-200c138184c5
+	github.com/volts-dev/utils v0.0.0-20221016185110-2b8319f61f5a
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
@@ -47,13 +48,11 @@ require (
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.5 // indirect
 	github.com/spf13/afero v1.8.2 // indirect
-	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/volts-dev/cacher v0.0.0-20220923021026-8c0ad5f82b30 // indirect
-	github.com/volts-dev/logger v0.0.0-20210803162057-18754d780c31 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect

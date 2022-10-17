@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spf13/cast"
 	"github.com/volts-dev/utils"
 )
 
@@ -142,6 +143,7 @@ func (self *Config) Load(fileName ...string) error {
 	return self.fmt.v.ReadInConfig()
 }
 
+// TODO 支持字段结构
 // save settings data from the config model
 func (self *Config) LoadToModel(model IConfig) error {
 	mapper := utils.NewStructMapper(model)
@@ -154,9 +156,42 @@ func (self *Config) LoadToModel(model IConfig) error {
 		// 字段赋值
 		key := strings.Join([]string{model.String(), utils.SnakeCasedName(field.Name())}, ".")
 		if val := self.fmt.v.Get(key); val != nil {
+			log.Println(field.Value())
+			// 初始化值以供接下来转换
+			if field.Value() == nil {
+				if err := field.Zero(); err != nil {
+					log.Fatal(err)
+				}
+			}
+
+			// 转换类型
+			switch field.Kind() {
+			case reflect.Bool:
+				val = cast.ToBool(val)
+			case reflect.String:
+				val = cast.ToString(val)
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				field.SetInt(cast.ToInt64(val))
+				continue
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				field.SetUint(cast.ToUint64(val))
+				continue
+			case reflect.Float64, reflect.Float32:
+				val = cast.ToFloat64(val)
+			default:
+				switch field.Value().(type) {
+				case time.Time:
+					val = cast.ToTime(val)
+				case []string:
+					val = cast.ToStringSlice(val)
+				case []int:
+					val = cast.ToIntSlice(val)
+				}
+			}
+
 			err := field.Set(val)
 			if err != nil {
-				log.Fatalf("load to model failed! %s %v", key, self.fmt.v.Get(key))
+				log.Fatalf("load to model failed! Key:%s Value:%v Err:%s", key, self.fmt.v.Get(key), err.Error())
 			}
 		}
 

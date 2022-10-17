@@ -1,11 +1,17 @@
 package config
 
-import "testing"
+import (
+	"log"
+	"testing"
+	"time"
+)
 
 type (
 	testConfig struct {
 		*Config
 		NameValue string `field:"name_value"`
+		Expiry    time.Duration
+		Mode      ModeType
 	}
 )
 
@@ -25,7 +31,9 @@ func (self *testConfig) String() string {
 }
 
 func (self *testConfig) Load() error {
-	return self.LoadToModel(self)
+	self.LoadToModel(self)
+	log.Println(self.Expiry, self.Mode)
+	return nil
 }
 
 func (self *testConfig) Save(immed ...bool) error {
