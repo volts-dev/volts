@@ -21,7 +21,11 @@ var codecs = make(map[SerializeType]ICodec)
 var names = make(map[string]SerializeType)
 
 func (self SerializeType) String() string {
-	return codecs[self].String()
+	if c, has := codecs[self]; has {
+		return c.String()
+	}
+
+	return "Unknown"
 }
 
 // RegisterCodec register customized codec.

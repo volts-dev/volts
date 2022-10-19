@@ -19,7 +19,7 @@ import (
 )
 
 var defaultRouter *TRouter
-var log = logger.New("Router")
+var log = logger.New("router")
 
 type (
 	// Router handle serving messages
@@ -500,17 +500,17 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
 	serviceName := reqMessage.Header["ServicePath"]
 	//methodName := msg.ServiceMethod
-
+	st := reqMessage.SerializeType()
 	res := transport.GetMessageFromPool()
 	res.SetMessageType(transport.MT_RESPONSE)
-	res.SetSerializeType(reqMessage.SerializeType())
+	res.SetSerializeType(st)
 
 	var coder codec.ICodec
 	var ctx *TRpcContext
 	// 获取支持的序列模式
-	coder = codec.IdentifyCodec(res.SerializeType())
+	coder = codec.IdentifyCodec(st)
 	if coder == nil {
-		log.Warnf("can not find codec for %v", res.SerializeType())
+		log.Warnf("can not find codec for %s", st.String())
 		return
 		//handleError(res, err)
 	} else {

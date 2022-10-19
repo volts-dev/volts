@@ -115,9 +115,9 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		transport.WithStream(),
 	}
 
-	//if opts.DialTimeout >= 0 {
-	//	dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout))
-	//}
+	if opts.DialTimeout >= 0 {
+		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout))
+	}
 
 	// 获取空闲链接
 	conn, err := self.pool.Get(address, dOpts...)

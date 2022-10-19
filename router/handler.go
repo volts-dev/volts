@@ -43,7 +43,7 @@ type (
 	// 控制器配置 可实现特殊功能
 	// 功能：中间件过滤器
 	ControllerConfig struct {
-		midFilter map[string][]string
+		midFilter map[string][]string // TODO sync
 	}
 
 	handle struct {
@@ -100,7 +100,13 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 	if self.midFilter == nil {
 		self.midFilter = make(map[string][]string)
 	}
-	self.midFilter[middleware] = handlers
+	lst := self.midFilter[middleware]
+	for _, name := range handlers {
+		if utils.InStrings(name, lst...) == -1 {
+			lst = append(lst, name)
+		}
+	}
+	self.midFilter[middleware] = lst
 }
 
 func GetFuncName(i interface{}, seps ...rune) string {

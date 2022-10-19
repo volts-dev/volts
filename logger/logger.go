@@ -122,7 +122,7 @@ func All() []ILogger {
 
 // 断言如果结果和条件不一致就错误
 func Assert(cnd bool, format string, args ...interface{}) {
-	if !cnd {
+	if cnd {
 		panic(fmt.Sprintf(format, args...))
 	}
 }

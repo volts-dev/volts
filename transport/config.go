@@ -50,7 +50,7 @@ type (
 		// multiple calls to send/recv and that send may not even be called
 		Stream bool
 		// Timeout for dialing
-		//Timeout time.Duration
+		Timeout time.Duration
 
 		// TODO: add tls options when dialling
 		// Currently set in global options
@@ -179,6 +179,12 @@ func WithContext(ctx context.Context) DialOption {
 func WithStream() DialOption {
 	return func(o *DialConfig) {
 		o.Stream = true
+	}
+}
+
+func WithTimeout(dialTimeout time.Duration) DialOption {
+	return func(cfg *DialConfig) {
+		cfg.Timeout = dialTimeout
 	}
 }
 

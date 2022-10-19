@@ -25,7 +25,7 @@ func NewTCPTransport(opts ...Option) ITransport {
 
 func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	cfg := DialConfig{
-		//Timeout: t.config.ConnectTimeout,
+		Timeout: self.config.ConnectTimeout,
 	}
 
 	for _, opt := range opts {
@@ -43,9 +43,9 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 				InsecureSkipVerify: true,
 			}
 		}
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: cfg.Timeout}, "tcp", addr, config)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, self.config.ConnectTimeout)
+		conn, err = net.DialTimeout("tcp", addr, cfg.Timeout)
 	}
 
 	if err != nil {

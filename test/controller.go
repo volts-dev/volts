@@ -16,7 +16,7 @@ type (
 )
 
 func (ctrl CtrlWithMiddleware) Init(cfg *router.ControllerConfig) {
-	cfg.AddFilter("session", "WithoutMiddlware")
+	cfg.AddFilter(ctrl.Session.Name(), "WithoutMiddlware")
 }
 
 func (ctrl CtrlWithMiddleware) Before(ctx *router.THttpContext) {
