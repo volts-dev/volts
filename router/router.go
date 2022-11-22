@@ -225,9 +225,9 @@ func (self *TRouter) store(services []*registry.Service) {
 				//path = sep.Metadata["path"]
 				r := EndpiontToRoute(sep)
 				if utils.InStrings("CONNECT", sep.Method...) > 0 {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, []interface{}{RpcReverseProxy}, []*registry.Service{service}))
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, []*registry.Service{service}))
 				} else {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, []interface{}{HttpReverseProxy}, []*registry.Service{service}))
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, []*registry.Service{service}))
 				}
 
 				err := self.tree.AddRoute(r)
@@ -514,7 +514,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 		//handleError(res, err)
 	} else {
-		route, _ := self.tree.Match("CONNECT", reqMessage.Path) // 匹配路由树
+		route, params := self.tree.Match("CONNECT", reqMessage.Path) // 匹配路由树
 		if route == nil {
 			err = errors.New("rpc: can't match route " + serviceName)
 			handleError(res, err)
@@ -536,7 +536,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 				ctx.inited = true
 			}
 			ctx.reset(w, r, self, route)
-
+			ctx.setPathParams(params)
 			// 执行控制器
 			self.route(route, ctx)
 		}
@@ -586,17 +586,8 @@ func (self *TRouter) route(route *route, ctx IContext) {
 	}()
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	var handler *handler
 	for _, h := range route.handlers {
-		handler = h.New(self)
-		ctx.setHandler(handler)
-
-		if handler.Type == LocalHandler {
-		}
-
-		ctx.Next()
-
 		// TODO 回收需要特殊通道 直接调用占用了处理时间
-		handler.Recycle()
+		h.Init(self).Invoke(ctx).Recycle()
 	}
 }

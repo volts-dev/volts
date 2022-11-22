@@ -13,16 +13,16 @@ import (
 )
 
 /*
-	tree 负责路由树的解析,排序,匹配
-	实现前面加类型
-	'/web/content/<string:xmlid>',
-	'/web/content/<string:xmlid>/<string:filename>',
-	'/web/content/<int:id>',
-	'/web/content/<int:id>/<string:filename>',
-	'/web/content/<int:id>-<string:unique>',
-	'/web/content/<int:id>-<string:unique>/<string:filename>',
-	'/web/content/<string:model>/<int:id>/<string:field>',
-	'/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
+tree 负责路由树的解析,排序,匹配
+实现前面加类型
+'/web/content/<string:xmlid>',
+'/web/content/<string:xmlid>/<string:filename>',
+'/web/content/<int:id>',
+'/web/content/<int:id>/<string:filename>',
+'/web/content/<int:id>-<string:unique>',
+'/web/content/<int:id>-<string:unique>/<string:filename>',
+'/web/content/<string:model>/<int:id>/<string:field>',
+'/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
 */
 const (
 	StaticNode  NodeType = iota // static, should equal
@@ -481,7 +481,6 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 	return nil
 }
 
-//
 func (self *TTree) Endpoints() []*registry.Endpoint {
 	eps := make([]*registry.Endpoint, 0)
 	checker := make(map[string]*route)
@@ -799,5 +798,12 @@ func printNode(buf *bytes.Buffer, i int, node *treeNode) {
 		}
 		buf.WriteString("\n")
 		printNode(buf, i+1, c)
+	}
+}
+
+// 忽略大小写
+func WithIgnoreCase() ConfigOption {
+	return func(tree *TTree) {
+		tree.IgnoreCase = true
 	}
 }

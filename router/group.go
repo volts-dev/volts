@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	_path "path"
 	"path/filepath"
 	"reflect"
@@ -59,13 +60,15 @@ type (
 	}
 )
 
-/*    """Return the path of the given module.
+/*
+	"""Return the path of the given module.
 
 Search the addons paths and return the first path where the given
 module is found. If downloaded is True, return the default addons
 path if nothing else is found.
 
-"""*/
+"""
+*/
 func GetModulePath(module string, downloaded bool, display_warning bool) (res string) {
 
 	// initialize_sys_path()
@@ -154,7 +157,7 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 	return isExported(t.Name()) || t.PkgPath() == ""
 }
 
-// get current file path without file name
+// get current source codes file path without file name
 func curFilePath(skip int) (string, string) {
 	/*s := 0
 	for {
@@ -177,11 +180,11 @@ func curFilePath(skip int) (string, string) {
 		return config.AppPath, "" // filepath.Base(AppPath)
 	}
 
-	// 确保路径在APP内
-	if !strings.HasPrefix(filePath, config.AppPath) {
-		//logger.Panicf("Get current group path failed!")
-		return "", ""
-	}
+	// 废除 有BUG // 确保路径在APP内
+	//if !strings.HasPrefix(filePath, config.AppPath) {
+	//	log.Err("Get current group path failed!")
+	//	return "", ""
+	//}
 
 	return filePath, dirName
 }
@@ -205,12 +208,11 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	grp := &TGroup{
 		config:      cfg,
 		TemplateVar: newTemplateVar(),
-		tree:        NewRouteTree(),
+		tree:        NewRouteTree(WithIgnoreCase()),
 		path:        _path.Join("/", cfg.Name),
 	}
 
 	// init router tree
-	grp.tree.IgnoreCase = true
 	grp.SetStatic("/static")
 	return grp
 }
@@ -228,10 +230,12 @@ func (self *TGroup) GetPath() string {
 	return self.path
 }
 
+// 获取组的绝对路径
 func (self *TGroup) GetFilePath() string {
 	return self.config.FilePath
 }
 
+// 获取组的链接路径
 func (self *TGroup) SetPath(path string) {
 	self.path = path
 }
@@ -245,30 +249,35 @@ func (self *TGroup) SetFilePath(path string) {
 // of the Router's NotFound handler.
 // To use the operating system's file system implementation,
 // use :
-//     router.Static("/static", "/var/www")
+//
+//	router.Static("/static", "/var/www")
 func (self *TGroup) SetStatic(relativePath string, root ...string) {
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
 		panic("URL parameters can not be used when serving a static folder")
 	}
 
-	filePath := self.config.FilePath
+	fp := self.config.FilePath
 	if len(root) > 0 {
-		filePath = root[0]
+		fp = root[0]
 	}
 
-	fs := http.Dir(_path.Join(filePath, relativePath))                         // the filesystem path
-	absolutePath := _path.Join(self.config.PrefixPath, relativePath)           // the url path
-	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))          // binding a file server
-	self.SetTemplateVar(relativePath[1:], _path.Join(self.path, relativePath)) // set the template var value
+	fs := http.Dir(_path.Join(fp, relativePath)) // the filesystem path
+	// 模版变量
+	urlPattern := _path.Join(self.path, relativePath)
+	self.SetTemplateVar(relativePath[1:], urlPattern)                 // set the template var value
+	absolutePath := _path.Join(self.config.PrefixPath, urlPattern)    // the url path
+	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs)) // binding a file server
 
 	handler := func(c *THttpContext) {
-		file := c.pathParams.FieldByName("filepath").AsString()
+		file := filepath.Join(c.pathParams.FieldByName("filepath").AsString())
 		// Check if file exists and/or if we have permission to access it
 		if _, err := fs.Open(file); err != nil {
 			// 对最后一个控制器返回404
 			if c.handlerIndex == len(c.route.handlers)-1 {
 				c.response.WriteHeader(http.StatusNotFound)
 			}
+
+			log.Err(err)
 			return
 		}
 
@@ -276,8 +285,9 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		c.Apply() //已经服务当前文件并结束
 	}
 
-	urlPattern := _path.Join(self.config.PrefixPath, relativePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
-	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, handler)
+	// 路由路径
+	urlPattern = _path.Join(self.config.PrefixPath, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
+	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, []any{handler})
 }
 
 // StaticFile registers a single route in order to serve a single file of the local filesystem.
@@ -315,7 +325,11 @@ Example: string:id only match "abc"
 '/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
 for details please read tree.go
 */
-func (self *TGroup) Url(method string, path string, handlers ...interface{}) *route {
+// @handlers 第一个将会被用于主要控制器其他将被归为中间件
+// @method:
+//			API:会映射所有对象符合要求的控制器作为API发布
+//			REST:会映射所有对象符合要求的create, read, update, and delete控制器作为Restful发布
+func (self *TGroup) Url(method string, path string, handlers ...any) *route {
 	if self.config.PrefixPath != "" && path == "//" {
 		// 生成"/abc/"而非"/abc"
 		path = _path.Join(self.config.PrefixPath, "") + "/"
@@ -326,14 +340,13 @@ func (self *TGroup) Url(method string, path string, handlers ...interface{}) *ro
 	method = strings.ToUpper(method)
 	switch method {
 	case "GET":
-		return self.addRoute(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, handlers...)
-
-	case "REST", "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE":
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers...)
-
+		return self.addRoute(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
+	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE":
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
 	case "CONNECT": // RPC or WS
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers...)
-
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
+	case "REST", "RPC":
+		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
 	default:
 		log.Fatalf("the params in Module.Url() %v:%v is invaild", method, path)
 	}
@@ -344,7 +357,7 @@ func (self *TGroup) Url(method string, path string, handlers ...interface{}) *ro
 /*
 pos: true 为插入Before 反之After
 */
-func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, handlers ...interface{}) *route {
+func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, methods []string, url *TUrl, handlers []any, mids ...any) *route {
 	// check vaild
 	if hanadlerType != ProxyHandler && len(handlers) == 0 {
 		panic("the route must binding a controller!")
@@ -353,18 +366,16 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	var hd *handler
 	h := handlers[0]
 	switch v := h.(type) {
-	case func(*THttpContext), func(*TRpcContext):
-		hd = generateHandler(hanadlerType, handlers, nil)
+	case func(*TRpcContext):
+		hd = generateHandler(hanadlerType, RpcHandler, handlers, mids, nil)
+	case func(*THttpContext):
+		hd = generateHandler(hanadlerType, HttpHandler, handlers, mids, nil)
 	case func(http.ResponseWriter, *http.Request):
-		hds := append([]interface{}{WrapFn(v)}, handlers[1:]...)
-		hd = generateHandler(hanadlerType, hds, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, nil)
 	case http.HandlerFunc:
-		hds := append([]interface{}{WrapFn(v)}, handlers[1:]...)
-		hd = generateHandler(hanadlerType, hds, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, nil)
 	case http.Handler:
-
-		hds := append([]interface{}{WrapHd(v)}, handlers[1:]...)
-		hd = generateHandler(hanadlerType, hds, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapHd(v)}, mids, nil)
 	default:
 		// init Value and Type
 		ctrlValue, ok := h.(reflect.Value)
@@ -385,28 +396,34 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			objName := utils.DotCasedName(utils.Obj2Name(h))
 			var name string
 			var method reflect.Value
-			isREST := utils.InStrings("REST", methods...) > -1
+			var contextType reflect.Type
+			useREST := utils.InStrings("REST", methods...) > -1
+			useRPC := utils.InStrings("RPC", methods...) > -1
 			for i := 0; i < ctrlType.NumMethod(); i++ {
 				// get the method information from the ctrl Type
 				name = ctrlType.Method(i).Name
 				method = ctrlType.Method(i).Func
 
 				// 忽略非handler方法
-				if method.Type().In(1) != HttpContextType && method.Type().In(1) != RpcContextType {
+				if method.Type().NumIn() <= 1 {
 					continue
 				}
 
 				if method.CanInterface() {
+					contextType = method.Type().In(1)
 					// 添加注册方法
-					if isREST {
+					if useREST && (contextType == HttpContextType || contextType == ContextType) {
 						// 方法为对象方法名称 url 只注册对象名称
-						// name 为GET POST DELETE等
-						ul := &TUrl{Path: url.Path, Controller: objName, Action: name}
-						self.addRoute(position, hanadlerType, []string{name}, ul, method)
-					} else {
-						name = NameMapper(name)
+						// name 为create, read, update, and delete (CRUD)等
+						name = NameMapper(name) // 名称格式化
+						ul := &TUrl{Path: path.Join(url.Path, name), Controller: objName, Action: name}
+						self.addRoute(position, hanadlerType, []string{"GET", "POST"}, ul, []any{method}, mids...)
+					}
+
+					if useRPC && (contextType == RpcContextType || contextType == ContextType) {
+						name = NameMapper(name) // 名称格式化
 						ul := &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}
-						self.addRoute(position, hanadlerType, methods, ul, method)
+						self.addRoute(position, hanadlerType, []string{"CONNECT"}, ul, []any{method}, mids...)
 					}
 				}
 			}
@@ -424,14 +441,15 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			// RPC route validate
 			if utils.InStrings("CONNECT", methods...) > -1 {
 				ctxType := ctrlType.In(1)
-				if ctxType != RpcContextType {
+				if ctxType != RpcContextType && ctxType != ContextType {
 					log.Fatalf("method %s must use context pointer as the first parameter", url.Action)
 					return nil
 				}
+				hd = generateHandler(hanadlerType, RpcHandler, []interface{}{ctrlValue}, mids, nil)
+			} else {
+				hd = generateHandler(hanadlerType, HttpHandler, []interface{}{ctrlValue}, mids, nil)
 			}
-			//var parm reflect.Type
-			hd = generateHandler(hanadlerType, []interface{}{ctrlValue}, nil)
-			break
+
 		default:
 			log.Fatal("controller must be func or bound method")
 		}

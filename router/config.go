@@ -1,6 +1,8 @@
 package router
 
 import (
+	"strings"
+
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
@@ -15,7 +17,7 @@ const (
 )
 
 var (
-	NameMapper = func(name string) string { return name }
+	NameMapper = func(name string) string { return strings.ToLower(name) }
 )
 
 type (
@@ -38,9 +40,9 @@ type (
 
 	GroupOption func(*GroupConfig)
 	GroupConfig struct {
-		Name       string
+		Name       string // 当前源代码文件夹名称
 		PrefixPath string
-		FilePath   string // 当前文件夹名称
+		FilePath   string // 当前源代码文件夹路径
 	}
 )
 

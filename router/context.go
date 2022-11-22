@@ -24,6 +24,7 @@ type (
 		Next()
 		Body() *body.TBody
 		Data() *TParamsSet
+		PathParams() *TParamsSet
 		Write([]byte) (int, error)
 		WriteStream(interface{}) error
 		Route() route

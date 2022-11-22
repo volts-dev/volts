@@ -42,6 +42,7 @@ func (self *THttpResponse) WriteHeader(s int) {
 
 func (self *THttpResponse) Write(b []byte) (int, error) {
 	size, err := self.ResponseWriter.Write(b)
+	self.status = http.StatusOK // 至少不是0
 	self.size += size
 	return size, err
 }

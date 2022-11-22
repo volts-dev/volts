@@ -180,7 +180,7 @@ func (self *THttpContext) setHandler(h *handler) {
 	self.handler = h
 }
 
-//TODO 添加验证Request 防止多次解析
+// TODO 添加验证Request 防止多次解析
 func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 	var useBlank bool
 	if len(blank) > 0 {
@@ -253,7 +253,7 @@ func (self *THttpContext) String() string {
 }
 
 // 值由Router 赋予
-//func (self *THttpContext) setPathParams(name, val string) {
+// func (self *THttpContext) setPathParams(name, val string) {
 func (self *THttpContext) setPathParams(p Params) {
 	// init dy url parm to handler
 	if len(p) > 0 {
@@ -402,13 +402,13 @@ func (self *THttpContext) RemoteAddr() string {
 	return addr
 }
 
-//SetCookie Sets the header entries associated with key to the single element value. It replaces any existing values associated with key.
-//一个cookie  有名称,内容,原始值,域,大小,过期时间,安全
-//cookie[0] => name string
-//cookie[1] => value string
-//cookie[2] => expires string
-//cookie[3] => path string
-//cookie[4] => domain string
+// SetCookie Sets the header entries associated with key to the single element value. It replaces any existing values associated with key.
+// 一个cookie  有名称,内容,原始值,域,大小,过期时间,安全
+// cookie[0] => name string
+// cookie[1] => value string
+// cookie[2] => expires string
+// cookie[3] => path string
+// cookie[4] => domain string
 func (self *THttpContext) SetCookie(name string, value string, others ...interface{}) {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%s=%s", sanitizeCookieName(name), sanitizeCookieValue(value))
@@ -629,13 +629,13 @@ func (self *THttpContext) SetTemplateVar(key string, value interface{}) {
 
 // Responds with 404 Not Found
 func (self *THttpContext) RespondWithNotFound(message ...string) {
+	self.isDone = true
 	self.response.WriteHeader(http.StatusNotFound)
 	if len(message) == 0 {
 		self.response.Write([]byte(http.StatusText(http.StatusNotFound)))
 		return
 	}
 	self.response.Write([]byte(message[0]))
-	self.isDone = true
 }
 
 func singleJoiningSlash(a, b string) string {

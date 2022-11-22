@@ -24,7 +24,8 @@ type (
 		request      *transport.RpcRequest  //
 		router       *TRouter
 		data         *TParamsSet // 数据缓存在各个Controler间调用
-		route        route       //执行本次Handle的Route
+		pathParams   *TParamsSet
+		route        route //执行本次Handle的Route
 		inited       bool
 		handlerIndex int
 		handler      *handler
@@ -142,6 +143,7 @@ func (self *TRpcContext) RespondByJson(data interface{}) {
 
 	self.response.Write(js)
 }
+
 func (self *TRpcContext) Next() {
 	self.handler.Invoke(self)
 }
@@ -152,6 +154,21 @@ func (self *TRpcContext) Data() *TParamsSet {
 	}
 
 	return self.data
+}
+
+func (self *TRpcContext) PathParams() *TParamsSet {
+	return self.pathParams
+}
+
+func (self *TRpcContext) setPathParams(p Params) {
+	// init dy url parm to handler
+	if len(p) > 0 {
+		self.pathParams = NewParamsSet(self)
+	}
+
+	for _, param := range p {
+		self.pathParams.FieldByName(param.Name).AsInterface(param.Value)
+	}
 }
 
 func (self *TRpcContext) setHandler(h *handler) {
