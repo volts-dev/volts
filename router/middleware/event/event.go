@@ -28,8 +28,8 @@ func (self *TEvent) Name() string {
 }
 
 func (self *TEvent) Handler(ctx router.IContext) {
-	ctrl := ctx.Data().FieldByName("controller").AsInterface()
-	switch v := ctx.(type) {
+	ctrl := ctx.Handler().Controller()
+	switch v := ctrl.(type) {
 	case *router.THttpContext:
 		if c, ok := ctrl.(httpEvent); ok {
 			c.Before(v)

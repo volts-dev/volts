@@ -120,7 +120,7 @@ func All() []ILogger {
 	return logs
 }
 
-// 断言如果结果和条件不一致就错误
+// 断言！如果条件成立报告错误
 func Assert(cnd bool, format string, args ...interface{}) {
 	if cnd {
 		panic(fmt.Sprintf(format, args...))

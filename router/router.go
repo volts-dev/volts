@@ -225,9 +225,9 @@ func (self *TRouter) store(services []*registry.Service) {
 				//path = sep.Metadata["path"]
 				r := EndpiontToRoute(sep)
 				if utils.InStrings("CONNECT", sep.Method...) > 0 {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, []*registry.Service{service}))
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, nil, []*registry.Service{service}))
 				} else {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, []*registry.Service{service}))
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, nil, []*registry.Service{service}))
 				}
 
 				err := self.tree.AddRoute(r)
@@ -588,6 +588,6 @@ func (self *TRouter) route(route *route, ctx IContext) {
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
 	for _, h := range route.handlers {
 		// TODO 回收需要特殊通道 直接调用占用了处理时间
-		h.Init(self).Invoke(ctx).Recycle()
+		h.init(self).Invoke(ctx).recycle()
 	}
 }

@@ -19,6 +19,10 @@ var deflautHandlerManager = newHandlerManager()
 type HandlerType byte
 type TransportType byte
 
+func (self HandlerType) String() string {
+	return [...]string{"LocalHandler", "ProxyHandler"}[self]
+}
+
 const (
 	// type of handler
 	LocalHandler HandlerType = iota
@@ -64,16 +68,16 @@ type (
 		FuncName      string        // handler方法名称
 		Type          HandlerType   // Route 类型 决定合并的形式
 		TransportType TransportType //
-		Pos           int           // current handle position
+		pos           int           // current handle position
 
 		// 多处理器包括中间件
-		Funcs []*handle
+		funcs []*handle
 
 		// 控制器提供[结构控制器]数据和中间件载体
-		CtrlType  reflect.Type  // 供生成新的控制器
-		CtrlName  string        // 区别不同[结构型控制器]
-		CtrlValue reflect.Value // 每个handler的控制器必须是唯一的
-		CtrlModel interface{}   // 提供Ctx特殊调用
+		ctrlType  reflect.Type  // 供生成新的控制器
+		ctrlName  string        // 区别不同[结构型控制器]
+		ctrlValue reflect.Value // 每个handler的控制器必须是唯一的
+		ctrlModel interface{}   // 提供Ctx特殊调用
 	}
 )
 
@@ -101,10 +105,6 @@ func WrapHd(h http.Handler) func(*THttpContext) {
 	return func(ctx *THttpContext) {
 		h.ServeHTTP(ctx.response.ResponseWriter, ctx.request.Request)
 	}
-}
-
-func (self HandlerType) String() string {
-	return [...]string{"LocalHandler", "ProxyHandler"}[self]
 }
 
 // add which middleware name blocked handler name
@@ -158,31 +158,34 @@ func newHandlerManager() *handlerManager {
 */
 // 生成handler原型
 // NOTE:不可用于实时环境
-func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any, middlewares []any, services []*registry.Service) *handler {
+func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, services []*registry.Service) *handler {
 	httpFn := func(h *handler, middlewares []any) {
 		for _, mid := range middlewares {
-			if v, ok := mid.(func(*THttpContext)); ok {
-				//h.HttpFuncs = append(h.HttpFuncs, v)
-				h.Funcs = append(h.Funcs, &handle{IsFunc: true, HttpFunc: v})
-				continue
-			}
-			// 创建新的中间件状态实例并调用传递中间件
-			if midCreator, ok := mid.(func() IMiddleware); ok {
-				middleware := midCreator()
-				h.Funcs = append(h.Funcs, &handle{IsFunc: true, Middleware: middleware, HttpFunc: WrapHttp(midCreator().Handler)})
+			switch v := mid.(type) {
+			case func(IContext):
+				h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
+			case func(*THttpContext):
+				h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: v})
+			case func() IMiddleware: // 创建新的中间件状态实例并调用传递中间件
+				middleware := v()
+				h.funcs = append(h.funcs, &handle{IsFunc: true, Middleware: middleware, HttpFunc: WrapHttp(middleware.Handler)})
+			default:
+				log.Errf("unknow middleware %v", v)
 			}
 		}
 	}
 	rpcFn := func(h *handler, middlewares []any) {
 		for _, mid := range middlewares {
-			if v, ok := mid.(func(*TRpcContext)); ok {
-				h.Funcs = append(h.Funcs, &handle{IsFunc: true, RpcFunc: v})
-				continue
-			}
-			// 转换中间件
-			if midCreator, ok := mid.(func() IMiddleware); ok {
-				middleware := midCreator()
-				h.Funcs = append(h.Funcs, &handle{IsFunc: true, Middleware: middleware, RpcFunc: WrapRpc(midCreator().Handler)})
+			switch v := mid.(type) {
+			case func(IContext):
+				h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
+			case func(*TRpcContext):
+				h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: v})
+			case func() IMiddleware:
+				middleware := v()
+				h.funcs = append(h.funcs, &handle{IsFunc: true, Middleware: middleware, RpcFunc: WrapRpc(middleware.Handler)})
+			default:
+				log.Errf("unknow middleware %v", v)
 			}
 		}
 	}
@@ -191,7 +194,7 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 		Config:   &ControllerConfig{},
 		Type:     hanadlerType,
 		Services: services,
-		Pos:      -1,
+		pos:      -1,
 	}
 	// 生成唯一标识用于缓存
 	h.Name = GetFuncName(handlers[0], filepath.Separator)
@@ -201,11 +204,11 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 	case func(*THttpContext):
 		h.TransportType = HttpHandler
 		httpFn(h, middlewares)
-		h.Funcs = append(h.Funcs, &handle{IsFunc: true, HttpFunc: val})
+		h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: val})
 	case func(*TRpcContext):
 		h.TransportType = RpcHandler
 		rpcFn(h, middlewares)
-		h.Funcs = append(h.Funcs, &handle{IsFunc: true, RpcFunc: val})
+		h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: val})
 	case reflect.Value:
 		// 以下处理带控制器的处理器
 		// Example: ctroller.method
@@ -218,21 +221,27 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 			log.Panicf("the handler %s receiver must not be a pointer and with HTTP/RPC context!", h.Name)
 		}
 		// 这是控制器上的某个方法 提取控制器和中间件
-		h.CtrlType = handlerType.In(0)
-		if h.CtrlType.Kind() == reflect.Pointer {
-			h.CtrlType = h.CtrlType.Elem()
+		h.ctrlType = handlerType.In(0)
+		if h.ctrlType.Kind() == reflect.Pointer {
+			h.ctrlType = h.ctrlType.Elem()
 		}
-		h.CtrlName = h.CtrlType.Name()
+
+		// 变更控制器名称
+		if url.Controller != "" {
+			h.ctrlName = url.Controller
+		} else {
+			h.ctrlName = h.ctrlType.Name()
+		}
 
 		// 检测获取绑定的handler
 		h.FuncName = GetFuncName(handlers[0], '.')
 		if !utils.IsStartUpper(h.FuncName) {
-			log.Dbgf("the handler %s.%s must start with upper letter!", h.CtrlName, h.FuncName)
+			log.Dbgf("the handler %s.%s must start with upper letter!", h.ctrlName, h.FuncName)
 		}
 
-		hd, ok := h.CtrlType.MethodByName(h.FuncName)
+		hd, ok := h.ctrlType.MethodByName(h.FuncName)
 		if !ok {
-			log.Dbgf("handler %s not exist in controller %s!", h.FuncName, h.CtrlType.Name())
+			log.Dbgf("handler %s not exist in controller %s!", h.FuncName, h.ctrlType.Name())
 		}
 
 		h.TransportType = tt
@@ -247,10 +256,10 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 		/*
 			var midVal reflect.Value
 			//var midhd reflect.Value
-			for i := 0; i < h.CtrlValue.NumField(); i++ {
-				midVal = h.CtrlValue.Field(i) // get the middleware value
+			for i := 0; i < h.ctrlValue.NumField(); i++ {
+				midVal = h.ctrlValue.Field(i) // get the middleware value
 
-				if midVal.Kind() == reflect.Struct && h.CtrlValue.Type().Field(0).Name == midVal.Type().Name() {
+				if midVal.Kind() == reflect.Struct && h.ctrlValue.Type().Field(0).Name == midVal.Type().Name() {
 					// 非指针且是继承的检测
 					// 由于 继承的变量名=结构名称
 					// Example:Event
@@ -307,23 +316,33 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 		*/
 	/*	}
 
-		// 写入handler
-		if h.TransportType != HttpHandler {
-			h.RpcFuncs = append(h.RpcFuncs, &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))})
-		} else {
-			h.HttpFuncs = append(h.HttpFuncs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
-		}
-	*/
+
+	 */
 	default:
 		log.Panicf("can not gen handler by this type")
 	}
 	return h
 }
 
+// 处理器名称
+func (self *handler) String() string {
+	return self.FuncName
+}
+
+// 控制器名称如果无控制器为空
+func (self *handler) ControllerName() string {
+	return self.ctrlName
+}
+
+// 控制器实例
+func (self *handler) Controller() any {
+	return self.ctrlModel
+}
+
 // 初始化生成新的处理器
 // 任务:创建/缓存/初始化
 // 调用Recycle回收
-func (self *handler) Init(router *TRouter) *handler {
+func (self *handler) init(router *TRouter) *handler {
 	p, has := self.Manager.handlerPool[self.Id]
 	if !has {
 		p = &sync.Pool{}
@@ -337,10 +356,10 @@ func (self *handler) Init(router *TRouter) *handler {
 
 	h := &handler{}
 	*h = *self //复制handler原型
-	if h.CtrlName != "" {
+	if h.ctrlName != "" {
 		// 新建控制器
-		ctrl := reflect.New(h.CtrlType)
-		h.CtrlValue = ctrl.Elem()
+		ctrl := reflect.New(h.ctrlType)
+		h.ctrlValue = ctrl.Elem()
 
 		// 初始化控制器配置
 		if c, ok := ctrl.Interface().(controllerInit); ok {
@@ -355,8 +374,8 @@ func (self *handler) Init(router *TRouter) *handler {
 
 		// 赋值中间件
 		// 修改成员
-		for i := 0; i < h.CtrlValue.NumField(); i++ {
-			midVal = h.CtrlValue.Field(i) // get the middleware value
+		for i := 0; i < h.ctrlValue.NumField(); i++ {
+			midVal = h.ctrlValue.Field(i) // get the middleware value
 			midTyp = midVal.Type()        // get the middleware type
 
 			if midTyp.Kind() == reflect.Ptr {
@@ -369,7 +388,7 @@ func (self *handler) Init(router *TRouter) *handler {
 			if midVal.Kind() == reflect.Ptr {
 				// 使用命名中间件
 				midItf = midVal.Interface()
-			} else if midVal.Kind() == reflect.Struct && h.CtrlValue.Type().Field(0).Name == midTyp.Name() {
+			} else if midVal.Kind() == reflect.Struct && h.ctrlValue.Type().Field(0).Name == midTyp.Name() {
 				// 非指针且是继承的检测
 				// 由于 继承的变量名=结构名称
 				// Example:Event
@@ -388,7 +407,7 @@ func (self *handler) Init(router *TRouter) *handler {
 
 			ml := router.middleware.Get(midName)
 			if ml == nil {
-				log.Panicf("Controller %s need middleware %s to be registered!", h.CtrlName, midName)
+				log.Panicf("Controller %s need middleware %s to be registered!", h.ctrlName, midName)
 			}
 
 			midNewVal := reflect.ValueOf(ml())
@@ -413,18 +432,18 @@ func (self *handler) Init(router *TRouter) *handler {
 			}
 
 			// 添加中间件
-			if midVal.Kind() == reflect.Struct && h.CtrlValue.Type().Field(0).Name == midVal.Type().Name() {
+			if midVal.Kind() == reflect.Struct && h.ctrlValue.Type().Field(0).Name == midVal.Type().Name() {
 				// 非指针且是继承的检测
 				// 由于 继承的变量名=结构名称
 				// Example:Event
 				//log.Dbg(ctrl.Interface(), midVal.Type().String(), ctrl.Interface().(IMiddleware))
 				if mw, ok := ctrl.Interface().(IMiddleware); ok {
-					h.Funcs = append(h.Funcs, &handle{IsFunc: false, Middleware: mw})
+					h.funcs = append(h.funcs, &handle{IsFunc: false, Middleware: mw})
 				}
 			} else {
 				//log.Dbg(midVal.Interface(), midVal.Type().String(), midVal.Interface().(IMiddleware))
 				if mw, ok := midVal.Interface().(IMiddleware); ok {
-					h.Funcs = append(h.Funcs, &handle{IsFunc: false, Middleware: mw})
+					h.funcs = append(h.funcs, &handle{IsFunc: false, Middleware: mw})
 				}
 			}
 		next:
@@ -432,89 +451,90 @@ func (self *handler) Init(router *TRouter) *handler {
 
 		// 写入handler
 		// MethodByName特性取到的值receiver默认为v
-		hd := h.CtrlValue.MethodByName(h.FuncName)
+		hd := h.ctrlValue.MethodByName(h.FuncName)
 		switch hd.Type().In(0) {
 		case ContextType:
 			if fn, ok := hd.Interface().(func(IContext)); ok {
 				if h.TransportType != HttpHandler {
-					h.Funcs = append(h.Funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(fn)})
+					h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(fn)})
 				} else {
-					h.Funcs = append(h.Funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(fn)})
+					h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(fn)})
 				}
 			}
 		case RpcContextType:
-			h.Funcs = append(h.Funcs, &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))})
+			h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))})
 		case HttpContextType:
-			h.Funcs = append(h.Funcs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
+			h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
 		default:
 			log.Panicf("the handler %v is not supportable!", hd)
 		}
 
 		// 所有的指针准备就绪后生成Interface
 		// NOTE:必须初始化结构指针才能生成完整的Model,之后修改CtrlValue将不会有效果
-		h.CtrlModel = h.CtrlValue.Interface()
+		h.ctrlModel = h.ctrlValue.Interface()
 	}
 
-	h.Reset()
+	h.reset()
 	return h
 }
 
 func (self *handler) Invoke(ctx IContext) *handler {
 	ctx.setHandler(self)
 
-	self.Pos++
+	self.pos++
 
-	// set the controller to context vars
-	if self.CtrlModel != nil {
-		ctx.Data().FieldByName("controller").AsInterface(self.CtrlModel)
-	}
+	// 废弃替代 set the controller to context vars
+	//if self.ctrlModel != nil {
+	//	ctx.Data().FieldByName("controller").AsInterface(self.ctrlModel)
+	//	ctx.Data().FieldByName("controller_name").AsString(self.ctrlName)
+	//}
 
 	//
 	switch self.TransportType {
 	case HttpHandler:
 		c := ctx.(*THttpContext)
-		for self.Pos < len(self.Funcs) {
+		for self.pos < len(self.funcs) {
 			if c.IsDone() {
 				break
 			}
-			hd := self.Funcs[self.Pos]
+			hd := self.funcs[self.pos]
 			if hd.IsFunc {
 				hd.HttpFunc(c)
 			} else {
 				hd.Middleware.Handler(c)
 			}
-			self.Pos++
+			self.pos++
 		}
 	case RpcHandler:
 		c := ctx.(*TRpcContext)
-		for self.Pos < len(self.Funcs) {
+		for self.pos < len(self.funcs) {
 			if c.IsDone() {
 				break
 			}
-			hd := self.Funcs[self.Pos]
+			hd := self.funcs[self.pos]
 			if hd.IsFunc {
 				hd.RpcFunc(c)
 			} else {
 				hd.Middleware.Handler(c)
 			}
-			self.Pos++
+			self.pos++
 		}
 	case ReflectHandler:
 		log.Panicf("ReflectHandler %v")
 		/*
-			for self.Pos < len(self.Funcs) {
+			for self.pos < len(self.funcs) {
 				if ctx.IsDone() {
 					break
 				}
-				v := self.Funcs[self.Pos]
-				rcv := self.FuncsReceiver[self.Pos]
+				v := self.funcs[self.pos]
+				rcv := self.FuncsReceiver[self.pos]
 				if rcv.IsValid() {
 					v.Call([]reflect.Value{rcv, ctx.ValueModel()})
 				} else {
 					v.Call([]reflect.Value{ctx.ValueModel()})
 				}
 
-				self.Pos++
+				self.pos++
 			}
 		*/
 
@@ -525,9 +545,9 @@ func (self *handler) Invoke(ctx IContext) *handler {
 
 // 初始化
 // NOTE:仅限于回收使用
-func (self *handler) Reset() *handler {
+func (self *handler) reset() *handler {
 	// 执行中间件初始化
-	for _, handle := range self.Funcs {
+	for _, handle := range self.funcs {
 		if handle.Middleware != nil {
 			if m, ok := handle.Middleware.(IMiddlewareRest); ok {
 				m.Rest()
@@ -535,13 +555,13 @@ func (self *handler) Reset() *handler {
 		}
 	}
 
-	self.Pos = -1
+	self.pos = -1
 	return self
 }
 
-func (self *handler) Recycle() *handler {
+func (self *handler) recycle() *handler {
 	p := self.Manager.handlerPool[self.Id]
-	self.Reset()
+	self.reset()
 	p.Put(self)
 
 	return self

@@ -17,7 +17,12 @@ const (
 )
 
 var (
-	NameMapper = func(name string) string { return strings.ToLower(name) }
+	NameMapper = func(name string) string {
+		name = strings.ToLower(name)
+		// 为特殊控制器提供固定的接口命名 比如Model.Read被占用的情款下改用Model.Api_Read
+		name = strings.Replace(name, "api_", "", 1)
+		return name
+	}
 )
 
 type (

@@ -18,7 +18,9 @@ import (
 )
 
 type (
-
+	IString interface {
+		String() string
+	}
 	// [scheme:][//[userinfo@]host][/[path]/controller.action][?query][#fragment]
 	TUrl struct {
 		Scheme     string
@@ -35,6 +37,7 @@ type (
 
 	// 非volts通用接口
 	IGroup interface {
+		String() string
 		// 返回Module所有Routes 理论上只需被调用一次
 		GetRoutes() *TTree
 		GetPath() string
@@ -217,6 +220,10 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	return grp
 }
 
+func (self *TGroup) String() string {
+	return self.config.Name
+}
+
 func (self *TGroup) Name() string {
 	return self.config.Name
 }
@@ -367,15 +374,15 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	h := handlers[0]
 	switch v := h.(type) {
 	case func(*TRpcContext):
-		hd = generateHandler(hanadlerType, RpcHandler, handlers, mids, nil)
+		hd = generateHandler(hanadlerType, RpcHandler, handlers, mids, url, nil)
 	case func(*THttpContext):
-		hd = generateHandler(hanadlerType, HttpHandler, handlers, mids, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, handlers, mids, url, nil)
 	case func(http.ResponseWriter, *http.Request):
-		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, url, nil)
 	case http.HandlerFunc:
-		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, url, nil)
 	case http.Handler:
-		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapHd(v)}, mids, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapHd(v)}, mids, url, nil)
 	default:
 		// init Value and Type
 		ctrlValue, ok := h.(reflect.Value)
@@ -393,7 +400,14 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 				ctrlType = ctrlType.Elem()
 			}
 
-			objName := utils.DotCasedName(utils.Obj2Name(h))
+			// 获取控制器名称
+			var objName string
+			if v, ok := h.(IString); ok {
+				objName = utils.DotCasedName(utils.TitleCasedName(v.String()))
+			} else {
+				objName = utils.DotCasedName(utils.Obj2Name(h))
+			}
+
 			var name string
 			var method reflect.Value
 			var contextType reflect.Type
@@ -445,9 +459,9 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 					log.Fatalf("method %s must use context pointer as the first parameter", url.Action)
 					return nil
 				}
-				hd = generateHandler(hanadlerType, RpcHandler, []interface{}{ctrlValue}, mids, nil)
+				hd = generateHandler(hanadlerType, RpcHandler, []interface{}{ctrlValue}, mids, url, nil)
 			} else {
-				hd = generateHandler(hanadlerType, HttpHandler, []interface{}{ctrlValue}, mids, nil)
+				hd = generateHandler(hanadlerType, HttpHandler, []interface{}{ctrlValue}, mids, url, nil)
 			}
 
 		default:
