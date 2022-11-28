@@ -95,12 +95,11 @@ type (
 
 		// 返回
 		ContentType  string
-		Result       []byte // 最终返回数据由Apply提交
-		handler      *handler
-		handlerIndex int                         // -- 提示目前控制器Index
-		isDone       bool                        // -- 已经提交过
-		inited       bool                        // 初始化固定值保存进POOL
-		finalCall    func(handler *THttpContext) // 废弃
+		Result       []byte   // -- 最终返回数据由Apply提交
+		handler      *handler // -- 当前处理器
+		handlerIndex int      // -- 提示目前处理器索引
+		isDone       bool     // -- 已经提交过
+		inited       bool     // -- 初始化固定值保存进POOL
 		val          reflect.Value
 		typ          reflect.Type
 	}
@@ -131,25 +130,6 @@ func NewHttpContext(router *TRouter) *THttpContext {
 func (self *THttpContext) Router() IRouter {
 	return self.router
 }
-
-// Call in the end of all controller
-func (self *THttpContext) FinalCall(handler func(*THttpContext)) {
-	self.finalCall = handler // reflect.ValueOf(handler)
-}
-
-/*
-func (self *THttpContext) getPathParams() {
-	// 获得正则字符做为Handler参数
-	lSubmatch := self.route.regexp.FindStringSubmatch(self.Request.URL.Path) //更加深层次正则表达式比对nil 为没有
-	if lSubmatch != nil && lSubmatch[0] == self.Request.URL.Path {           // 第一个是Match字符串本身
-		for i, arg := range lSubmatch[1:] { ///Url正则字符作为参数
-			if arg != "" {
-				self.PathParams[self.route.regexp.SubexpNames()[i+1]] = arg //SubexpNames 获得URL 上的(?P<keywords>.*)
-			}
-		}
-	}
-}
-*/
 
 func (self *THttpContext) Request() *transport.THttpRequest {
 	return self.request
@@ -332,10 +312,16 @@ func (self *THttpContext) Route() route {
 }
 
 func (self *THttpContext) Handler(index ...int) *handler {
-	if index != nil {
-		return self.route.handlers[index[0]]
+	idx := self.handlerIndex
+	if len(index) > 0 {
+		idx = index[0]
 	}
-	return self.route.handlers[self.handlerIndex]
+
+	if idx == self.handlerIndex {
+		return self.handler
+	}
+
+	return self.route.handlers[idx]
 }
 
 func (self *THttpContext) _CtrlCount() int {
@@ -571,11 +557,10 @@ func (self *THttpContext) Redirect(urlStr string, status ...int) {
 
 	self.Header().Set("Location", urlStr)
 	self.WriteHeader(lStatusCode)
-	//self.Write([]byte("Redirecting to: " + urlStr))
 	self.Result = []byte("Redirecting to: " + urlStr)
 
 	// stop run next ctrl
-	//self.isDone = true
+	self.isDone = true
 }
 
 // return a download file redirection for client

@@ -22,7 +22,7 @@ type (
 	}
 
 	// OptionFn configures options of server.
-	Option func(*Config) error
+	Option func(*Config)
 	Config struct {
 		*config.Config `field:"-"`
 		Logger         logger.ILogger `field:"-"` // 实例
@@ -41,8 +41,8 @@ func newConfig(opts ...Option) *Config {
 		Strategy: Random,
 		Registry: noop.New(),
 	}
-	cfg.Init(opts...)
 	config.Default().Register(cfg)
+	cfg.Init(opts...)
 	return cfg
 }
 
@@ -66,11 +66,16 @@ func (self *Config) Save(immed ...bool) error {
 	return self.SaveFromModel(self, immed...)
 }
 
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Debug = true
+	}
+}
+
 // Registry sets the registry used by the selector
 func Registry(r registry.IRegistry) Option {
-	return func(cfg *Config) error {
+	return func(cfg *Config) {
 		cfg.Registry = r
-		return nil
 	}
 }
 

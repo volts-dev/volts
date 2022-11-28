@@ -403,7 +403,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			// 获取控制器名称
 			var objName string
 			if v, ok := h.(IString); ok {
-				objName = utils.DotCasedName(utils.TitleCasedName(v.String()))
+				objName = v.String()
 			} else {
 				objName = utils.DotCasedName(utils.Obj2Name(h))
 			}

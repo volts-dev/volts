@@ -11,7 +11,7 @@ type (
 
 func New() *noopRegistry {
 	reg := &noopRegistry{
-		config: &registry.Config{},
+		config: registry.NewConfig(),
 	}
 	reg.config.Name = reg.String()
 	return reg

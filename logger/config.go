@@ -22,8 +22,8 @@ func newConfig(opts ...Option) *Config {
 		Level:  LevelDebug,
 		Prefix: "LOG",
 	}
-	cfg.Init(opts...)
 	config.Default().Register(cfg)
+	cfg.Init(opts...)
 	return cfg
 }
 
@@ -45,6 +45,12 @@ func (self *Config) Load() error {
 
 func (self *Config) Save(immed ...bool) error {
 	return self.SaveFromModel(self, immed...)
+}
+
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Debug = true
+	}
 }
 
 func WithWrite(name string) Option {

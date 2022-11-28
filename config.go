@@ -28,6 +28,7 @@ type (
 		// can be stored in a context
 		Context context.Context
 		Signal  bool
+		Debug   bool
 	}
 )
 
@@ -36,32 +37,35 @@ func newConfig(opts ...Option) *Config {
 		Registry: noop.New(),
 	}
 
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	if cfg.Context == nil {
-		cfg.Context = context.Background()
-	}
-
-	if cfg.Transport == nil {
-		cfg.Transport = transport.NewHTTPTransport()
-	}
-
-	if cfg.Client == nil {
-		cfg.Client = client.Default(client.WithTransport(cfg.Transport))
-	}
-
-	if cfg.Server == nil {
-		cfg.Server = server.New(server.Transport(cfg.Transport))
-	}
-
+	cfg.Init(opts...)
 	return cfg
 }
 
 func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		opt(self)
+	}
+
+	if self.Context == nil {
+		self.Context = context.Background()
+	}
+
+	if self.Transport == nil {
+		self.Transport = transport.NewHTTPTransport()
+	}
+
+	if self.Client == nil {
+		self.Client = client.Default(client.WithTransport(self.Transport))
+	}
+
+	if self.Server == nil {
+		self.Server = server.New(server.Transport(self.Transport))
+	}
+
+	if self.Debug {
+		self.Transport.Init(transport.Debug())
+		self.Client.Init(client.Debug())
+		self.Server.Config().Init(server.Debug())
 	}
 }
 
@@ -76,11 +80,7 @@ func Name(name string) Option {
 // under debug mode the port will keep at 35999
 func Debug() Option {
 	return func(cfg *Config) {
-		srvCfg := cfg.Server.Config()
-		srvCfg.Router.Config().RequestPrinter = true
-		srvCfg.Router.Config().RouterTreePrinter = true
-		srvCfg.Address = ":35999"
-		//...
+		cfg.Debug = true
 	}
 }
 

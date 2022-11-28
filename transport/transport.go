@@ -2,7 +2,6 @@ package transport
 
 import (
 	"net"
-	"time"
 
 	"github.com/volts-dev/volts/util/body"
 )
@@ -68,8 +67,4 @@ type (
 		Read(interface{}) error
 		Write(interface{}) error
 	}
-)
-
-var (
-	DefaultTimeout = time.Second * 5
 )

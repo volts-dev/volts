@@ -86,11 +86,6 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	md, ok := metadata.FromContext(ctx)
 	if ok {
 		for k, v := range md {
-			// don't copy Micro-Topic header, that used for pub/sub
-			// this fix case then client uses the same context that received in subscriber
-			if k == "Micro-Topic" {
-				continue
-			}
 			msg.Header[k] = v
 		}
 	}
@@ -116,7 +111,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	}
 
 	if opts.DialTimeout >= 0 {
-		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout))
+		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout, opts.RequestTimeout, 0))
 	}
 
 	// 获取空闲链接

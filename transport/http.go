@@ -31,7 +31,7 @@ type data struct {
 // HTTP response or the Cookie header of an HTTP request.
 //
 // See https://tools.ietf.org/html/rfc6265 for details.
-//Stolen from Net/http/cookies
+// Stolen from Net/http/cookies
 type Cookie struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -121,7 +121,9 @@ func (self *HttpTransport) Init(opts ...Option) error {
 // to make a Dial with server
 func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	dialCfg := DialConfig{
-		//Timeout: DefaultDialTimeout,
+		DialTimeout:  self.config.DialTimeout,
+		ReadTimeout:  self.config.ReadTimeout,
+		WriteTimeout: self.config.WriteTimeout,
 	}
 
 	for _, opt := range opts {
@@ -182,14 +184,14 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		} else {
 			//config.NextProtos = []string{"http/1.1"}
 			//	conn, err = newConn(func(addr string) (net.Conn, error) {
-			//		return tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
+			//		return tls.DialWithDialer(&net.Dialer{Timeout: self.config.DialTimeout}, "tcp", addr, config)
 			//	})(addr)
-			conn, err = tls.DialWithDialer(&net.Dialer{Timeout: self.config.ConnectTimeout}, "tcp", addr, config)
+			conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
 		}
 
 	} else {
 		conn, err = newConn(func(addr string) (net.Conn, error) {
-			return net.DialTimeout("tcp", addr, self.config.ConnectTimeout)
+			return net.DialTimeout("tcp", addr, dialCfg.DialTimeout)
 		})(addr)
 	}
 
@@ -271,13 +273,13 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 }
 
 /*
-func (h *httpTransport) Request(msg Message, sock *Socket, cde codec.ICodec) IRequest {
-	return nil
-}
+	func (h *httpTransport) Request(msg Message, sock *Socket, cde codec.ICodec) IRequest {
+		return nil
+	}
 
-func (h *httpTransport) Response(sock *Socket, cde codec.ICodec) IResponse {
-	return nil
-}
+	func (h *httpTransport) Response(sock *Socket, cde codec.ICodec) IResponse {
+		return nil
+	}
 */
 func (self *HttpTransport) Config() *Config {
 	return self.config

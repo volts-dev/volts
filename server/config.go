@@ -14,6 +14,7 @@ import (
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
 	"github.com/volts-dev/volts/registry/noop"
+	"github.com/volts-dev/volts/router"
 	vrouter "github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
 )
@@ -75,9 +76,8 @@ func newConfig(opts ...Option) *Config {
 		Version:          DefaultVersion,
 		AutoCreate:       true,
 	}
-
-	cfg.Init(opts...)
 	config.Default().Register(cfg)
+	cfg.Init(opts...)
 	return cfg
 }
 
@@ -102,6 +102,12 @@ func (self *Config) Init(opts ...Option) {
 	if self.Registry == nil {
 		self.Registry = noop.New()
 	}
+
+	if self.Debug {
+		self.Transport.Init(transport.Debug())
+		self.Router.Config().Init(router.Debug())
+		self.Registry.Config().Init(registry.Debug())
+	}
 }
 
 func (self *Config) Load() error {
@@ -115,9 +121,14 @@ func (self *Config) Save(immed ...bool) error {
 // under debug mode the port will keep at 35999
 func Debug() Option {
 	return func(cfg *Config) {
+		cfg.Debug = true
 		cfg.Router.Config().RequestPrinter = true
 		cfg.Router.Config().RouterTreePrinter = true
-		cfg.Address = ":35999"
+		if cfg.Transport.String() == "Http Transport" {
+			cfg.Address = ":35999"
+		} else {
+			cfg.Address = ":45999"
+		}
 		//...
 	}
 }

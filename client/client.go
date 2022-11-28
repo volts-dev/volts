@@ -1,8 +1,6 @@
 package client
 
 import (
-	"time"
-
 	"github.com/volts-dev/volts/util/body"
 	"github.com/volts-dev/volts/util/header"
 )
@@ -53,21 +51,6 @@ type (
 		// Read the undecoded response
 		//Read(out interface{}) error
 	}
-)
-
-var (
-	// Default Client
-	defaultClient IClient
-	// DefaultRetry is the default check-for-retry function for retries
-	DefaultRetry = RetryOnError
-	// DefaultRetries is the default number of times a request is tried
-	DefaultRetries = 1
-	// DefaultRequestTimeout is the default request timeout
-	DefaultRequestTimeout = time.Second * 50 // TODO
-	// DefaultPoolSize sets the connection pool size
-	DefaultPoolSize = 100
-	// DefaultPoolTTL sets the connection pool ttl
-	DefaultPoolTTL = time.Minute
 )
 
 // Creates a new request using the default client. Content Type will

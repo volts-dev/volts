@@ -15,7 +15,22 @@ import (
 	"github.com/volts-dev/volts/transport"
 )
 
-var log = logger.New("Client")
+var (
+	log = logger.New("Client")
+
+	// Default Client
+	defaultClient IClient
+	// DefaultRetry is the default check-for-retry function for retries
+	DefaultRetry = RetryOnError
+	// DefaultRetries is the default number of times a request is tried
+	DefaultRetries = 1
+	// DefaultRequestTimeout is the default request timeout
+	DefaultRequestTimeout = time.Second * 5
+	// DefaultPoolSize sets the connection pool size
+	DefaultPoolSize = 100
+	// DefaultPoolTTL sets the connection pool ttl
+	DefaultPoolTTL = time.Minute
+)
 
 type (
 	RequestOptions struct {
@@ -28,6 +43,7 @@ type (
 		// can be stored in a context
 		Context context.Context
 	}
+
 	HttpOption func(*Config)
 	// Option contains all options for creating clients.
 	Option func(*Config)
@@ -101,12 +117,6 @@ type (
 		_Block interface{}
 		// RPCPath for http connection
 		_RPCPath string
-		//ConnectTimeout sets timeout for dialing
-		ConnectTimeout time.Duration
-		// ReadTimeout sets readdeadline for underlying net.Conns
-		ReadTimeout time.Duration
-		// WriteTimeout sets writedeadline for underlying net.Conns
-		WriteTimeout time.Duration
 
 		// BackupLatency is used for Failbackup mode. rpc will sends another request if the first response doesn't return in BackupLatency time.
 		BackupLatency time.Duration
@@ -138,7 +148,6 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		Transport: tr,
 		Retries:   3,
 		//RPCPath:        share.DefaultRPCPath,
-		ConnectTimeout: 10 * time.Second,
 		//SerializeType:  codec.MsgPack,
 		CompressType:  transport.None,
 		BackupLatency: 10 * time.Millisecond,
@@ -157,8 +166,8 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		//Registry: registry.Default(),
 	}
 
-	cfg.Init(opts...)
 	config.Default().Register(cfg)
+	cfg.Init(opts...)
 	return cfg
 }
 
@@ -181,6 +190,20 @@ func (self *Config) Load() error {
 
 func (self *Config) Save(immed ...bool) error {
 	return self.SaveFromModel(self, immed...)
+}
+
+// 增加超时到60s
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Debug = true
+		cfg.CallOptions.RequestTimeout = 60 * time.Second
+		cfg.CallOptions.DialTimeout = 60 * time.Second
+		cfg.Transport.Init(
+			transport.DialTimeout(cfg.CallOptions.DialTimeout),
+			transport.ReadTimeout(cfg.CallOptions.DialTimeout),
+			transport.WriteTimeout(cfg.CallOptions.DialTimeout),
+		)
+	}
 }
 
 func WithCodec(c codec.SerializeType) RequestOption {
@@ -235,15 +258,6 @@ func WithUserAgent(userAgent string) HttpOption {
 func AllowRedirect() HttpOption {
 	return func(cfg *Config) {
 		cfg.AllowRedirect = true
-	}
-}
-
-// 增加超时到60s
-func Debug() Option {
-	return func(cfg *Config) {
-		cfg.ConnectTimeout = 60 * time.Second
-		cfg.ReadTimeout = 60 * time.Second
-		cfg.WriteTimeout = 60 * time.Second
 	}
 }
 

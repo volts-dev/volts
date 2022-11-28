@@ -84,10 +84,16 @@ func (self *TRpcContext) HandlerIndex() int {
 }
 
 func (self *TRpcContext) Handler(index ...int) *handler {
-	if index != nil {
-		return self.route.handlers[index[0]]
+	idx := self.handlerIndex
+	if len(index) > 0 {
+		idx = index[0]
 	}
-	return self.route.handlers[self.handlerIndex]
+
+	if idx == self.handlerIndex {
+		return self.handler
+	}
+
+	return self.route.handlers[idx]
 }
 
 func (self *TRpcContext) Context() context.Context {

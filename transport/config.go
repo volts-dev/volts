@@ -10,7 +10,10 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-var log = logger.New("Transport")
+var (
+	log            = logger.New("Transport")
+	DefaultTimeout = time.Second * 5
+)
 
 type (
 	Option       func(*Config)
@@ -33,8 +36,8 @@ type (
 		// is mTLS keypair
 		TLSConfig *tls.Config
 
-		//ConnectTimeout sets timeout for dialing
-		ConnectTimeout time.Duration
+		//DialTimeout sets timeout for dialing
+		DialTimeout time.Duration
 		// ReadTimeout sets readdeadline for underlying net.Conns
 		ReadTimeout time.Duration
 		// WriteTimeout sets writedeadline for underlying net.Conns
@@ -49,8 +52,14 @@ type (
 		// Tells the transport this is a streaming connection with
 		// multiple calls to send/recv and that send may not even be called
 		Stream bool
-		// Timeout for dialing
-		Timeout time.Duration
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Secure      bool
+		DialTimeout time.Duration
+		// ReadTimeout sets readdeadline for underlying net.Conns
+		ReadTimeout time.Duration
+		// WriteTimeout sets writedeadline for underlying net.Conns
+		WriteTimeout time.Duration
 
 		// TODO: add tls options when dialling
 		// Currently set in global options
@@ -58,9 +67,7 @@ type (
 		ProxyURL string
 		dialer   proxy.Dialer
 		Network  string
-		// Other options for implementations of the interface
-		// can be stored in a context
-		Secure  bool
+
 		Context context.Context
 	}
 
@@ -76,12 +83,12 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Config:         config.New(config.DEFAULT_PREFIX),
-		ConnectTimeout: DefaultTimeout,
-		ReadTimeout:    DefaultTimeout,
-		WriteTimeout:   DefaultTimeout,
+		DialTimeout:  DefaultTimeout,
+		ReadTimeout:  DefaultTimeout,
+		WriteTimeout: DefaultTimeout,
 	}
 
+	config.Default().Register(cfg)
 	cfg.Init(opts...)
 	return cfg
 }
@@ -97,6 +104,7 @@ func (self *Config) Init(opts ...Option) {
 		}
 	}
 }
+
 func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }
@@ -105,55 +113,64 @@ func (self *Config) Save(immed ...bool) error {
 	return self.SaveFromModel(self, immed...)
 }
 
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Debug = true
+		cfg.ReadTimeout = 60 * time.Second
+		cfg.WriteTimeout = 60 * time.Second
+		cfg.DialTimeout = 60 * time.Second
+	}
+}
+
 // Addrs to use for transport
 func Addrs(addrs ...string) Option {
-	return func(o *Config) {
-		o.Addrs = addrs
+	return func(cfg *Config) {
+		cfg.Addrs = addrs
 	}
 }
 
 // Timeout sets the timeout for Send/Recv execution
 func Timeout(t time.Duration) Option {
-	return func(o *Config) {
-		o.ReadTimeout = t
-		o.WriteTimeout = t
-		o.ConnectTimeout = t
+	return func(cfg *Config) {
+		cfg.ReadTimeout = t
+		cfg.WriteTimeout = t
+		cfg.DialTimeout = t
 	}
 }
 
 // Timeout sets the timeout for Send/Recv execution
 func ReadTimeout(t time.Duration) Option {
-	return func(o *Config) {
-		o.ReadTimeout = t
+	return func(cfg *Config) {
+		cfg.ReadTimeout = t
 	}
 }
 
 // Timeout sets the timeout for Send/Recv execution
 func WriteTimeout(t time.Duration) Option {
-	return func(o *Config) {
-		o.WriteTimeout = t
+	return func(cfg *Config) {
+		cfg.WriteTimeout = t
 	}
 }
 
 // Timeout sets the timeout for Send/Recv execution
-func ConnectTimeout(t time.Duration) Option {
-	return func(o *Config) {
-		o.ConnectTimeout = t
+func DialTimeout(t time.Duration) Option {
+	return func(cfg *Config) {
+		cfg.DialTimeout = t
 	}
 }
 
 // Use secure communication. If TLSConfig is not specified we
 // use InsecureSkipVerify and generate a self signed cert
 func Secure(b bool) Option {
-	return func(o *Config) {
-		o.Secure = b
+	return func(cfg *Config) {
+		cfg.Secure = b
 	}
 }
 
 // TLSConfig to be used for the transport.
 func TLSConfig(t *tls.Config) Option {
-	return func(o *Config) {
-		o.TLSConfig = t
+	return func(cfg *Config) {
+		cfg.TLSConfig = t
 	}
 }
 
@@ -182,9 +199,35 @@ func WithStream() DialOption {
 	}
 }
 
-func WithTimeout(dialTimeout time.Duration) DialOption {
+func WithTimeout(dial, read, write time.Duration) DialOption {
 	return func(cfg *DialConfig) {
-		cfg.Timeout = dialTimeout
+		if dial > 0 {
+			cfg.DialTimeout = dial
+		}
+		if read > 0 {
+			cfg.ReadTimeout = read
+		}
+		if write > 0 {
+			cfg.WriteTimeout = write
+		}
+	}
+}
+
+func WithDialTimeout(timeout time.Duration) DialOption {
+	return func(cfg *DialConfig) {
+		cfg.DialTimeout = timeout
+	}
+}
+
+func WithReadTimeout(timeout time.Duration) DialOption {
+	return func(cfg *DialConfig) {
+		cfg.ReadTimeout = timeout
+	}
+}
+
+func WithWriteTimeout(timeout time.Duration) DialOption {
+	return func(cfg *DialConfig) {
+		cfg.WriteTimeout = timeout
 	}
 }
 

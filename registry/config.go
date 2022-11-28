@@ -62,8 +62,8 @@ func NewConfig(opts ...Option) *Config {
 		Context: context.Background(),
 		Timeout: time.Millisecond * 100,
 	}
-	cfg.Init(opts...)
 	config.Default().Register(cfg)
+	cfg.Init(opts...)
 	return cfg
 }
 
@@ -89,6 +89,12 @@ func (self *Config) Save(immed ...bool) error {
 
 func Logger() logger.ILogger {
 	return log
+}
+
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Debug = true
+	}
 }
 
 // Addrs is the registry addresses to use

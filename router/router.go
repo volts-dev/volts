@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -41,12 +40,13 @@ type (
 	// router represents an RPC router.
 	TRouter struct {
 		sync.RWMutex
-		TGroup // router is a group set
+		// router is a group set
+		TGroup
+		//
 		config *Config
-
-		middleware *TMiddlewareManager // 中间件
-		template   *template.TTemplateSet
-		//objectPool  *pool
+		// 中间件
+		middleware  *TMiddlewareManager
+		template    *template.TTemplateSet
 		respPool    sync.Pool
 		httpCtxPool map[int]*sync.Pool //根据Route缓存
 		rpcCtxPool  map[int]*sync.Pool
@@ -56,31 +56,7 @@ type (
 	}
 )
 
-// clone the middleware object
-// 克隆interface 并复制里面的指针
-func cloneInterfacePtrFeild(model interface{}) reflect.Value {
-	model_value := reflect.Indirect(reflect.ValueOf(model)) //Indirect 等同 Elem()
-	model_type := reflect.TypeOf(model).Elem()              // 返回类型
-	new_model_value := reflect.New(model_type)              //创建某类型
-	new_model_value.Elem().Set(model_value)
-	/*
-		for i := 0; i < model_value.NumField(); i++ {
-			lField := model_value.Field(i)
-			Warn("jj", lField, lField.Kind())
-			if lField.Kind() == reflect.Ptr {
-				//fmt.Println("jj", lField, lField.Elem())
-				//new_model_value.Field(i).SetPointer(unsafe.Pointer(lField.Pointer()))
-				new_model_value.Elem().Field(i).Set(lField)
-				//new_model_value.FieldByName("Id").SetString("fasd")
-			}
-		}
-	*/
-	//fmt.Println(new_model_value)
-	//return reflect.Indirect(new_model_value).Interface()
-	return new_model_value
-}
-
-// Validate validates an endpoint to guarantee it won't blow up when being served
+// TODO Validate validates an endpoint to guarantee it won't blow up when being served
 func Validate(e *registry.Endpoint) error {
 	/*	if e == nil {
 			return errors.New("endpoint is nil")
@@ -113,29 +89,12 @@ func Validate(e *registry.Endpoint) error {
 	return nil
 }
 
-func strip(s string) string {
-	return strings.TrimSpace(s)
-}
-
-func slice(s string) []string {
-	var sl []string
-
-	for _, p := range strings.Split(s, ",") {
-		if str := strip(p); len(str) > 0 {
-			sl = append(sl, strip(p))
-		}
-	}
-
-	return sl
-}
-
 func New() *TRouter {
 	cfg := newConfig()
 	router := &TRouter{
-		TGroup:     *NewGroup(),
-		config:     cfg,
-		middleware: newMiddlewareManager(),
-		//objectPool: newPool(),
+		TGroup:      *NewGroup(),
+		config:      cfg,
+		middleware:  newMiddlewareManager(),
 		httpCtxPool: make(map[int]*sync.Pool),
 		rpcCtxPool:  make(map[int]*sync.Pool),
 		exit:        make(chan bool),
@@ -577,17 +536,20 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 
 func (self *TRouter) route(route *route, ctx IContext) {
 	defer func() {
-		if self.config.Recover && self.config.RecoverHandler != nil {
+		if self.config.Recover {
 			if err := recover(); err != nil {
 				log.Err(err)
-				self.config.RecoverHandler(ctx)
+
+				if self.config.RecoverHandler != nil {
+					self.config.RecoverHandler(ctx)
+				}
 			}
 		}
 	}()
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	for _, h := range route.handlers {
+	for _, handler := range route.handlers {
 		// TODO 回收需要特殊通道 直接调用占用了处理时间
-		h.init(self).Invoke(ctx).recycle()
+		handler.init(self).Invoke(ctx).recycle()
 	}
 }

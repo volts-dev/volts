@@ -24,12 +24,14 @@ func NewTCPTransport(opts ...Option) ITransport {
 }
 
 func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
-	cfg := DialConfig{
-		Timeout: self.config.ConnectTimeout,
+	dialCfg := DialConfig{
+		DialTimeout:  self.config.DialTimeout,
+		ReadTimeout:  self.config.ReadTimeout,
+		WriteTimeout: self.config.WriteTimeout,
 	}
 
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(&dialCfg)
 	}
 
 	var conn net.Conn
@@ -43,9 +45,9 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 				InsecureSkipVerify: true,
 			}
 		}
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: cfg.Timeout}, "tcp", addr, config)
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, cfg.Timeout)
+		conn, err = net.DialTimeout("tcp", addr, dialCfg.DialTimeout)
 	}
 
 	if err != nil {
@@ -54,12 +56,10 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 
 	//encBuf := bufio.NewWriter(conn)
 	return &tcpTransportClient{
-		tcpTransportSocket: *NewTcpTransportSocket(conn, self.config.ReadTimeout, self.config.WriteTimeout),
+		tcpTransportSocket: *NewTcpTransportSocket(conn, dialCfg.ReadTimeout, dialCfg.WriteTimeout),
 		transport:          self,
-		config:             cfg,
+		config:             dialCfg,
 		conn:               conn,
-		//encBuf:             encBuf,
-		//timeout: t.config.Timeout,
 	}, nil
 }
 
@@ -117,10 +117,6 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 		listener:  l,
 	}
 
-	/*	self.config.Listener = &transportListener{
-		transport: self,
-		listener:  l,
-	}*/
 	return self.config.Listener, nil
 }
 

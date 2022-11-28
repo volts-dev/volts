@@ -30,7 +30,7 @@ const (
 
 	HttpHandler TransportType = iota
 	RpcHandler
-	ReflectHandler
+	ReflectHandler // TODO废弃
 )
 
 type (
@@ -358,11 +358,12 @@ func (self *handler) init(router *TRouter) *handler {
 	*h = *self //复制handler原型
 	if h.ctrlName != "" {
 		// 新建控制器
-		ctrl := reflect.New(h.ctrlType)
-		h.ctrlValue = ctrl.Elem()
+		h.ctrlValue = reflect.New(h.ctrlType)
+		ctrl := h.ctrlValue.Elem()
 
 		// 初始化控制器配置
-		if c, ok := ctrl.Interface().(controllerInit); ok {
+		// 断言必须非Elem()
+		if c, ok := h.ctrlValue.Interface().(controllerInit); ok {
 			c.Init(h.Config)
 		}
 
@@ -374,9 +375,9 @@ func (self *handler) init(router *TRouter) *handler {
 
 		// 赋值中间件
 		// 修改成员
-		for i := 0; i < h.ctrlValue.NumField(); i++ {
-			midVal = h.ctrlValue.Field(i) // get the middleware value
-			midTyp = midVal.Type()        // get the middleware type
+		for i := 0; i < ctrl.NumField(); i++ {
+			midVal = ctrl.Field(i) // get the middleware value
+			midTyp = midVal.Type() // get the middleware type
 
 			if midTyp.Kind() == reflect.Ptr {
 				midTyp = midTyp.Elem()
@@ -388,7 +389,7 @@ func (self *handler) init(router *TRouter) *handler {
 			if midVal.Kind() == reflect.Ptr {
 				// 使用命名中间件
 				midItf = midVal.Interface()
-			} else if midVal.Kind() == reflect.Struct && h.ctrlValue.Type().Field(0).Name == midTyp.Name() {
+			} else if midVal.Kind() == reflect.Struct && ctrl.Type().Field(0).Name == midTyp.Name() {
 				// 非指针且是继承的检测
 				// 由于 继承的变量名=结构名称
 				// Example:Event
@@ -432,7 +433,7 @@ func (self *handler) init(router *TRouter) *handler {
 			}
 
 			// 添加中间件
-			if midVal.Kind() == reflect.Struct && h.ctrlValue.Type().Field(0).Name == midVal.Type().Name() {
+			if midVal.Kind() == reflect.Struct && ctrl.Type().Field(0).Name == midVal.Type().Name() {
 				// 非指针且是继承的检测
 				// 由于 继承的变量名=结构名称
 				// Example:Event
@@ -451,7 +452,7 @@ func (self *handler) init(router *TRouter) *handler {
 
 		// 写入handler
 		// MethodByName特性取到的值receiver默认为v
-		hd := h.ctrlValue.MethodByName(h.FuncName)
+		hd := ctrl.MethodByName(h.FuncName)
 		switch hd.Type().In(0) {
 		case ContextType:
 			if fn, ok := hd.Interface().(func(IContext)); ok {
@@ -466,7 +467,7 @@ func (self *handler) init(router *TRouter) *handler {
 		case HttpContextType:
 			h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
 		default:
-			log.Panicf("the handler %v is not supportable!", hd)
+			log.Errf("the handler %v is not supportable!", hd)
 		}
 
 		// 所有的指针准备就绪后生成Interface
@@ -482,14 +483,6 @@ func (self *handler) Invoke(ctx IContext) *handler {
 	ctx.setHandler(self)
 
 	self.pos++
-
-	// 废弃替代 set the controller to context vars
-	//if self.ctrlModel != nil {
-	//	ctx.Data().FieldByName("controller").AsInterface(self.ctrlModel)
-	//	ctx.Data().FieldByName("controller_name").AsString(self.ctrlName)
-	//}
-
-	//
 	switch self.TransportType {
 	case HttpHandler:
 		c := ctx.(*THttpContext)

@@ -36,6 +36,7 @@ type (
 		Mode       ModeType
 		Prefix     string
 		FileName   string
+		Debug      bool
 	}
 
 	IConfig interface {

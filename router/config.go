@@ -58,6 +58,7 @@ func newConfig(opts ...Option) *Config {
 		RecoverHandler: recoverHandler,
 	}
 
+	config.Default().Register(cfg)
 	cfg.Init(opts...)
 
 	if cfg.Registry == nil {
@@ -65,7 +66,6 @@ func newConfig(opts ...Option) *Config {
 		cfg.RegistryCacher = cacher.New(cfg.Registry)
 	}
 
-	config.Default().Register(cfg)
 	return cfg
 }
 
@@ -87,6 +87,12 @@ func (self *Config) Load() error {
 
 func (self *Config) Save(immed ...bool) error {
 	return self.SaveFromModel(self, immed...)
+}
+
+func Debug() Option {
+	return func(cfg *Config) {
+		cfg.Debug = true
+	}
 }
 
 func WithNameMapper(fn func(string) string) config.Option {
