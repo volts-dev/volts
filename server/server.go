@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/volts-dev/volts/logger"
@@ -30,7 +31,7 @@ var (
 )
 
 type (
-	// Server is a simple micro server abstraction
+	// Server is a simple volts server abstraction
 	IServer interface {
 		//Init(...Option) error // Initialise options
 		Config() *Config // Retrieve the options
@@ -58,25 +59,27 @@ type (
 		httpRspPool sync.Pool
 
 		// server status
-		started    bool // marks the serve as started
-		registered bool // used for first registration
+		started    atomic.Value // marks the serve as started
+		registered bool         // used for first registration
 		exit       chan chan error
 		wg         *sync.WaitGroup // graceful exit
-		rsvc       *registry.Service
+		services   []*registry.Service
 	}
 )
 
 // new a server for the service node
 func New(opts ...Option) *TServer {
 	// inite HandlerPool New function
-	return &TServer{
-		config:     newConfig(opts...),
-		RWMutex:    sync.RWMutex{},
-		started:    false,
+	srv := &TServer{
+		config:  newConfig(opts...),
+		RWMutex: sync.RWMutex{},
+		//started:    atomic.Value,
 		registered: false,
 		exit:       make(chan chan error),
 		wg:         &sync.WaitGroup{},
 	}
+	srv.started.Store(false)
+	return srv
 }
 
 // 默认server实例
@@ -94,7 +97,7 @@ func Default(opts ...Option) *TServer {
 // 注册到服务发现
 func (self *TServer) Register() error {
 	self.RLock()
-	regSrv := self.rsvc
+	regSrv := self.services
 	config := self.config
 	self.RUnlock()
 
@@ -122,10 +125,13 @@ func (self *TServer) Register() error {
 	}
 
 	// have we registered before?
-	if regSrv != nil {
-		if err := regFunc(regSrv); err != nil {
-			return err
+	if len(regSrv) > 0 {
+		for _, srv := range regSrv {
+			if err := regFunc(srv); err != nil {
+				return err
+			}
 		}
+
 		return nil
 	}
 
@@ -217,12 +223,29 @@ func (self *TServer) Register() error {
 		endpoints = append(endpoints, e.Endpoints()...)
 	}
 	*/
-	// default registry service of this server
-	service := &registry.Service{
-		Name:      config.Name,
-		Version:   config.Version,
-		Nodes:     []*registry.Node{node},
-		Endpoints: config.Router.Endpoints(),
+	var servics []*registry.Service
+	for name, endpoints := range config.Router.Endpoints() {
+		if len(endpoints) == 0 {
+			continue
+		}
+
+		if name == "" {
+			name = config.Name // default registry service of this server
+		}
+		// default registry service of this server
+		service := &registry.Service{
+			Name:      name,
+			Version:   config.Version,
+			Nodes:     []*registry.Node{node},
+			Endpoints: endpoints,
+		}
+
+		// register the service
+		if err := regFunc(service); err != nil {
+			return err
+		}
+
+		servics = append(servics, service)
 	}
 
 	// get registered value
@@ -234,11 +257,6 @@ func (self *TServer) Register() error {
 		//if log.V(log.InfoLevel, log.DefaultLogger) {
 		//	、	log.Infof("Registry [%s] Registering node: %s", config.Registry.String(), node.Uid)
 		//	}
-	}
-
-	// register the service
-	if err := regFunc(service); err != nil {
-		return err
 	}
 
 	// already registered? don't need to register subscribers
@@ -290,7 +308,7 @@ func (self *TServer) Register() error {
 		}
 	*/
 	if cacheService {
-		self.rsvc = service
+		self.services = servics
 	}
 	self.registered = true
 
@@ -353,7 +371,7 @@ func (self *TServer) Deregister() error {
 	}
 
 	self.Lock()
-	self.rsvc = nil
+	self.services = nil
 
 	if !self.registered {
 		self.Unlock()
@@ -385,12 +403,9 @@ func (self *TServer) Deregister() error {
 }
 
 func (self *TServer) Start() error {
-	self.RLock()
-	if self.started {
-		self.RUnlock()
+	if self.started.Load().(bool) {
 		return nil
 	}
-	self.RUnlock()
 
 	config := self.config
 	config.Config.Load()
@@ -556,33 +571,24 @@ func (self *TServer) Start() error {
 	}()
 
 	// mark the server as started
-	self.Lock()
-	self.started = true
-	self.Unlock()
-
+	self.started.Store(true)
 	return nil
 }
 
 func (self *TServer) Started() bool {
-	return self.started
+	return self.started.Load().(bool)
 }
 
 func (self *TServer) Stop() error {
-	self.RLock()
-	if !self.started {
-		self.RUnlock()
+	if !self.started.Load().(bool) {
 		return nil
 	}
-	self.RUnlock()
 
 	ch := make(chan error)
 	self.exit <- ch
 
 	err := <-ch
-	self.Lock()
-	self.started = false
-	self.Unlock()
-
+	self.started.Store(false)
 	return err
 }
 

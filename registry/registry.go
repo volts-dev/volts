@@ -23,10 +23,11 @@ type (
 		GetService(string) ([]*Service, error)
 		ListServices() ([]*Service, error)
 		Watcher(...WatchOptions) (Watcher, error)
-		CurrentService() *Service
+		LocalServices() []*Service
 		String() string
 	}
 
+	// 微服务
 	Service struct {
 		Name      string            `json:"name"`
 		Version   string            `json:"version"`
@@ -35,6 +36,7 @@ type (
 		Nodes     []*Node           `json:"nodes"`
 	}
 
+	// 微服务节点 相当于每个程序Port一个节点
 	Node struct {
 		Uid      string            `json:"id"`
 		Address  string            `json:"address"`
@@ -75,14 +77,14 @@ type (
 	}
 )
 
-func _Default(new ...IRegistry) IRegistry {
+// NoopRegistry as default registry
+func Default(new ...IRegistry) IRegistry {
 	if new != nil {
 		defaultRegistry = new[0]
-	} else {
-		if defaultRegistry == nil {
-			//defaultRegistry = newNoopRegistry()
-		}
+	} else if defaultRegistry == nil {
+		defaultRegistry = newNoopRegistry()
 	}
+
 	return defaultRegistry
 }
 

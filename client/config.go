@@ -102,9 +102,8 @@ type (
 
 		// Used to select codec
 		ContentType string
-
-		_conn     net.Conn
-		_protocol string
+		_conn       net.Conn
+		_protocol   string
 
 		// Group is used to select the services in the same group. Services set group info in their meta.
 		// If it is empty, clients will ignore group.

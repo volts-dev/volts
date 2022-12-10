@@ -19,10 +19,22 @@ const (
 	MT_REQUEST
 	MT_RESPONSE // Response is message type of response
 
-	// Normal is normal requests and responses.
-	Normal MessageStatusType = iota
+	StatusOK MessageStatusType = iota // Normal Not an error; returned on success.
 	// Error indicates some errors occur.
-	Error
+	StatusError
+	//Internal errors. This means that some invariants expected by the underlying system have been broken. This error code is reserved for serious errors.
+	StatusInternalError
+	// The caller does not have permission to execute the specified operation. StatusForbidden must not be used for rejections caused by exhausting some resource (use RESOURCE_EXHAUSTED instead for those errors). StatusForbidden must not be used if the caller can not be identified (use UNAUTHENTICATED instead for those errors). This error code does not imply the request is valid or the requested entity exists or satisfies other pre-conditions.
+	StatusForbidden
+	StatusNotFound
+	StatusUnknown
+	StatusAborted
+	// The operation is not implemented or is not supported/enabled in this service.
+	StatusNotImplemented
+	// The service is currently unavailable. This is most likely a transient condition, which can be corrected by retrying with a backoff. Note that it is not always safe to retry non-idempotent operations.
+	StatusServiceUnavailable
+	// The request does not have valid authentication credentials for the operation.
+	StatusUnauthorized
 
 	// None does not compress.
 	None CompressType = iota
@@ -92,7 +104,9 @@ type (
 	}
 
 	Message struct {
-		*Bom                      // 字节码
+		*Bom // 字节码
+		//Service  string            // service path
+		//Endpoint string            // method path
 		Path    string            // the path
 		Header  map[string]string // 消息头
 		Body    []byte            // 消息主体

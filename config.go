@@ -5,7 +5,6 @@ import (
 
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/noop"
 	"github.com/volts-dev/volts/server"
 	"github.com/volts-dev/volts/transport"
 )
@@ -34,7 +33,7 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Registry: noop.New(),
+		Registry: registry.Default(),
 	}
 
 	cfg.Init(opts...)

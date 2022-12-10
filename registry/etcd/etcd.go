@@ -145,10 +145,6 @@ func (e *etcdRegistry) Config() *registry.Config {
 }
 
 func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, opts ...registry.Option) error {
-	if len(s.Nodes) == 0 {
-		return errors.New("Require at least one node")
-	}
-
 	// check existing lease cache
 	e.RLock()
 	leaseID, ok := e.leases[s.Name+node.Uid]
@@ -314,18 +310,21 @@ func (e *etcdRegistry) Register(s *registry.Service, opts ...registry.Option) er
 
 	// register each node individually
 	for _, node := range s.Nodes {
-		err := e.registerNode(s, node, opts...)
-		if err != nil {
+		if err := e.registerNode(s, node, opts...); err != nil {
 			gerr = err
 		}
 	}
-	e.config.Service = s
+	if gerr == nil {
+		e.config.LocalServices = append(e.config.LocalServices, s)
+	}
 
 	return gerr
 }
-func (m *etcdRegistry) CurrentService() *registry.Service {
-	return m.config.Service
+
+func (m *etcdRegistry) LocalServices() []*registry.Service {
+	return m.config.LocalServices
 }
+
 func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()

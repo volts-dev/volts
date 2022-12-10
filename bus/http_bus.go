@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/volts/registry/noop"
 	maddr "github.com/volts-dev/volts/util/addr"
 	vnet "github.com/volts-dev/volts/util/net"
 	vtls "github.com/volts-dev/volts/util/tls"
@@ -84,7 +83,7 @@ func newTransport(config *tls.Config) *http.Transport {
 func NewHttpBus(opts ...Option) *httpBus {
 	cfg := &Config{
 		Codec:    codec.IdentifyCodec(codec.JSON),
-		Registry: noop.New(),
+		Registry: registry.Default(),
 		Context:  context.TODO(),
 	}
 

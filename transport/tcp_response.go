@@ -11,6 +11,7 @@ type RpcResponse struct {
 	body    *body.TBody //
 	sock    ISocket
 	Request *RpcRequest // request for this response
+	status  MessageStatusType
 }
 
 // 提供给Router的context使用
@@ -19,6 +20,7 @@ func NewRpcResponse(ctx context.Context, req *RpcRequest, socket ISocket) *RpcRe
 		sock:    socket,
 		Request: req,
 		body:    body.New(codec.IdentifyCodec(req.Message.SerializeType())),
+		status:  StatusOK,
 	}
 }
 
@@ -27,8 +29,9 @@ func (self *RpcResponse) Body() *body.TBody {
 }
 
 // TODO 写状态
-func (self *RpcResponse) WriteHeader(code MessageType) {
-	self.Request.Message.SetMessageType(code)
+func (self *RpcResponse) WriteHeader(code MessageStatusType) {
+	//equest.Message.SetMessageType(code)
+	self.status = code
 }
 
 func (self *RpcResponse) Write(b []byte) (int, error) {
@@ -36,10 +39,10 @@ func (self *RpcResponse) Write(b []byte) (int, error) {
 		return 0, nil // errors.New("This is one way request!")
 	}
 
-	self.WriteHeader(MT_RESPONSE)
-
 	msg := newMessage()
 	self.Request.Message.CloneTo(msg)
+	msg.SetMessageType(MT_RESPONSE)
+	msg.SetMessageStatusType(self.status)
 	msg.Payload = b
 	return len(b), self.sock.Send(msg)
 }
@@ -50,9 +53,9 @@ func (self *RpcResponse) WriteStream(data interface{}) error {
 		return nil // errors.New("This is one way request!")
 	}
 
-	self.WriteHeader(MT_RESPONSE)
-
 	msg := self.Request.Message
+	msg.SetMessageType(MT_RESPONSE)
+	msg.SetMessageStatusType(self.status)
 	_, err := self.body.Encode(data)
 	if err != nil {
 		return err

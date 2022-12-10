@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	"github.com/asim/go-micro/v3/errors"
+	"github.com/volts-dev/volts/errors"
 )
 
 // note that returning either false or a non-nil error will result in the call not being retried

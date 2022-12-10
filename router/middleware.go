@@ -1,7 +1,6 @@
 package router
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -57,7 +56,7 @@ func (self *TMiddlewareManager) Add(key string, value func() IMiddleware) {
 		self.middlewares[key] = value
 		self.names = append(self.names, key) // # 保存添加顺序
 	} else {
-		log.Err("key:" + key + " already exists")
+		log.Warn("middleware key:" + key + " already exists")
 	}
 }
 
@@ -68,7 +67,7 @@ func (self *TMiddlewareManager) Set(key string, value func() IMiddleware) {
 	if _, ok := self.middlewares[key]; ok {
 		self.middlewares[key] = value
 	} else {
-		fmt.Println("key:" + key + " does not exists")
+		log.Warn("middleware key:" + key + " does not exists")
 	}
 }
 
@@ -88,6 +87,5 @@ func (self *TMiddlewareManager) Del(key string) {
 			self.names = append(self.names[:i], self.names[i+1:]...)
 			break
 		}
-
 	}
 }

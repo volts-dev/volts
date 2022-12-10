@@ -7,12 +7,11 @@ import (
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/noop"
 
+	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
-	"github.com/volts-dev/volts/util/errors"
 	"github.com/volts-dev/volts/util/metadata"
 	"github.com/volts-dev/volts/util/net"
 	"github.com/volts-dev/volts/util/pool"
@@ -39,7 +38,7 @@ func NewRpcClient(opts ...Option) (*RpcClient, error) {
 	}
 
 	if cfg.Registry == nil {
-		cfg.Registry = noop.New()
+		cfg.Registry = registry.Default()
 		cfg.Selector = selector.New(selector.Registry(cfg.Registry))
 	}
 
@@ -121,7 +120,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	}
 	defer self.pool.Release(conn, nil)
 
-	msg.Path = req.Service()
+	msg.Path = req.Method() // TODO msg 添加server action
 	//data, err := msgCodece.Encode(req.Body())
 	data := req.Body().Data.Bytes()
 	if err != nil {
@@ -171,31 +170,24 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 			return
 		}
 
+		// 状态码处理
+		switch msg.MessageStatusType() {
+		case transport.StatusOK:
+			break
+		case transport.StatusError:
+			ch <- errors.New("StatusError", int32(transport.StatusError), string(msg.Payload))
+			return
+		default:
+			ch <- errors.New("", int32(msg.MessageStatusType()), string(msg.Payload))
+			return
+		}
+
 		bd := body.New(codec.IdentifyCodec(msg.SerializeType()))
 		bd.Data.Write(msg.Payload)
 		// 解码消息内容
 		resp.contentType = msg.SerializeType()
 		resp.body = bd // msg.Payload
-		/*
-			///	移动到reponse里处理
-				data := msg.Payload
-				if len(data) > 0 {
-					msgCodece := codec.IdentifyCodec(msg.SerializeType())
-					if msgCodece == nil {
-						//call.Error = ServiceError(ErrUnsupportedCodec.Error())
-						ch <- errors.UnsupportedCodec("volts.client", msg.SerializeType())
-						return
-					} else {
 
-						// 解码内容
-						err = msgCodece.Decode(data, &resp.body)
-						if err != nil {
-							ch <- err
-							return
-						}
-					}
-				}
-		*/
 		// success
 		ch <- nil
 	}(resp)
@@ -224,6 +216,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
+	callOpts.SelectOptions = append(callOpts.SelectOptions, selector.WithFilter(selector.FilterTrasport(self.config.Transport)))
 	for _, opt := range opts {
 		opt(&callOpts)
 	}

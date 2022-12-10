@@ -68,3 +68,15 @@ type (
 		Write(interface{}) error
 	}
 )
+
+var defaultTransport ITransport
+
+func Default(set ...ITransport) ITransport {
+	if len(set) > 0 {
+		defaultTransport = set[0]
+	} else if defaultTransport == nil {
+		defaultTransport = NewHTTPTransport()
+	}
+
+	return defaultTransport
+}

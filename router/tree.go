@@ -10,6 +10,7 @@ import (
 
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/registry"
+	"go.uber.org/atomic"
 )
 
 /*
@@ -96,6 +97,7 @@ type (
 		IgnoreCase    bool
 		__DelimitChar byte // Delimit Char xxx<.>xxx
 		PrefixChar    byte // the Prefix Char </>xxx.xxx
+		Count         atomic.Int32
 	}
 )
 
@@ -481,16 +483,27 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 	return nil
 }
 
-func (self *TTree) Endpoints() []*registry.Endpoint {
-	eps := make([]*registry.Endpoint, 0)
-	checker := make(map[string]*route)
+func (self *TTree) Endpoints() (services map[string][]*registry.Endpoint) {
+	services = make(map[string][]*registry.Endpoint, 0)
+	validator := make(map[string]*route)
 	var match func(method string, i int, node *treeNode)
 	match = func(method string, i int, node *treeNode) {
 		for _, c := range node.Children {
 			if c.Route != nil {
 				// TODO 检测
-				if _, ok := checker[c.Route.Path]; !ok {
-					eps = append(eps, RouteToEndpiont(c.Route))
+				if _, ok := validator[c.Route.Path]; !ok {
+					//
+				}
+
+				srvName := ""
+				if c.Route.group.IsService() {
+					srvName = c.Route.group.Name()
+				}
+
+				if eps, has := services[srvName]; has {
+					services[srvName] = append(eps, RouteToEndpiont(c.Route))
+				} else {
+					services[srvName] = []*registry.Endpoint{RouteToEndpiont(c.Route)}
 				}
 			}
 			match(method, i+1, c)
@@ -503,7 +516,7 @@ func (self *TTree) Endpoints() []*registry.Endpoint {
 		}
 	}
 
-	return eps
+	return services
 }
 
 func (r *TTree) Match(method string, path string) (*route, Params) {
@@ -530,6 +543,28 @@ func (r *TTree) Match(method string, path string) (*route, Params) {
 	}
 
 	return nil, nil
+}
+
+// add nodes to trees
+func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
+	//fmt.Println("self.Root", self.Root)
+	// 获得对应方法[POST,GET...]
+	cn := self.root[method]
+	if cn == nil {
+
+		// 初始化Root node
+		cn = &treeNode{
+			Children: subNodes{},
+		}
+		self.root[method] = cn
+	}
+
+	var p *treeNode = cn // 复制方法对应的Root
+
+	// 层级插入Nodes的Node到Root
+	for idx := range nodes {
+		p = cn.addNode(self, p, nodes, idx, isHook)
+	}
 }
 
 // 添加路由到Tree
@@ -587,7 +622,7 @@ func (self *TTree) DelRoute(path string, route *route) error {
 
 		// 层级插入Nodes的Node到Root
 		for idx := range nodes {
-			p = n.delNode(p, nodes, idx)
+			p = n.delNode(self, p, nodes, idx)
 		}
 	}
 	return nil
@@ -654,28 +689,6 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 	return self
 }
 
-// add nodes to trees
-func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
-	//fmt.Println("self.Root", self.Root)
-	// 获得对应方法[POST,GET...]
-	cn := self.root[method]
-	if cn == nil {
-
-		// 初始化Root node
-		cn = &treeNode{
-			Children: subNodes{},
-		}
-		self.root[method] = cn
-	}
-
-	var p *treeNode = cn // 复制方法对应的Root
-
-	// 层级插入Nodes的Node到Root
-	for idx := range nodes {
-		p = cn.addNode(p, nodes, idx, isHook)
-	}
-}
-
 func (self *TTree) PrintTrees() {
 	buf := bytes.NewBufferString("")
 	buf.WriteString("\n")
@@ -690,7 +703,7 @@ func (self *TTree) PrintTrees() {
 }
 
 // add node nodes[i] to parent node p
-func (self *treeNode) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bool) *treeNode {
+func (self *treeNode) addNode(tree *TTree, parent *treeNode, nodes []*treeNode, i int, isHook bool) *treeNode {
 	if len(parent.Children) == 0 {
 		parent.Children = make([]*treeNode, 0)
 	}
@@ -705,6 +718,7 @@ func (self *treeNode) addNode(parent *treeNode, nodes []*treeNode, i int, isHook
 					n.Route.CombineHandler(nodes[i].Route)
 				} else {
 					n.Route = nodes[i].Route
+					tree.Count.Inc()
 				}
 			}
 			return n
@@ -717,7 +731,7 @@ func (self *treeNode) addNode(parent *treeNode, nodes []*treeNode, i int, isHook
 	return nodes[i]
 }
 
-func (self *treeNode) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode {
+func (self *treeNode) delNode(tree *TTree, parent *treeNode, nodes []*treeNode, i int) *treeNode {
 	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
 	for _, n := range parent.Children {
 		if n.Equal(nodes[i]) {
@@ -725,6 +739,7 @@ func (self *treeNode) delNode(parent *treeNode, nodes []*treeNode, i int) *treeN
 			if i == len(nodes)-1 {
 				// 剥离目标控制器
 				n.Route.StripHandler(nodes[i].Route)
+				tree.Count.Dec() // 递减计数器
 			}
 			return n
 		}

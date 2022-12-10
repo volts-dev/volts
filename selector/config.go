@@ -6,7 +6,6 @@ import (
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/noop"
 )
 
 type (
@@ -39,7 +38,7 @@ func newConfig(opts ...Option) *Config {
 	cfg := &Config{
 		Logger:   log,
 		Strategy: Random,
-		Registry: noop.New(),
+		Registry: registry.Default(),
 	}
 	config.Default().Register(cfg)
 	cfg.Init(opts...)

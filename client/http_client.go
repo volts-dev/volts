@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asim/go-micro/v3/metadata"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
 	"github.com/volts-dev/volts/util/body"
-	"github.com/volts-dev/volts/util/errors"
+	"github.com/volts-dev/volts/util/metadata"
 	"github.com/volts-dev/volts/util/pool"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/proxy"
@@ -372,6 +372,7 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
+	callOpts.SelectOptions = append(callOpts.SelectOptions, selector.WithFilter(selector.FilterTrasport(self.config.Transport)))
 	for _, opt := range opts {
 		opt(&callOpts)
 	}
@@ -403,7 +404,7 @@ func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpRes
 	// should we noop right here?
 	select {
 	case <-ctx.Done():
-		return nil, errors.New("http.client", fmt.Sprintf("%v", ctx.Err()), 408)
+		return nil, errors.New("http.client", 408, fmt.Sprintf("%v", ctx.Err()))
 	default:
 	}
 
@@ -459,7 +460,7 @@ func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpRes
 
 		select {
 		case <-ctx.Done():
-			return nil, errors.New("http.client", fmt.Sprintf("%v", ctx.Err()), 408)
+			return nil, errors.New("http.client", 408, fmt.Sprintf("%v", ctx.Err()))
 		case err := <-ch:
 			// if the call succeeded lets bail early
 			if err == nil {

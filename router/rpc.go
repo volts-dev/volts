@@ -43,7 +43,7 @@ type (
 )
 
 func handleError(res *transport.Message, err error) (*transport.Message, error) {
-	res.SetMessageStatusType(transport.Error)
+	res.SetMessageStatusType(transport.StatusError)
 	if res.Header == nil {
 		res.Header = make(map[string]string)
 	}
@@ -181,7 +181,27 @@ func (self *TRpcContext) setHandler(h *handler) {
 	self.handler = h
 }
 
-func (self *TRpcContext) Abort(body string) {
-	// TODO
+func (self *TRpcContext) Abort(message ...string) {
 	self.isDone = true
+	self.response.WriteHeader(transport.StatusAborted)
+	if len(message) > 0 {
+		self.Write([]byte(message[0]))
+	}
+	self.isDone = true
+}
+
+func (self *TRpcContext) NotFound(message ...string) {
+	self.isDone = true
+	self.response.WriteHeader(transport.StatusNotFound)
+	if len(message) > 0 {
+		self.Write([]byte(message[0]))
+	}
+}
+
+func (self *TRpcContext) Forbidden(message ...string) {
+	self.isDone = true
+	self.response.WriteHeader(transport.StatusForbidden)
+	if len(message) > 0 {
+		self.Write([]byte(message[0]))
+	}
 }

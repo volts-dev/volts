@@ -36,7 +36,7 @@ type (
 		*config.Config `field:"-"`
 		Logger         logger.ILogger  `field:"-"` // 实例
 		Context        context.Context `field:"-"`
-		Service        *Service        `field:"-"` // current service information
+		LocalServices  []*Service      `field:"-"` // current service information
 		Name           string
 		Addrs          []string
 		Timeout        time.Duration

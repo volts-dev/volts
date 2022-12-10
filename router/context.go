@@ -38,6 +38,7 @@ type (
 		IsDone() bool //response data is done
 		String() string
 		//Abort(string)
+		NotFound(message ...string)
 	}
 )
 

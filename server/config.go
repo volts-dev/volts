@@ -13,7 +13,6 @@ import (
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
-	"github.com/volts-dev/volts/registry/noop"
 	"github.com/volts-dev/volts/router"
 	vrouter "github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
@@ -91,16 +90,16 @@ func (self *Config) Init(opts ...Option) {
 	}
 
 	if self.Transport == nil && self.AutoCreate {
-		self.Transport = transport.NewHTTPTransport()
+		self.Transport = transport.Default()
 	}
 
 	// if not special router use create new
 	if self.Router == nil && self.AutoCreate {
-		self.Router = vrouter.New()
+		self.Router = vrouter.Default()
 	}
 
 	if self.Registry == nil {
-		self.Registry = noop.New()
+		self.Registry = registry.Default()
 	}
 
 	if self.Debug {

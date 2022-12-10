@@ -3,7 +3,6 @@ module github.com/volts-dev/volts
 go 1.18
 
 require (
-	github.com/asim/go-micro/v3 v3.7.1
 	github.com/fsnotify/fsnotify v1.5.4
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.0
@@ -20,6 +19,7 @@ require (
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
+	go.uber.org/atomic v1.7.0
 	go.uber.org/zap v1.23.0
 	golang.org/x/net v0.0.0-20220923203811-8be639271d50
 	golang.org/x/sync v0.0.0-20220923202941-7f9b1623fab7
@@ -54,7 +54,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/volts-dev/cacher v0.0.0-20220923021026-8c0ad5f82b30 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
-	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4 // indirect
 	golang.org/x/mod v0.5.0 // indirect

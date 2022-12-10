@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path"
 	_path "path"
 	"path/filepath"
 	"reflect"
@@ -43,6 +42,7 @@ type (
 		GetPath() string
 		GetFilePath() string
 		GetTemplateVar() map[string]interface{}
+		IsService() bool
 	}
 
 	// 服务模块 每个服务代表一个对象
@@ -204,8 +204,11 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	}
 
 	// 获取路径文件夹名称
-	if cfg.Name == "" || cfg.FilePath == "" {
-		cfg.FilePath, cfg.Name = curFilePath(2)
+	filePath, name := curFilePath(2)
+	if cfg.Name == "" {
+		cfg.Name = name
+	} else if cfg.FilePath == "" {
+		cfg.FilePath = filePath
 	}
 
 	grp := &TGroup{
@@ -226,6 +229,10 @@ func (self *TGroup) String() string {
 
 func (self *TGroup) Name() string {
 	return self.config.Name
+}
+
+func (self *TGroup) Config() *GroupConfig {
+	return self.config
 }
 
 func (self *TGroup) GetRoutes() *TTree {
@@ -272,7 +279,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 	// 模版变量
 	urlPattern := _path.Join(self.path, relativePath)
 	self.SetTemplateVar(relativePath[1:], urlPattern)                 // set the template var value
-	absolutePath := _path.Join(self.config.PrefixPath, urlPattern)    // the url path
+	absolutePath := _path.Join(self.config.PathPrefix, urlPattern)    // the url path
 	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs)) // binding a file server
 
 	handler := func(c *THttpContext) {
@@ -293,7 +300,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 	}
 
 	// 路由路径
-	urlPattern = _path.Join(self.config.PrefixPath, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
+	urlPattern = _path.Join(self.config.PathPrefix, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
 	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, []any{handler})
 }
 
@@ -337,11 +344,11 @@ for details please read tree.go
 //			API:会映射所有对象符合要求的控制器作为API发布
 //			REST:会映射所有对象符合要求的create, read, update, and delete控制器作为Restful发布
 func (self *TGroup) Url(method string, path string, handlers ...any) *route {
-	if self.config.PrefixPath != "" && path == "//" {
+	if self.config.PathPrefix != "" && path == "//" {
 		// 生成"/abc/"而非"/abc"
-		path = _path.Join(self.config.PrefixPath, "") + "/"
+		path = _path.Join(self.config.PathPrefix, "") + "/"
 	} else {
-		path = _path.Join(self.config.PrefixPath, path)
+		path = _path.Join(self.config.PathPrefix, path)
 	}
 
 	method = strings.ToUpper(method)
@@ -430,7 +437,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 						// 方法为对象方法名称 url 只注册对象名称
 						// name 为create, read, update, and delete (CRUD)等
 						name = NameMapper(name) // 名称格式化
-						ul := &TUrl{Path: path.Join(url.Path, name), Controller: objName, Action: name}
+						ul := &TUrl{Path: _path.Join(url.Path, name), Controller: objName, Action: name}
 						self.addRoute(position, hanadlerType, []string{"GET", "POST"}, ul, []any{method}, mids...)
 					}
 
@@ -474,17 +481,14 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 		url.Path = "/" + url.Path
 	}
 
-	route := newRoute(self,
-		methods,
-		url,
-		url.Path,
-		self.config.FilePath,
-		self.config.Name,
-		url.Action,
-	)
-
+	route := newRoute(self, methods, url, url.Path, self.config.FilePath, self.config.Name, url.Action)
 	route.handlers = append(route.handlers, hd)
+
 	// register route
 	self.tree.AddRoute(route)
 	return route
+}
+
+func (self *TGroup) IsService() bool {
+	return self.config.IsService
 }

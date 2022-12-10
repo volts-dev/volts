@@ -8,7 +8,7 @@ package:
 Object：
 每个对象实现String()返回对象名称
 #模板全局默认变量
-	micro
+	Volts
 	│
 	├─cmd 命令接口目录
 	├─transport 通讯接口目录

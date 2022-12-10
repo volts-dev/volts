@@ -58,10 +58,9 @@ func New(opts ...Option) ISelector {
 func Default(new ...ISelector) ISelector {
 	if new != nil {
 		defaultSelector = new[0]
-	} else {
-		if defaultSelector == nil {
-			defaultSelector = New()
-		}
+	} else if defaultSelector == nil {
+		defaultSelector = New()
 	}
+
 	return defaultSelector
 }

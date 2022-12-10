@@ -613,14 +613,14 @@ func (self *THttpContext) SetTemplateVar(key string, value interface{}) {
 }
 
 // Responds with 404 Not Found
-func (self *THttpContext) RespondWithNotFound(message ...string) {
+func (self *THttpContext) NotFound(message ...string) {
 	self.isDone = true
 	self.response.WriteHeader(http.StatusNotFound)
-	if len(message) == 0 {
-		self.response.Write([]byte(http.StatusText(http.StatusNotFound)))
+	if len(message) > 0 {
+		self.response.Write([]byte(message[0]))
 		return
 	}
-	self.response.Write([]byte(message[0]))
+	self.response.Write([]byte(http.StatusText(http.StatusNotFound)))
 }
 
 func singleJoiningSlash(a, b string) string {

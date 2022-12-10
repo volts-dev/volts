@@ -51,18 +51,22 @@ func (ew *etcdWatcher) Next() (*registry.Result, error) {
 		if wresp.Canceled {
 			return nil, errors.New("could not get next")
 		}
+
+		var service *registry.Service
 		for _, ev := range wresp.Events {
-			service := decode(ev.Kv.Value)
 			var action string
 
 			switch ev.Type {
 			case clientv3.EventTypePut:
+				service = decode(ev.Kv.Value)
+
 				if ev.IsCreate() {
 					action = "create"
 				} else if ev.IsModify() {
 					action = "update"
 				}
 			case clientv3.EventTypeDelete:
+				service = nil
 				action = "delete"
 
 				// get service from prevKv

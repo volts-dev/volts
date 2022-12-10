@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,13 +27,24 @@ func (self *Error) Error() string {
 }
 
 // New generates a custom error.
-func New(id, detail string, code int32) error {
+func New(id string, code int32, detail string) error {
 	return &Error{
 		Id:     id,
 		Code:   code,
 		Detail: detail,
 		Status: http.StatusText(int(code)),
 	}
+}
+
+// Parse tries to parse a JSON string into an error. If that
+// fails, it will set the given string as the error detail.
+func Parse(err string) *Error {
+	e := new(Error)
+	errr := json.Unmarshal([]byte(err), e)
+	if errr != nil {
+		e.Detail = err
+	}
+	return e
 }
 
 // InternalServerError generates a 500 error.

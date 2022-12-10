@@ -9,9 +9,8 @@ import (
 
 type (
 	rpcRequest struct {
-		service       string //
-		method        string
-		endpoint      string
+		service       string //服务名
+		method        string //method和endpoint目前是一样的是方法名
 		ContentLength int64
 		header        header.Header
 		body          *body.TBody
@@ -19,7 +18,7 @@ type (
 	}
 )
 
-func newRpcRequest(service, endpoint string, data interface{}, opts ...RequestOption) (*rpcRequest, error) {
+func newRpcRequest(service, method string, data interface{}, opts ...RequestOption) (*rpcRequest, error) {
 	reqOpts := RequestOptions{}
 	for _, o := range opts {
 		o(&reqOpts)
@@ -27,8 +26,7 @@ func newRpcRequest(service, endpoint string, data interface{}, opts ...RequestOp
 
 	req := &rpcRequest{
 		service:       service,
-		method:        endpoint,
-		endpoint:      endpoint,
+		method:        method,
 		body:          body.New(reqOpts.Codec),
 		ContentLength: 0,
 		opts:          reqOpts,

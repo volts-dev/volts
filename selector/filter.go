@@ -2,7 +2,25 @@ package selector
 
 import (
 	"github.com/volts-dev/volts/registry"
+	"github.com/volts-dev/volts/transport"
 )
+
+// 过滤传输层
+func FilterTrasport(tp transport.ITransport) Filter {
+	return func(services []*registry.Service) []*registry.Service {
+		var nodes []*registry.Node
+		for _, service := range services {
+			for _, node := range service.Nodes {
+				if node.Metadata["transport"] == tp.String() {
+					nodes = append(nodes, node)
+				}
+			}
+			service.Nodes = nodes
+		}
+
+		return services
+	}
+}
 
 // FilterEndpoint is an endpoint based Select Filter which will
 // only return services with the endpoint specified.

@@ -1,7 +1,6 @@
 package router
 
 import (
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -31,9 +30,9 @@ type (
 		// Deregister endpoint from router
 		Deregister(ep *registry.Endpoint) error
 		// list all endpiont from router
-		Endpoints() []*registry.Endpoint
+		Endpoints() (services map[string][]*registry.Endpoint)
 		RegisterMiddleware(middlewares ...func() IMiddleware)
-		RegisterGroup(grp ...IGroup)
+		RegisterGroup(groups ...IGroup)
 		PrintRoutes()
 	}
 
@@ -50,7 +49,6 @@ type (
 		respPool    sync.Pool
 		httpCtxPool map[int]*sync.Pool //根据Route缓存
 		rpcCtxPool  map[int]*sync.Pool
-
 		// compiled regexp for host and path
 		exit chan bool
 	}
@@ -135,18 +133,24 @@ func (self *TRouter) isClosed() bool {
 
 // 过滤自己
 func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
-	curSrv := self.config.Registry.CurrentService()
-	if curSrv != nil && service.Name == curSrv.Name {
-		node := curSrv.Nodes[0]
-		host, port, err := net.SplitHostPort(node.Address)
-		if err != nil {
-			log.Err(err)
+	localServices := self.config.Registry.LocalServices()
+
+	nodes := make([]*registry.Node, 0)
+	for _, n := range service.Nodes {
+		//  TODO 解决监控拉取registry服务器服务列表比LocalServices获取注册的本地早
+		if len(localServices) == 0 && self.tree.Count.Load() > 0 {
+			break
 		}
 
-		nodes := make([]*registry.Node, 0)
-		for _, n := range service.Nodes {
+		for _, curSrv := range localServices {
+			node := curSrv.Nodes[0]
+			host, port, err := net.SplitHostPort(node.Address)
+			if err != nil {
+				log.Err(err)
+			}
+
 			if n.Uid == node.Uid {
-				continue
+				goto out
 			}
 
 			h, p, err := net.SplitHostPort(n.Address)
@@ -156,14 +160,47 @@ func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
 
 			// 同个服务器
 			if host == h && port == p {
-				continue
+				goto out
 			}
 
-			nodes = append(nodes, n)
 		}
-		service.Nodes = nodes
+		nodes = append(nodes, n)
+	out:
 	}
 
+	service.Nodes = nodes
+	/*
+		for _, curSrv := range localServices {
+			if curSrv != nil && service.Name == curSrv.Name {
+				node := curSrv.Nodes[0]
+				host, port, err := net.SplitHostPort(node.Address)
+				if err != nil {
+					log.Err(err)
+				}
+
+				nodes := make([]*registry.Node, 0)
+				var node *registry.Node
+				for _, n := range service.Nodes {
+					if n.Uid == node.Uid {
+						continue
+					}
+
+					h, p, err := net.SplitHostPort(n.Address)
+					if err != nil {
+						log.Err(err)
+					}
+
+					// 同个服务器
+					if host == h && port == p {
+						continue
+					}
+
+					nodes = append(nodes, n)
+				}
+				service.Nodes = nodes
+			}
+		}
+	*/
 	return service
 }
 
@@ -201,6 +238,9 @@ func (self *TRouter) store(services []*registry.Service) {
 // watch for endpoint changes
 func (self *TRouter) watch() {
 	var attempts int
+
+	// 5秒后才启动监测
+	time.Sleep(5 * time.Second)
 
 	for {
 		if self.isClosed() {
@@ -265,18 +305,26 @@ func (self *TRouter) watch() {
 
 // refresh list of api services
 func (self *TRouter) refresh() {
-	var attempts int
+	// 5秒后才启动监测
+	time.Sleep(5 * time.Second)
+
+	var (
+		err      error
+		services []*registry.Service
+		list     []*registry.Service
+		attempts int
+	)
 
 	for {
-		services, err := self.config.Registry.ListServices()
+		list, err = self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
-			log.Errf("registry unable to list services: %v", err)
+			log.Warnf("registry unable to list services: %v", err)
 			time.Sleep(time.Duration(attempts) * time.Second)
 			continue
 		}
 		// 无监视者等待
-		if len(services) == 0 {
+		if len(list) == 0 {
 			time.Sleep(60 * time.Second)
 			continue
 		}
@@ -284,18 +332,23 @@ func (self *TRouter) refresh() {
 		attempts = 0
 
 		// for each service, get service and store endpoints
-		for _, s := range services {
-			if self.config.Registry.CurrentService().Equal(s) {
-				// 不添加自己
-				continue
+		for _, s := range list {
+			for _, local := range self.config.Registry.LocalServices() {
+				if local.Equal(s) {
+					// 不添加自己
+					goto out
+				}
+
 			}
 
-			service, err := self.config.RegistryCacher.GetService(s.Name)
+			services, err = self.config.RegistryCacher.GetService(s.Name)
 			if err != nil {
 				log.Errf("unable to get service: %v", err)
 				continue
 			}
-			self.store(service)
+			self.store(services)
+
+		out:
 		}
 
 		// refresh list in 10 minutes... cruft
@@ -320,22 +373,20 @@ func (self *TRouter) Handler() interface{} {
 	return self
 }
 
+// registry a endpoion to router
 func (self *TRouter) Register(ep *registry.Endpoint) error {
 	if err := Validate(ep); err != nil {
 		return err
 	}
-
-	//path := ep.Metadata["path"]
 	return self.tree.AddRoute(EndpiontToRoute(ep))
 }
 
 func (self *TRouter) Deregister(ep *registry.Endpoint) error {
-	//method := ep.Metadata["method"]
 	path := ep.Metadata["path"]
 	return self.tree.DelRoute(path, EndpiontToRoute(ep))
 }
 
-func (self *TRouter) Endpoints() []*registry.Endpoint {
+func (self *TRouter) Endpoints() (services map[string][]*registry.Endpoint) {
 	return self.tree.Endpoints()
 }
 
@@ -358,9 +409,9 @@ func (self *TRouter) RegisterMiddleware(middlewares ...func() IMiddleware) {
 }
 
 // register module
-func (self *TRouter) RegisterGroup(grp ...IGroup) {
-	for _, g := range grp {
-		self.tree.Conbine(g.GetRoutes())
+func (self *TRouter) RegisterGroup(groups ...IGroup) {
+	for _, group := range groups {
+		self.tree.Conbine(group.GetRoutes())
 	}
 }
 
@@ -439,66 +490,61 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 
 func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest) {
 	reqMessage := r.Message // return the packet struct
-
 	// 心跳包 直接返回
 	if reqMessage.IsHeartbeat() {
-		//data := req.Message.Encode()
-		//w.Write(data)
-		//TODO 补全状态吗
+		reqMessage.SetMessageType(transport.MT_RESPONSE)
+		data := reqMessage.Encode()
+		w.Write(data)
 		return
 	}
-
-	var (
-		err error
-	)
 
 	//resMetadata := make(map[string]string)
 	//newCtx := context.WithValue(context.WithValue(ctx, share.ReqMetaDataKey, req.Metadata),
 	//	share.ResMetaDataKey, resMetadata)
 
 	//		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-	serviceName := reqMessage.Header["ServicePath"]
+	//serviceName := reqMessage.Header["ServicePath"]
 	//methodName := msg.ServiceMethod
 	st := reqMessage.SerializeType()
-	res := transport.GetMessageFromPool()
-	res.SetMessageType(transport.MT_RESPONSE)
-	res.SetSerializeType(st)
-
-	var coder codec.ICodec
-	var ctx *TRpcContext
+	//res := transport.GetMessageFromPool()
+	//res.SetMessageType(transport.MT_RESPONSE)
+	//res.SetSerializeType(st)
 	// 获取支持的序列模式
-	coder = codec.IdentifyCodec(st)
+	coder := codec.IdentifyCodec(st)
 	if coder == nil {
-		log.Warnf("can not find codec for %s", st.String())
+		w.WriteHeader(transport.StatusForbidden)
+		//w.Write([]byte("can not find codec for " + st.String()))
+		w.Write([]byte{})
 		return
-		//handleError(res, err)
+	}
+
+	route, params := self.tree.Match("CONNECT", reqMessage.Path) // 匹配路由树
+	if route == nil {
+		w.WriteHeader(transport.StatusNotFound)
+		w.Write([]byte{})
+		//w.Write([]byte("rpc: can't match route " + serviceName))
+		return
 	} else {
-		route, params := self.tree.Match("CONNECT", reqMessage.Path) // 匹配路由树
-		if route == nil {
-			err = errors.New("rpc: can't match route " + serviceName)
-			handleError(res, err)
-		} else {
-			// 初始化Context
-			p, has := self.rpcCtxPool[route.Id]
-			if !has { // TODO 优化
-				p = &sync.Pool{New: func() interface{} {
-					return NewRpcHandler(self)
-				}}
-				self.rpcCtxPool[route.Id] = p
-
-			}
-
-			ctx = p.Get().(*TRpcContext)
-			if !ctx.inited {
-				ctx.router = self
-				ctx.route = *route
-				ctx.inited = true
-			}
-			ctx.reset(w, r, self, route)
-			ctx.setPathParams(params)
-			// 执行控制器
-			self.route(route, ctx)
+		// 初始化Context
+		p, has := self.rpcCtxPool[route.Id]
+		if !has { // TODO 优化
+			p = &sync.Pool{New: func() interface{} {
+				return NewRpcHandler(self)
+			}}
+			self.rpcCtxPool[route.Id] = p
 		}
+
+		ctx := p.Get().(*TRpcContext)
+		if !ctx.inited {
+			ctx.router = self
+			ctx.route = *route
+			ctx.inited = true
+		}
+		ctx.reset(w, r, self, route)
+		ctx.setPathParams(params)
+
+		// 执行控制器
+		self.route(route, ctx)
 	}
 
 	// 返回数据

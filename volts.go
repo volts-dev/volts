@@ -12,7 +12,7 @@ import (
 type (
 
 	// Service is an interface that wraps the lower level libraries
-	// within go-micro. Its a convenience method for building
+	// within volts. Its a convenience method for building
 	// and initialising services.
 	IService interface {
 		// The service name

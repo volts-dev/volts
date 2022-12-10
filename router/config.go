@@ -7,7 +7,6 @@ import (
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
-	"github.com/volts-dev/volts/registry/noop"
 )
 
 const (
@@ -45,9 +44,11 @@ type (
 
 	GroupOption func(*GroupConfig)
 	GroupConfig struct {
-		Name       string // 当前源代码文件夹名称
-		PrefixPath string
-		FilePath   string // 当前源代码文件夹路径
+		Name        string // 当前源代码文件夹名称
+		_PrefixPath string
+		FilePath    string // 当前源代码文件夹路径
+		IsService   bool   // 是否在registry注册为独立的服务
+		PathPrefix  string
 	}
 )
 
@@ -62,7 +63,7 @@ func newConfig(opts ...Option) *Config {
 	cfg.Init(opts...)
 
 	if cfg.Registry == nil {
-		cfg.Registry = noop.New()
+		cfg.Registry = registry.Default()
 		cfg.RegistryCacher = cacher.New(cfg.Registry)
 	}
 
@@ -152,6 +153,17 @@ func WithGroupName(name string) GroupOption {
 // PrefixPath url "/PrefixPath/abc"
 func WithGroupPathPrefix(prefixPath string) GroupOption {
 	return func(cfg *GroupConfig) {
-		cfg.PrefixPath = prefixPath
+		cfg.PathPrefix = prefixPath
+	}
+}
+
+// 独立出来注册为单一微服务在registry里
+func WithAloneService(asService bool, servicsName string, prefix ...string) GroupOption {
+	return func(cfg *GroupConfig) {
+		cfg.Name = servicsName
+		cfg.IsService = asService
+		if len(prefix) > 0 {
+			cfg.PathPrefix = prefix[0]
+		}
 	}
 }
