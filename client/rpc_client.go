@@ -121,19 +121,10 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	defer self.pool.Release(conn, nil)
 
 	msg.Path = req.Method() // TODO msg 添加server action
-	//data, err := msgCodece.Encode(req.Body())
 	data := req.Body().Data.Bytes()
-	if err != nil {
-		log.Dbg("odec.Encode(call.Args)", err.Error())
-		//call.Error = err
-		//call.done()
-		return nil, err
-	}
 	if len(data) > 1024 && self.config.CompressType == transport.Gzip {
 		data, err = transport.Zip(data)
 		if err != nil {
-			//call.Error = err
-			//call.done()
 			return nil, err
 		}
 
@@ -254,7 +245,12 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 	// return errors.New("volts.client", "request timeout", 408)
 	call := func(i int, response *IResponse) error {
 		// select next node
+		// selector 可能因为过滤后得不到合适服务器
 		node, err := next()
+		if err != nil {
+			return err
+		}
+
 		// make the call
 		*response, err = self.call(ctx, node, request, callOpts)
 		//r.opts.Selector.Mark(service, node, err)

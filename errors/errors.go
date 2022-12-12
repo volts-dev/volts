@@ -9,8 +9,9 @@ import (
 
 // ErrShutdown connection is closed.
 var (
-	ErrShutdown         = errors.New("connection is shut down")
-	ErrUnsupportedCodec = errors.New("unsupported codec")
+	ErrShutdown          = errors.New("connection is shut down")
+	ErrUnsupportedCodec  = errors.New("unsupported codec")
+	ErrUnvailableService = errors.New("Unvailable Service")
 )
 
 type (

@@ -20,7 +20,6 @@ func NewRpcResponse(ctx context.Context, req *RpcRequest, socket ISocket) *RpcRe
 		sock:    socket,
 		Request: req,
 		body:    body.New(codec.IdentifyCodec(req.Message.SerializeType())),
-		status:  StatusOK,
 	}
 }
 
@@ -30,7 +29,6 @@ func (self *RpcResponse) Body() *body.TBody {
 
 // TODO 写状态
 func (self *RpcResponse) WriteHeader(code MessageStatusType) {
-	//equest.Message.SetMessageType(code)
 	self.status = code
 }
 
@@ -42,6 +40,9 @@ func (self *RpcResponse) Write(b []byte) (int, error) {
 	msg := newMessage()
 	self.Request.Message.CloneTo(msg)
 	msg.SetMessageType(MT_RESPONSE)
+	if self.status == 0 {
+		self.status = StatusOK
+	}
 	msg.SetMessageStatusType(self.status)
 	msg.Payload = b
 	return len(b), self.sock.Send(msg)
@@ -55,6 +56,9 @@ func (self *RpcResponse) WriteStream(data interface{}) error {
 
 	msg := self.Request.Message
 	msg.SetMessageType(MT_RESPONSE)
+	if self.status == 0 {
+		self.status = StatusOK
+	}
 	msg.SetMessageStatusType(self.status)
 	_, err := self.body.Encode(data)
 	if err != nil {
@@ -62,6 +66,5 @@ func (self *RpcResponse) WriteStream(data interface{}) error {
 	}
 
 	msg.Payload = self.Body().Data.Bytes()
-
 	return self.sock.Send(msg)
 }

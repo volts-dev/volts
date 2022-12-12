@@ -18,7 +18,8 @@ const (
 	MT_ERROR MessageType = iota
 	MT_REQUEST
 	MT_RESPONSE // Response is message type of response
-
+)
+const ( // TODO 9 重要修复状态修改不一致问题
 	StatusOK MessageStatusType = iota // Normal Not an error; returned on success.
 	// Error indicates some errors occur.
 	StatusError
@@ -35,7 +36,8 @@ const (
 	StatusServiceUnavailable
 	// The request does not have valid authentication credentials for the operation.
 	StatusUnauthorized
-
+)
+const (
 	// None does not compress.
 	None CompressType = iota
 	// Gzip uses gzip compression.
@@ -198,7 +200,7 @@ func (self Bom) CompressType() CompressType {
 
 // SetCompressType sets the compression type.
 func (self *Bom) SetCompressType(ct CompressType) {
-	self[2] = self[2] | ((byte(ct) << 2) & 0x1C)
+	self[2] = (self[2] &^ 0x1C) | ((byte(ct) << 2) & 0x1C)
 }
 
 // MessageStatusType returns the message status type.
@@ -208,7 +210,7 @@ func (self Bom) MessageStatusType() MessageStatusType {
 
 // SetMessageStatusType sets message status type.
 func (self *Bom) SetMessageStatusType(mt MessageStatusType) {
-	self[2] = self[2] | (byte(mt) & 0x03)
+	self[2] = (self[2] &^ 0x03) | (byte(mt) & 0x03)
 }
 
 // SerializeType returns serialization type of payload.

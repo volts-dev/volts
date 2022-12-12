@@ -29,6 +29,7 @@ func WithConfig(model IConfig) Option {
 	}
 }
 
+// 监听配置文件变动
 func WithWatcher() Option {
 	return func(cfg *Config) {
 		// 监视文件

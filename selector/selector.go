@@ -11,7 +11,7 @@ var (
 	defaultSelector  = New()
 	log              = logger.New("selector")
 	ErrNotFound      = errors.New("not found")
-	ErrNoneAvailable = errors.New("none available")
+	ErrNoneAvailable = errors.New("service none available")
 )
 
 type (

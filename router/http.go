@@ -293,8 +293,7 @@ func (self *THttpContext) Apply() {
 	if !self.isDone {
 		if self.TemplateSrc != "" {
 			self.SetHeader(true, "Content-Type", self.ContentType)
-			err := self.Template.RenderToWriter(self.TemplateSrc, self.templateVar, self.response)
-			if err != nil {
+			if err := self.Template.RenderToWriter(self.TemplateSrc, self.templateVar, self.response); err != nil {
 				http.Error(self.response, "Apply fail:"+err.Error(), http.StatusInternalServerError)
 			}
 		} else if !self.response.Written() { // STEP:只许一次返回
