@@ -61,7 +61,7 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 	// default http2 server
 
 	// insecure connection use h2c
-	if !(h.transport.config.Secure || h.transport.config.TLSConfig != nil) {
+	if !(h.transport.config.Secure || h.transport.config.TlsConfig != nil) {
 		h.http.Handler = h2c.NewHandler(h.http.Handler, &http2.Server{})
 	}
 

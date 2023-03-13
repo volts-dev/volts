@@ -137,6 +137,7 @@ func (self *TRpcContext) Write(data []byte) (int, error) {
 }
 
 func (self *TRpcContext) WriteStream(data interface{}) error {
+	self.isDone = true
 	return self.response.WriteStream(data)
 }
 

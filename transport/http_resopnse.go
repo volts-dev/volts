@@ -2,10 +2,13 @@ package transport
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"reflect"
+
+	"github.com/volts-dev/volts/util/body"
 )
 
 // 参考Tango
@@ -21,6 +24,7 @@ type (
 	}
 
 	THttpResponse struct {
+		body *body.TBody //
 		http.ResponseWriter
 		status int
 		size   int
@@ -29,8 +33,10 @@ type (
 	}
 )
 
-func NewResponser() *THttpResponse {
-	resp := &THttpResponse{}
+func NewHttpResponse(ctx context.Context, req *THttpRequest) *THttpResponse {
+	resp := &THttpResponse{
+		body: body.New(req.Codec()),
+	}
 	resp.Val = reflect.ValueOf(resp)
 	return resp
 }
@@ -47,6 +53,21 @@ func (self *THttpResponse) Write(b []byte) (int, error) {
 	}
 	self.size += size
 	return size, err
+}
+
+// write data as stream
+func (self *THttpResponse) WriteStream(data interface{}) error {
+	_, err := self.body.Encode(data)
+	if err != nil {
+		return err
+	}
+
+	_, err = self.Write(self.body.Data.Bytes())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // writable

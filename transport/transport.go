@@ -3,6 +3,7 @@ package transport
 import (
 	"net"
 
+	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/util/body"
 )
 
@@ -53,6 +54,8 @@ type (
 		ContentType() string
 		// write a response directly to the client
 		Body() IBody // *body.TBody
+
+		Codec() codec.ICodec
 	}
 
 	// 提供给服务器客户端最基本接口

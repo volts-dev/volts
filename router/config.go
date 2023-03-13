@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	NameMapper = func(name string) string {
+	ControllerMethodNameMapper = func(name string) string {
 		name = strings.ToLower(name)
 		// 为特殊控制器提供固定的接口命名 比如Model.Read被占用的情款下改用Model.Api_Read
 		name = strings.Replace(name, "api_", "", 1)
@@ -28,6 +28,8 @@ type (
 	Option func(*Config)
 	Config struct {
 		*config.Config `field:"-"`
+		Name           string             `field:"-"` // config name/path in config file
+		PrefixName     string             `field:"-"` // config prefix name
 		Logger         logger.ILogger     `field:"-"` // 实例
 		Router         *TRouter           `field:"-"`
 		Registry       registry.IRegistry `field:"-"`
@@ -40,6 +42,7 @@ type (
 		RequestPrinter    bool           `field:"request_printer"`
 		StaticDir         []string       `field:"static_dir"` // the static dir allow to visit
 		StaticExt         []string       `field:"static_ext"` // the static file format allow to visit
+		UsePprof          bool
 	}
 
 	GroupOption func(*GroupConfig)
@@ -54,13 +57,13 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Name:           "router",
 		Logger:         log,
 		Recover:        true,
 		RecoverHandler: recoverHandler,
 	}
-
-	config.Default().Register(cfg)
 	cfg.Init(opts...)
+	config.Register(cfg)
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.Default()
@@ -71,7 +74,10 @@ func newConfig(opts ...Option) *Config {
 }
 
 func (self *Config) String() string {
-	return "router"
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+	}
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -98,7 +104,7 @@ func Debug() Option {
 
 func WithNameMapper(fn func(string) string) config.Option {
 	return func(cfg *config.Config) {
-		NameMapper = fn
+		ControllerMethodNameMapper = fn
 	}
 }
 
@@ -165,5 +171,16 @@ func WithAloneService(asService bool, servicsName string, prefix ...string) Grou
 		if len(prefix) > 0 {
 			cfg.PathPrefix = prefix[0]
 		}
+	}
+}
+
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
+	return func(cfg *Config) {
+		cfg.PrefixName = prefixName
+		// 重新加载
+		cfg.Load()
+		// 重新注册
+		config.Register(cfg)
 	}
 }

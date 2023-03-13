@@ -48,7 +48,7 @@ func TestHelloworld(t *testing.T) {
 	g.Wait()
 	//<-time.After(3 * time.Second)
 
-	cli, _ := client.NewRpcClient(
+	cli := client.NewRpcClient(
 		client.Debug(),
 		client.WithHost(app.Server().Config().Address),
 	)

@@ -59,8 +59,8 @@ func NewHttpClient(opts ...Option) (*HttpClient, error) {
 	)
 
 	// 默认编码
-	if cfg.SerializeType == 0 {
-		cfg.SerializeType = codec.Bytes
+	if cfg.SerializeType == "" {
+		cfg.Serialize = codec.Bytes
 	}
 
 	p := pool.NewPool(
@@ -87,7 +87,7 @@ func NewHttpClient(opts ...Option) (*HttpClient, error) {
 		dialer = proxy.Direct
 	}
 
-	cfg.Transport.Config().TLSConfig = cfg.TLSConfig
+	cfg.Transport.Config().TlsConfig = cfg.TlsConfig
 	cli := &HttpClient{
 		config: cfg,
 		pool:   p,
@@ -156,7 +156,7 @@ func (self *HttpClient) Config() *Config {
 // 新建请求
 func (self *HttpClient) NewRequest(method, url string, data interface{}, optinos ...RequestOption) (*httpRequest, error) {
 	optinos = append(optinos,
-		WithCodec(self.config.SerializeType),
+		WithCodec(self.config.Serialize),
 	)
 
 	return newHttpRequest(method, url, data, optinos...)
@@ -172,7 +172,7 @@ func (h *HttpClient) next(request *httpRequest, opts CallOptions) (selector.Next
 	}
 	service := request.Service()
 
-	// get proxy
+	// TODO 修改环境变量名称 get proxy
 	if prx := os.Getenv("MICRO_PROXY"); len(prx) > 0 {
 		service = prx
 	}
@@ -302,8 +302,8 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 
 	// set the content type for the request
 	// 默认bytes 编码不改Content-Type 以request为主
-	st := h.config.SerializeType
-	if req.opts.SerializeType != h.config.SerializeType {
+	st := h.config.Serialize
+	if req.opts.SerializeType != h.config.Serialize {
 		st = req.opts.SerializeType
 	}
 	if st != codec.Bytes {

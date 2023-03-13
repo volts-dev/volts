@@ -116,7 +116,7 @@ func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
 
 func isWebSocket(ctx *THttpContext) bool {
 	contains := func(key, val string) bool {
-		vv := strings.Split(ctx.Request().Header.Get(key), ",")
+		vv := strings.Split(ctx.Request().Header().Get(key), ",")
 		for _, v := range vv {
 			if val == strings.ToLower(strings.TrimSpace(v)) {
 				return true

@@ -14,13 +14,9 @@ type tcpTransport struct {
 }
 
 func NewTCPTransport(opts ...Option) ITransport {
-	cfg := newConfig()
-
-	for _, opt := range opts {
-		opt(cfg)
+	return &tcpTransport{
+		config: newConfig(opts...),
 	}
-
-	return &tcpTransport{config: cfg}
 }
 
 func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
@@ -29,17 +25,14 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 		ReadTimeout:  self.config.ReadTimeout,
 		WriteTimeout: self.config.WriteTimeout,
 	}
-
-	for _, opt := range opts {
-		opt(&dialCfg)
-	}
+	dialCfg.Init(opts...)
 
 	var conn net.Conn
 	var err error
 
 	// TODO: support dial option here rather than using internal config
-	if self.config.Secure || self.config.TLSConfig != nil {
-		config := self.config.TLSConfig
+	if self.config.Secure || self.config.TlsConfig != nil {
+		config := self.config.TlsConfig
 		if config == nil {
 			config = &tls.Config{
 				InsecureSkipVerify: true,
@@ -73,8 +66,8 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 	var err error
 
 	// TODO: support use of listen options
-	if self.config.Secure || self.config.TLSConfig != nil {
-		config := self.config.TLSConfig
+	if self.config.Secure || self.config.TlsConfig != nil {
+		config := self.config.TlsConfig
 
 		fn := func(addr string) (net.Listener, error) {
 			if config == nil {

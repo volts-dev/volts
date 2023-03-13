@@ -14,18 +14,36 @@ type (
 		*http.Request
 		Transport ITransport
 		body      *body.TBody //
+		codec     codec.ICodec
 	}
 )
 
 // 提供给Router的context使用
 func NewHttpRequest(req *http.Request) *THttpRequest {
-	ct := req.Header.Get("Content-Type")
-	c := codec.IdentifyCodec(codec.CodecByName(ct))
-
-	return &THttpRequest{
+	r := &THttpRequest{
 		Request: req,
-		body:    body.New(c),
 	}
+
+	r.body = body.New(r.Codec())
+	return r
+}
+
+func (self *THttpRequest) Codec() codec.ICodec {
+	if self.codec == nil {
+		ct := self.Request.Header.Get("Content-Type")
+
+		// TODO 添加更多
+		var st codec.SerializeType
+		switch ct {
+		case "application/json":
+			st = codec.JSON
+		default:
+			st = codec.Use(ct)
+		}
+		self.codec = codec.IdentifyCodec(st)
+	}
+
+	return self.codec
 }
 
 func (self *THttpRequest) Body() *body.TBody {
@@ -54,17 +72,17 @@ func (self *THttpRequest) ____ContentType() string {
 }
 
 // Header of the request
-func (self *THttpRequest) ___Header() IHeader {
+func (self *THttpRequest) Header() http.Header {
 	return self.Request.Header
 }
 
 // Body is the initial decoded value
-//Body() interface{}
+// Body() interface{}
 // Read the undecoded request body
 func (self *THttpRequest) Read() ([]byte, error) { return nil, nil }
 
 // The encoded message stream
-//Codec() codec.Reader
+// Codec() codec.Reader
 // Indicates whether its a stream
 func (self *THttpRequest) Stream() bool {
 	return false

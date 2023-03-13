@@ -54,7 +54,7 @@ func New(Prefix string, opts ...Option) *TLogger {
 		return l.(*TLogger)
 	}
 
-	opts = append(opts, WithPrefix(Prefix)) //
+	opts = append(opts, WithConfigPrefixName(Prefix)) //
 	config := newConfig(opts...)
 
 	//log := newLogger(opts...)

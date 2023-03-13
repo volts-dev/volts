@@ -9,13 +9,15 @@ type (
 
 func newNoopRegistry() *noopRegistry {
 	reg := &noopRegistry{
-		config: NewConfig(),
+		config: NewConfig(
+			WithName(""),
+		),
 	}
-	reg.config.Name = reg.String()
 	return reg
 }
 
-func (*noopRegistry) Init(...Option) error {
+func (self *noopRegistry) Init(opts ...Option) error {
+	self.config.Init(opts...)
 	return nil
 }
 
@@ -49,6 +51,6 @@ func (*noopRegistry) LocalServices() []*Service {
 	return nil
 }
 
-func (*noopRegistry) String() string {
-	return "noopRegistry"
+func (self *noopRegistry) String() string {
+	return self.config.Name
 }

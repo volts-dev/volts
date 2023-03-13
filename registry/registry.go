@@ -2,6 +2,8 @@ package registry
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 
 	"github.com/volts-dev/volts/logger"
 )
@@ -11,6 +13,8 @@ var (
 	defaultRegistry   IRegistry
 	ErrNotFound       = errors.New("service not found") // Not found error when GetService is called
 	ErrWatcherStopped = errors.New("watcher stopped")   // Watcher stopped error when watcher is stopped
+	registryMap       = make(map[string]func(opts ...Option) IRegistry)
+	rehistryHost      sync.Map
 )
 
 type (
@@ -36,7 +40,7 @@ type (
 		Nodes     []*Node           `json:"nodes"`
 	}
 
-	// 微服务节点 相当于每个程序Port一个节点
+	// 微服务节点 相当于每个程序/Port一个节点
 	Node struct {
 		Uid      string            `json:"id"`
 		Address  string            `json:"address"`
@@ -76,6 +80,41 @@ type (
 		Values []*Value `json:"values"`
 	}
 )
+
+func Register(name string, creator func(opts ...Option) IRegistry) {
+	registryMap[name] = creator
+}
+
+func Use(name string, opts ...Option) IRegistry {
+	cfg := NewConfig(opts...)
+
+	// 加载存在的服务
+	for _, addr := range cfg.Addrs {
+		if addr == "" {
+			continue
+		}
+
+		regName := fmt.Sprintf("%s-%s", cfg.String(), addr)
+		if reg, has := rehistryHost.Load(regName); has {
+			return reg.(IRegistry)
+		}
+	}
+
+	if fn, has := registryMap[name]; has {
+		reg := fn(opts...)
+		for _, addr := range reg.Config().Addrs {
+			if addr == "" {
+				continue
+			}
+
+			regName := fmt.Sprintf("%s-%s", cfg.String(), addr)
+			rehistryHost.Store(regName, reg)
+		}
+		return reg
+	}
+
+	return newNoopRegistry()
+}
 
 // NoopRegistry as default registry
 func Default(new ...IRegistry) IRegistry {

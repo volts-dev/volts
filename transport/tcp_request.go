@@ -23,7 +23,7 @@ type RpcRequest struct {
 	endpoint    string
 	contentType string
 	socket      ISocket //
-	Codec       codec.ICodec
+	codec       codec.ICodec
 	header      header.Header
 	body        *body.TBody //
 	rawBody     interface{}
@@ -33,19 +33,26 @@ type RpcRequest struct {
 
 // 提供给Router的context使用
 func NewRpcRequest(ctx context.Context, message *Message, socket ISocket) *RpcRequest {
-	// new a body
-	body := body.New(codec.IdentifyCodec(message.SerializeType()))
-	body.Data.Write(message.Payload)
-
-	req := &RpcRequest{
+	r := &RpcRequest{
 		Message: message,
 		Context: ctx,
 		socket:  socket,
-		body:    body,
-		Codec:   codec.IdentifyCodec(message.SerializeType()), // TODO 判断合法
 	}
 
-	return req
+	// new a body
+	body := body.New(r.Codec())
+	body.Data.Write(message.Payload)
+	r.body = body
+
+	return r
+}
+
+func (self *RpcRequest) Codec() codec.ICodec {
+	if self.codec == nil {
+		self.codec = codec.IdentifyCodec(self.Message.SerializeType())
+	}
+
+	return self.codec
 }
 
 func (self *RpcRequest) Body() *body.TBody {

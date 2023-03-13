@@ -98,15 +98,9 @@ type (
 )
 
 func NewHTTPTransport(opts ...Option) *HttpTransport {
-	cfg := newConfig()
-
-	for _, o := range opts {
-		o(cfg)
-	}
-
 	return &HttpTransport{
 		//dialer: proxy.Direct,
-		config: cfg,
+		config: newConfig(opts...),
 	}
 }
 
@@ -125,17 +119,14 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		ReadTimeout:  self.config.ReadTimeout,
 		WriteTimeout: self.config.WriteTimeout,
 	}
-
-	for _, opt := range opts {
-		opt(&dialCfg)
-	}
+	dialCfg.Init(opts...)
 
 	var conn net.Conn
 	var err error
 
 	// TODO: support dial option here rather than using internal config
-	if dialCfg.Secure || self.config.TLSConfig != nil {
-		config := self.config.TLSConfig
+	if dialCfg.Secure || self.config.TlsConfig != nil {
+		config := self.config.TlsConfig
 		if config == nil {
 			config = &tls.Config{
 				InsecureSkipVerify: true, // 跳过认证证书
@@ -221,8 +212,8 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 	var err error
 
 	// TODO: support use of listen options
-	if self.config.Secure || self.config.TLSConfig != nil {
-		config := self.config.TLSConfig
+	if self.config.Secure || self.config.TlsConfig != nil {
+		config := self.config.TlsConfig
 
 		fn := func(addr string) (net.Listener, error) {
 			if config == nil {

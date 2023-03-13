@@ -2,14 +2,31 @@ package selector
 
 import (
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/volts-dev/volts/registry"
 )
 
+var strategyMap = map[string]func(services []*registry.Service) Next{
+	"random":     Random,
+	"roundrobin": RoundRobin,
+}
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
+}
+
+func Register(name string, fn func(services []*registry.Service) Next) {
+	strategyMap[strings.ToLower(name)] = fn
+}
+
+func Use(name string) func(services []*registry.Service) Next {
+	if fn, has := strategyMap[strings.ToLower(name)]; has {
+		return fn
+	}
+	return nil
 }
 
 // Random is a random strategy algorithm for node selection

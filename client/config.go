@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/codec"
@@ -25,7 +26,7 @@ var (
 	// DefaultRetries is the default number of times a request is tried
 	DefaultRetries = 1
 	// DefaultRequestTimeout is the default request timeout
-	DefaultRequestTimeout = time.Second * 5
+	DefaultRequestTimeout = time.Second * 20
 	// DefaultPoolSize sets the connection pool size
 	DefaultPoolSize = 100
 	// DefaultPoolTTL sets the connection pool ttl
@@ -82,14 +83,17 @@ type (
 
 	Config struct {
 		*config.Config `field:"-"`
+		Name           string `field:"-"` // config name/path in config file
+		PrefixName     string `field:"-"` // config prefix name
 		// Other options for implementations of the interface
 		// can be stored in a context
-		Logger      logger.ILogger         `field:"-"`
+		Logger      logger.ILogger         `field:"-"` // 保留:提供给扩展使用
 		Context     context.Context        `field:"-"`
 		Client      IClient                `field:"-"`
 		Transport   transport.ITransport   `field:"-"`
 		Registry    registry.IRegistry     `field:"-"`
 		Selector    selector.ISelector     `field:"-"`
+		TlsConfig   *tls.Config            `field:"-"` // TLSConfig for tcp and quic
 		CallOptions CallOptions            `field:"-"` // Default Call Options
 		DialOptions []transport.DialOption `field:"-"` // TODO 		// 提供实时变化sturct
 		// Breaker is used to config CircuitBreaker
@@ -109,9 +113,6 @@ type (
 		// If it is empty, clients will ignore group.
 		Group string
 
-		// TLSConfig for tcp and quic
-		TLSConfig *tls.Config `field:"-"`
-
 		// kcp.BlockCrypt
 		_Block interface{}
 		// RPCPath for http connection
@@ -120,7 +121,9 @@ type (
 		// BackupLatency is used for Failbackup mode. rpc will sends another request if the first response doesn't return in BackupLatency time.
 		BackupLatency time.Duration
 
-		SerializeType codec.SerializeType
+		// 传输序列类型
+		Serialize     codec.SerializeType `field:"-"`
+		SerializeType string              //codec.SerializeType
 		CompressType  transport.CompressType
 
 		Heartbeat         bool
@@ -135,6 +138,13 @@ type (
 		// Debug mode
 		PrintRequest    bool
 		PrintRequestAll bool
+
+		// Registry
+		RegistryType string
+		RegistryHost string
+
+		// Selector
+		SelectorStrategy string
 	}
 
 	// RequestOption used by NewRequest
@@ -143,6 +153,8 @@ type (
 
 func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
+		Name:      "client",
+		Config:    config.Default(),
 		Logger:    log,
 		Transport: tr,
 		Retries:   3,
@@ -160,18 +172,56 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		},
 		PoolSize: DefaultPoolSize,
 		PoolTtl:  DefaultPoolTTL,
-		//	Broker:    broker.DefaultBroker,
+		//Broker:    broker.DefaultBroker,
 		//Selector: selector.Default(),
 		//Registry: registry.Default(),
+		SelectorStrategy: "random",
 	}
 
-	config.Default().Register(cfg)
+	//if cfg.Name == "" {
+	//	cfg.Name = "client"
+	//}
 	cfg.Init(opts...)
+
+	config.Register(cfg)
+
+	// 保存/加载
+	if !config.Default().InConfig(cfg.String()) {
+		// 保存到内存
+		if err := cfg.Save(false); err != nil {
+			log.Fatalf("save %v config failed!", cfg.String())
+		}
+		// 保存到配置文件
+		config.Default().Save()
+	} else if err := cfg.Load(); err != nil {
+		log.Fatalf("load %v config failed!", cfg.String())
+	}
+
+	// 初始化序列
+	if st := codec.Use(cfg.SerializeType); st != 0 {
+		cfg.Serialize = st
+	}
+
+	// 初始化 transport
+	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
+
+	// 初始化regsitry
+	if reg := registry.Use(cfg.RegistryType /*registry.WithName(cfg.RegistryType),*/, registry.WithConfigPrefixName(cfg.Name), registry.Addrs(cfg.RegistryHost)); reg != nil {
+		cfg.Registry = reg
+		cfg.Selector = selector.New(
+			selector.WithConfigPrefixName(cfg.String()), // 配置路径
+			selector.Registry(cfg.Registry),
+			selector.WithStrategy(cfg.SelectorStrategy),
+		)
+	}
 	return cfg
 }
 
 func (self *Config) String() string {
-	return "client"
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{self.Name, self.PrefixName}, ".")
+	}
+	return self.Name
 }
 
 // init options
@@ -195,8 +245,8 @@ func (self *Config) Save(immed ...bool) error {
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
-		cfg.CallOptions.RequestTimeout = 60 * time.Second
-		cfg.CallOptions.DialTimeout = 60 * time.Second
+		cfg.CallOptions.RequestTimeout = 180 * time.Second
+		cfg.CallOptions.DialTimeout = 180 * time.Second
 		cfg.Transport.Init(
 			transport.DialTimeout(cfg.CallOptions.DialTimeout),
 			transport.ReadTimeout(cfg.CallOptions.DialTimeout),
@@ -261,9 +311,10 @@ func AllowRedirect() HttpOption {
 }
 
 // Codec to be used to encode/decode requests for a given content type
-func WithSerializeType(c codec.SerializeType) Option {
+func WithSerializeType(st codec.SerializeType) Option {
 	return func(cfg *Config) {
-		cfg.SerializeType = c
+		cfg.Serialize = st
+		cfg.SerializeType = st.String()
 	}
 }
 
@@ -272,7 +323,9 @@ func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
 		// set in the selector
-		cfg.Selector.Init(selector.Registry(r))
+		if cfg.Selector != nil {
+			cfg.Selector.Init(selector.Registry(r))
+		}
 	}
 }
 
@@ -330,5 +383,14 @@ func WithPrintRequest(all ...bool) Option {
 func WithHost(adr ...string) Option {
 	return func(cfg *Config) {
 		cfg.CallOptions.Address = append(cfg.CallOptions.Address, adr...)
+	}
+}
+
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
+	return func(cfg *Config) {
+		cfg.PrefixName = prefixName
+		// 重新加载
+		cfg.Load()
 	}
 }

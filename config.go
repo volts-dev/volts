@@ -13,13 +13,14 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		Client    client.IClient
-		Server    server.IServer
-		Registry  registry.IRegistry
-		Transport transport.ITransport
+		Name   string
+		Client client.IClient
+		Server server.IServer
+		//Transport transport.ITransport
+		//Registry  registry.IRegistry
 
 		// Before and After funcs
-		BeforeStart []func() error
+		BeforeStart []func() error // TODO 处理服务器启动后的事物
 		BeforeStop  []func() error
 		AfterStart  []func() error
 		AfterStop   []func() error
@@ -33,7 +34,8 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Registry: registry.Default(),
+		Name: "service",
+		//Registry: registry.Default(),
 	}
 
 	cfg.Init(opts...)
@@ -48,21 +50,29 @@ func (self *Config) Init(opts ...Option) {
 	if self.Context == nil {
 		self.Context = context.Background()
 	}
-
+	/* 废弃
 	if self.Transport == nil {
 		self.Transport = transport.NewHTTPTransport()
 	}
-
-	if self.Client == nil {
-		self.Client = client.Default(client.WithTransport(self.Transport))
+	*/
+	if self.Server == nil {
+		self.Server = server.New(
+			server.Name(self.Name),
+			server.Transport(
+				transport.NewHTTPTransport(transport.WithConfigPrefixName(self.Name)),
+			),
+		)
 	}
 
-	if self.Server == nil {
-		self.Server = server.New(server.Transport(self.Transport))
+	if self.Client == nil {
+		self.Client = client.NewRpcClient(
+			/*client.WithTransport(self.Transport)*/
+			client.WithConfigPrefixName(self.Server.Config().Name),
+		)
 	}
 
 	if self.Debug {
-		self.Transport.Init(transport.Debug())
+		//self.Transport.Init(transport.Debug())
 		self.Client.Init(client.Debug())
 		self.Server.Config().Init(server.Debug())
 	}
@@ -71,7 +81,11 @@ func (self *Config) Init(opts ...Option) {
 // Name of the service
 func Name(name string) Option {
 	return func(cfg *Config) {
-		cfg.Server.Config().Init(server.Name(name))
+		cfg.Name = name
+		if cfg.Server != nil {
+			//cfg.Server.Config().Init(server.Name(name))
+			cfg.Server.Config().Init(server.WithConfigPrefixName(cfg.Name))
+		}
 	}
 }
 
@@ -94,6 +108,7 @@ func Client(cli client.IClient) Option {
 func Server(srv server.IServer) Option {
 	return func(cfg *Config) {
 		cfg.Server = srv
+		cfg.Server.Config().Init(server.WithConfigPrefixName(cfg.Name))
 	}
 }
 
@@ -101,7 +116,7 @@ func Server(srv server.IServer) Option {
 // and the underlying components
 func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
-		cfg.Registry = r
+		//cfg.Registry = r
 		// Update Client and Server
 
 		if cfg.Client != nil {
@@ -120,7 +135,7 @@ func Registry(r registry.IRegistry) Option {
 // and the underlying components
 func Transport(t transport.ITransport) Option {
 	return func(cfg *Config) {
-		cfg.Transport = t
+		//cfg.Transport = t
 
 		// Update Client and Server
 		if cfg.Client != nil {

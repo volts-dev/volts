@@ -1,15 +1,21 @@
 package logger
 
-import "github.com/volts-dev/volts/config"
+import (
+	"strings"
+
+	"github.com/volts-dev/volts/config"
+)
 
 type (
 	Option func(*Config)
 
 	Config struct {
 		*config.Config `field:"-"`
+		Name           string `field:"-"` // config name/path in config file
+		PrefixName     string `field:"-"` // config prefix name
 		Level          Level
-		Prefix         string
-		WriterName     string
+		//Prefix         string
+		WriterName string
 	}
 )
 
@@ -19,17 +25,20 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Config: config.Default(),
 		Level:  LevelDebug,
-		Prefix: "LOG",
+		Name:   "logger",
 	}
-	config.Default().Register(cfg)
 	cfg.Init(opts...)
+	config.Default().Register(cfg)
 	return cfg
 }
 
-// init options
 func (self *Config) String() string {
-	return "logger." + self.Prefix
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{self.Name, self.PrefixName}, ".")
+	}
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -59,9 +68,12 @@ func WithWrite(name string) Option {
 	}
 }
 
-func WithPrefix(name string) Option {
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
-		cfg.Prefix = name
+		cfg.PrefixName = prefixName
+		// 重新加载
+		cfg.Load()
 	}
 }
 

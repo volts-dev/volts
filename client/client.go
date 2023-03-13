@@ -65,17 +65,13 @@ type (
 ///}
 
 // NewClient returns a new client
-func New(opts ...Option) (IClient, error) {
+func New(opts ...Option) IClient {
 	return NewRpcClient(opts...) //
 }
 
 func Default(opts ...Option) IClient {
 	if defaultClient == nil {
-		var err error
-		defaultClient, err = NewRpcClient()
-		if err != nil {
-			panic(err)
-		}
+		defaultClient = NewRpcClient()
 	}
 	defaultClient.Init(opts...)
 	return defaultClient

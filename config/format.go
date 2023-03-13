@@ -4,7 +4,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
+	"github.com/volts-dev/utils"
 )
 
 type (
@@ -111,14 +113,14 @@ func (self *format) GetFloat64(key string, defaultValue float64) float64 {
 func (self *format) Unmarshal(rawVal interface{}) error {
 	self.Lock()
 	defer self.Unlock()
-	return self.v.Unmarshal(rawVal)
+	return self.v.Unmarshal(rawVal, withTagName("field"), withMatchName())
 }
 
 // key 可以整个config结构
 func (self *format) UnmarshalKey(key string, rawVal interface{}) error {
 	self.Lock()
 	defer self.Unlock()
-	return self.v.UnmarshalKey(key, rawVal)
+	return self.v.UnmarshalKey(key, rawVal, withTagName("field"), withMatchName())
 }
 
 func (self *format) SetValue(key string, value interface{}) {
@@ -131,4 +133,18 @@ func (self *format) SetDefault(key string, value interface{}) {
 	self.Lock()
 	self.v.SetDefault(key, value)
 	self.Unlock()
+}
+
+func withTagName(tag string) viper.DecoderConfigOption {
+	return func(c *mapstructure.DecoderConfig) {
+		c.TagName = tag
+	}
+}
+
+func withMatchName() viper.DecoderConfigOption {
+	return func(c *mapstructure.DecoderConfig) {
+		c.MatchName = func(mapKey, fieldName string) bool {
+			return mapKey == utils.SnakeCasedName(fieldName)
+		}
+	}
 }

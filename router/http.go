@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -179,14 +178,14 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 
 			// # parse the data from POST method #
 			var err error
-			ct := self.request.Header.Get("Content-Type")
+			ct := self.request.Header().Get("Content-Type")
 			ct, _, err = mime.ParseMediaType(ct)
 			if err != nil {
 				logger.Err(err)
 				return self.methodParams
 			} else {
 				if ct == "multipart/form-data" {
-					self.request.ParseMultipartForm(256)
+					self.request.ParseMultipartForm(32 << 20) // 32m
 				} else {
 					self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
 				}
@@ -211,16 +210,8 @@ func (self *THttpContext) Write(data []byte) (int, error) {
 }
 
 func (self *THttpContext) WriteStream(data interface{}) error {
-	switch v := data.(type) {
-	case []byte:
-		_, err := self.response.Write(v)
-		return err
-	case string:
-		_, err := self.response.Write([]byte(v))
-		return err
-	}
-
-	return errors.New("only accept []byte type data")
+	self.isDone = true
+	return self.response.WriteStream(data)
 }
 
 // 如果返回 nil 代表 Url 不含改属性
@@ -359,7 +350,7 @@ func (self *THttpContext) IP() (res []string) {
 	}
 
 	proxy := make([]string, 0)
-	if ips := self.request.Header.Get("X-Forwarded-For"); ips != "" {
+	if ips := self.request.Header().Get("X-Forwarded-For"); ips != "" {
 		proxy = strings.Split(ips, ",")
 	}
 	if len(proxy) > 0 && proxy[0] != "" {
@@ -374,9 +365,9 @@ func (self *THttpContext) IP() (res []string) {
 
 // RemoteAddr returns more real IP address of visitor.
 func (self *THttpContext) RemoteAddr() string {
-	addr := self.request.Header.Get("X-Real-IP")
+	addr := self.request.Header().Get("X-Real-IP")
 	if len(addr) == 0 {
-		addr = self.request.Header.Get("X-Forwarded-For")
+		addr = self.request.Header().Get("X-Forwarded-For")
 		if addr == "" {
 			addr = self.request.RemoteAddr
 			if i := strings.LastIndex(addr, ":"); i > -1 {

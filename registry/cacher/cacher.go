@@ -20,6 +20,7 @@ type (
 	ICacher interface {
 		// embed the registry interface
 		registry.IRegistry
+		Match(endpoint string) ([]*registry.Service, error)
 		// stop the cache watcher
 		Stop()
 	}
@@ -30,9 +31,10 @@ type (
 
 		// registry cache
 		sync.RWMutex
-		cache   map[string][]*registry.Service
-		ttls    map[string]time.Time
-		watched map[string]bool
+		cache       map[string][]*registry.Service
+		endpointMap map[string]string // 缓存ep
+		ttls        map[string]time.Time
+		watched     map[string]bool
 
 		// used to stop the cache
 		exit chan bool
@@ -56,15 +58,18 @@ var (
 func New(r registry.IRegistry, opts ...registry.Option) ICacher {
 	rand.Seed(time.Now().UnixNano())
 
-	opts = append(opts, registry.RegisterTTL(DefaultTTL))
+	opts = append(opts,
+		registry.WithName(""),
+		registry.RegisterTTL(DefaultTTL))
 
 	return &cache{
-		IRegistry: r,
-		config:    registry.NewConfig(opts...),
-		watched:   make(map[string]bool),
-		cache:     make(map[string][]*registry.Service),
-		ttls:      make(map[string]time.Time),
-		exit:      make(chan bool),
+		IRegistry:   r,
+		config:      registry.NewConfig(opts...),
+		watched:     make(map[string]bool),
+		cache:       make(map[string][]*registry.Service),
+		endpointMap: make(map[string]string),
+		ttls:        make(map[string]time.Time),
+		exit:        make(chan bool),
 	}
 }
 
@@ -415,6 +420,11 @@ func (c *cache) run() {
 // watch loops the next event and calls update
 // it returns if there's an error
 func (c *cache) watch(w registry.Watcher) error {
+	// not need watch
+	if w == nil {
+		return nil
+	}
+
 	// used to stop the watch
 	stop := make(chan bool)
 
@@ -449,6 +459,62 @@ func (c *cache) watch(w registry.Watcher) error {
 	}
 }
 
+func (c *cache) match(endpoint string) ([]*registry.Service, error) {
+	c.RLock()
+	// check the cache first
+	service, has := c.endpointMap[endpoint]
+	if !has {
+		val, err, _ := c.sg.Do(endpoint, func() (interface{}, error) {
+			return c.IRegistry.ListServices()
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		services, _ := val.([]*registry.Service)
+		// reset the status
+		if err := c.getStatus(); err != nil {
+			c.setStatus(nil)
+		}
+
+		for _, srv := range services {
+			for _, ep := range srv.Endpoints {
+				// 获取服务名称
+				if ep.Path == endpoint {
+					service = srv.Name
+				}
+
+				if srvName, has := c.endpointMap[ep.Path]; has {
+					if srvName != srv.Name {
+						log.Errf("same endpiont in diff service %s-%s", srvName, srv.Name)
+					}
+
+					continue
+				}
+				c.endpointMap[ep.Path] = srv.Name
+
+			}
+		}
+	}
+	c.RUnlock()
+	return c.get(service)
+}
+
+func (c *cache) Match(endpoint string) ([]*registry.Service, error) {
+	services, err := c.match(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	// if there's nothing return err
+	if len(services) == 0 {
+		return nil, registry.ErrNotFound
+	}
+
+	// return services
+	return services, nil
+}
+
 func (c *cache) GetService(service string) ([]*registry.Service, error) {
 	// get the service
 	services, err := c.get(service)
@@ -478,5 +544,5 @@ func (c *cache) Stop() {
 }
 
 func (c *cache) String() string {
-	return "Registry Cache"
+	return c.config.Name
 }

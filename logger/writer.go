@@ -70,7 +70,7 @@ func (self *TWriterManager) write(level Level, msg string) error {
 		}
 	}
 
-	msg = "[" + self.config.Prefix + "]" + msg
+	msg = "[" + self.config.PrefixName + "]" + msg
 
 	// 异步执行
 	if self.asynchronous {

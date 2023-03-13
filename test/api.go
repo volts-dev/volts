@@ -23,7 +23,7 @@ func (self ArithCli) Mul(arg *Args) (result *Reply, err error) {
 	endpoint := "Test.Endpoint"
 	address := "127.0.0.1:35999"
 
-	cli, _ := client.NewRpcClient()
+	cli := client.NewRpcClient()
 	req, _ := cli.NewRequest(service, endpoint, arg,
 		client.WithCodec(codec.MsgPack), // 默认传输编码
 	)

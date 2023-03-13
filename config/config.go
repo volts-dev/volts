@@ -18,12 +18,12 @@ var (
 	AppName       string
 	AppUrl        string
 	AppSubUrl     string
-	AppPath       string
-	AppFilePath   string
-	AppDir        string
+	AppPath       = utils.AppPath()
+	AppFilePath   = utils.AppFilePath()
+	AppDir        = utils.AppDir()
 	AppModuleDir  = "module"
-	cfgs          sync.Map
 	defaultConfig = New(DEFAULT_PREFIX)
+	cfgs          sync.Map
 )
 
 type (
@@ -34,7 +34,6 @@ type (
 		models     sync.Map
 		CreateFile bool `field:"-"`
 		Mode       ModeType
-		Prefix     string
 		FileName   string
 		Debug      bool
 	}
@@ -50,34 +49,54 @@ type (
 	}
 )
 
-func init() {
-	AppFilePath = utils.AppFilePath()
-	AppPath = utils.AppPath()
-	AppDir = utils.AppDir()
-}
-
+/*
+	func init() {
+		AppFilePath = utils.AppFilePath()
+		AppPath = utils.AppPath()
+		AppDir = utils.AppDir()
+	}
+*/
 func Default() *Config {
 	return defaultConfig
 }
 
+func Init(opts ...Option) {
+	defaultConfig.Init(opts...)
+}
+
+func Register(cfg IConfig) {
+	defaultConfig.Register(cfg)
+}
+
+func Unregister(cfg IConfig) {
+	defaultConfig.Unregister(cfg)
+}
+
+func Load(fileName ...string) error {
+	return defaultConfig.Load(fileName...)
+}
+
 func New(prefix string, opts ...Option) *Config {
 	// 取缓存
+	var cfg *Config
 	if c, ok := cfgs.Load(prefix); ok {
-		cfg := c.(*Config)
-		cfg.Init(opts...)
-		return cfg
+		cfg = c.(*Config)
+	} else {
+		cfg = &Config{
+			fmt:        newFormat(), // 配置主要文件格式读写实现,
+			CreateFile: true,
+			Mode:       MODE_NORMAL,
+			//Prefix:     prefix,
+			FileName: CONFIG_FILE_NAME,
+		}
 	}
 
-	cfg := &Config{
-		fmt:        newFormat(), // 配置主要文件格式读写实现,
-		CreateFile: true,
-		Mode:       MODE_NORMAL,
-		Prefix:     prefix,
-		FileName:   CONFIG_FILE_NAME,
-	}
+	// 初始化程序硬配置
 	cfg.Init(opts...)
+	// 加载文件配置
+	cfg.Load()
 
-	cfgs.Store(cfg.Prefix, cfg)
+	//cfgs.Store(cfg.Prefix, cfg)
 	return cfg
 }
 
@@ -97,6 +116,10 @@ func (self *Config) Register(cfg IConfig) {
 	self.models.Store(cfg.String(), cfg)
 }
 
+func (self *Config) Unregister(cfg IConfig) {
+	self.models.Delete(cfg.String())
+}
+
 // config: the config struct with binding the options
 func (self *Config) Init(opts ...Option) {
 	if self == nil {
@@ -110,11 +133,31 @@ func (self *Config) Init(opts ...Option) {
 
 func (self *Config) Reload() {
 	// 重新加载配置
-	self.models.Range(func(key any, value any) bool {
+	defaultConfig.models.Range(func(key any, value any) bool {
 		v := value.(IConfig)
 		err := v.Load()
 		if err != nil {
 			log.Fatalf("reload %v config failed!", key)
+		}
+		return true
+	})
+}
+
+// 检测配置路径是否在Config里出现了
+func (self *Config) InConfig(path string) bool {
+	return defaultConfig.fmt.v.InConfig(path)
+}
+
+// 校正
+func (self *Config) Trim(fileName ...string) {
+	// 保存默认配置
+	self.models.Range(func(key any, value any) bool {
+		if v, ok := value.(IConfig); ok {
+			if key != v.String() {
+				// 配置路径被更改过
+				self.models.Delete(key)
+				self.models.Store(v.String(), v)
+			}
 		}
 		return true
 	})
@@ -127,13 +170,16 @@ func (self *Config) Load(fileName ...string) error {
 	filePath := filepath.Join(AppPath, self.FileName)
 	self.fmt.v.SetConfigFile(filePath)
 
+	self.Trim()
+
 	if self.CreateFile && !utils.FileExists(filePath) {
-		// 加载默认配置
+		// 保存默认配置
 		self.models.Range(func(key any, value any) bool {
-			v := value.(IConfig)
-			err := v.Save(false)
-			if err != nil {
-				log.Fatalf("reload %v config failed!", key)
+			if v, ok := value.(IConfig); ok {
+				if err := v.Save(false); err != nil {
+					log.Fatalf("reload %v config failed!", v.String())
+					return false
+				}
 			}
 			return true
 		})
@@ -141,12 +187,50 @@ func (self *Config) Load(fileName ...string) error {
 	}
 	// Find and read the config file
 	// Handle errors reading the config file
-	return self.fmt.v.ReadInConfig()
+	err := self.fmt.v.ReadInConfig()
+	if err != nil {
+		return err
+	}
+
+	changed := 0
+	self.models.Range(func(key any, value any) bool {
+		if v, ok := value.(IConfig); ok {
+			if !self.fmt.v.InConfig(v.String()) {
+				if err := v.Save(false); err != nil {
+					log.Fatalf("save %v config failed!", key)
+					return false
+				}
+				changed++
+			} else if err := v.Load(); err != nil {
+				log.Fatalf("reload %v config failed!", key)
+			}
+		}
+		return true
+	})
+	if changed > 0 {
+		// 保存新的配置
+		return self.fmt.v.WriteConfig()
+	}
+
+	return nil
+}
+
+func (self *Config) LoadToModel(model IConfig) error {
+	err := defaultConfig.fmt.UnmarshalKey(model.String(), model)
+	if err != nil {
+		return err
+	}
+
+	// 保存但不覆盖注册的Model
+	if _, ok := defaultConfig.models.Load(model.String()); !ok {
+		defaultConfig.models.Store(model.String(), model)
+	}
+	return nil
 }
 
 // TODO 支持字段结构
 // save settings data from the config model
-func (self *Config) LoadToModel(model IConfig) error {
+func (self *Config) ___LoadToModel(model IConfig) error {
 	mapper := utils.NewStructMapper(model)
 	for _, field := range mapper.Fields() {
 		// 过滤自己

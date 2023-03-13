@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/util/addr"
@@ -22,7 +23,7 @@ var log = logger.New("Server")
 
 var (
 	DefaultAddress          = ":0"
-	DefaultName             = "volts.server"
+	DefaultName             = "server"
 	DefaultVersion          = "latest"
 	DefaultRegisterCheck    = func(context.Context) error { return nil }
 	DefaultRegisterInterval = time.Second * 30
@@ -54,7 +55,7 @@ type (
 
 	TServer struct {
 		//*router
-		sync.RWMutex
+		//sync.RWMutex
 		config      *Config
 		httpRspPool sync.Pool
 
@@ -71,8 +72,8 @@ type (
 func New(opts ...Option) *TServer {
 	// inite HandlerPool New function
 	srv := &TServer{
-		config:  newConfig(opts...),
-		RWMutex: sync.RWMutex{},
+		config: newConfig(opts...),
+		//RWMutex: sync.RWMutex{},
 		//started:    atomic.Value,
 		registered: false,
 		exit:       make(chan chan error),
@@ -96,10 +97,10 @@ func Default(opts ...Option) *TServer {
 
 // 注册到服务发现
 func (self *TServer) Register() error {
-	self.RLock()
+	//self.RLock()
 	regSrv := self.services
 	config := self.config
-	self.RUnlock()
+	//self.RUnlock()
 
 	regFunc := func(service *registry.Service) error {
 		// create registry options
@@ -188,7 +189,7 @@ func (self *TServer) Register() error {
 	node.Metadata["registry"] = config.Registry.String()
 	node.Metadata["protocol"] = "mucp"
 
-	self.RLock()
+	//self.RLock()
 	/* 是否需要
 	// Maps are ordered randomly, sort the keys for consistency
 	var handlerList []string
@@ -251,7 +252,7 @@ func (self *TServer) Register() error {
 	// get registered value
 	registered := self.registered
 
-	self.RUnlock()
+	//self.RUnlock()
 
 	if !registered {
 		//if log.V(log.InfoLevel, log.DefaultLogger) {
@@ -264,8 +265,8 @@ func (self *TServer) Register() error {
 		return nil
 	}
 
-	self.Lock()
-	defer self.Unlock()
+	//self.Lock()
+	//defer self.Unlock()
 
 	// set what we're advertising
 	self.config.Advertise = addr
@@ -319,9 +320,9 @@ func (self *TServer) Deregister() error {
 	var err error
 	var advt, host, port string
 
-	self.RLock()
+	//self.RLock()
 	config := self.config
-	self.RUnlock()
+	//self.RUnlock()
 
 	// check the advertise address first
 	// if it exists then use it, otherwise
@@ -370,11 +371,11 @@ func (self *TServer) Deregister() error {
 		return err
 	}
 
-	self.Lock()
+	//self.Lock()
 	self.services = nil
 
 	if !self.registered {
-		self.Unlock()
+		//self.Unlock()
 		return nil
 	}
 
@@ -397,9 +398,8 @@ func (self *TServer) Deregister() error {
 			self.subscribers[sb] = nil
 		}
 	*/
-	self.Unlock()
+	//self.Unlock()
 	return nil
-
 }
 
 func (self *TServer) Start() error {
@@ -407,23 +407,22 @@ func (self *TServer) Start() error {
 		return nil
 	}
 
-	config := self.config
-	config.Config.Load()
-	config.Router.PrintRoutes()
+	cfg := self.config
+	//config.Register(cfg) // 注册服务器配置
+	config.Load() // 加载所有配置
+
+	// 打印
+	cfg.Router.PrintRoutes()
 
 	// start listening on the transport
-	ts, err := config.Transport.Listen(config.Address)
+	ts, err := cfg.Transport.Listen(cfg.Address)
 	if err != nil {
 		return err
 	}
 
-	log.Infof("Listening on %s - %s", ts.Addr(), config.Transport.String())
-
 	// swap address
-	self.Lock()
-	addr := config.Address
-	config.Address = ts.Addr().String()
-	self.Unlock()
+	addr := cfg.Address
+	cfg.Address = ts.Addr().String()
 	/*
 		bname := config.Broker.String()
 
@@ -442,13 +441,13 @@ func (self *TServer) Start() error {
 	// use RegisterCheck func before register
 	if err = self.config.RegisterCheck(self.config.Context); err != nil {
 		//if log.V(log.ErrorLevel, log.DefaultLogger) {
-		log.Errf("Server %s-%s register check error: %s", config.Name, config.Uid, err)
+		log.Errf("Server %s-%s register check error: %s", cfg.Name, cfg.Uid, err)
 		//}
 	} else {
 		// announce self to the world
 		if err = self.Register(); err != nil {
 			//if log.V(log.ErrorLevel, log.DefaultLogger) {
-			log.Errf("Server %s-%s register error: %s", config.Name, config.Uid, err)
+			log.Errf("Server %s-%s register error: %s", cfg.Name, cfg.Uid, err)
 			//}
 		}
 	}
@@ -482,15 +481,19 @@ func (self *TServer) Start() error {
 			return
 		}
 	}()
+	// mark the server as started
+	self.started.Store(true)
+
+	log.Infof("Listening on %s - %s", ts.Addr(), cfg.Transport.String())
 
 	// 监听退出
 	go func() {
 		t := new(time.Ticker)
 
 		// only process if it exists
-		if config.RegisterInterval > time.Duration(0) {
+		if cfg.RegisterInterval > time.Duration(0) {
 			// new ticker
-			t = time.NewTicker(config.RegisterInterval)
+			t = time.NewTicker(cfg.RegisterInterval)
 		}
 
 		// return error chan
@@ -501,26 +504,26 @@ func (self *TServer) Start() error {
 			select {
 			// register self on interval
 			case <-t.C:
-				self.RLock()
+				//self.RLock()
 				registered := self.registered
-				self.RUnlock()
-				rerr := config.RegisterCheck(self.config.Context)
+				//self.RUnlock()
+				rerr := cfg.RegisterCheck(self.config.Context)
 				if rerr != nil && registered {
-					log.Errf("Server %s-%s register check error: %s, deregister it", config.Name, config.Uid, err)
+					log.Errf("Server %s-%s register check error: %s, deregister it", cfg.Name, cfg.Uid, err)
 
 					// deregister self in case of error
 					if err := self.Deregister(); err != nil {
-						log.Errf("Server %s-%s deregister error: %s", config.Name, config.Uid, err)
+						log.Errf("Server %s-%s deregister error: %s", cfg.Name, cfg.Uid, err)
 
 					}
 				} else if rerr != nil && !registered {
-					log.Errf("Server %s-%s register check error: %s", config.Name, config.Uid, err)
+					log.Errf("Server %s-%s register check error: %s", cfg.Name, cfg.Uid, err)
 
 					continue
 				}
 
 				if err := self.Register(); err != nil {
-					log.Errf("Server %s-%s register error: %s", config.Name, config.Uid, err)
+					log.Errf("Server %s-%s register error: %s", cfg.Name, cfg.Uid, err)
 
 				}
 			// wait for exit
@@ -531,20 +534,20 @@ func (self *TServer) Start() error {
 			}
 		}
 
-		self.RLock()
+		//self.RLock()
 		registered := self.registered
-		self.RUnlock()
+		//self.RUnlock()
 		if registered {
 			// deregister self
 			if err := self.Deregister(); err != nil {
-				log.Errf("Server %s-%s deregister error: %s", config.Name, config.Uid, err)
+				log.Errf("Server %s-%s deregister error: %s", cfg.Name, cfg.Uid, err)
 
 			}
 		}
 
-		self.Lock()
+		//self.Lock()
 		swg := self.wg
-		self.Unlock()
+		//self.Unlock()
 
 		// wait for requests to finish
 		if swg != nil {
@@ -565,13 +568,11 @@ func (self *TServer) Start() error {
 		//}
 
 		// swap back address
-		self.Lock()
-		config.Address = addr
-		self.Unlock()
+		//self.Lock()
+		cfg.Address = addr
+		//self.Unlock()
 	}()
 
-	// mark the server as started
-	self.started.Store(true)
 	return nil
 }
 
@@ -601,8 +602,8 @@ func (self *TServer) String() string {
 }
 
 func (self *TServer) Config() *Config {
-	self.RLock()
+	//self.RLock()
 	cfg := self.config
-	self.RUnlock()
+	//self.RUnlock()
 	return cfg
 }

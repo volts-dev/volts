@@ -87,6 +87,8 @@ func Validate(e *registry.Endpoint) error {
 	return nil
 }
 
+// 新建路由
+// NOTE 路由不支持线程安全 不推荐多服务器调用！
 func New() *TRouter {
 	cfg := newConfig()
 	router := &TRouter{
@@ -98,9 +100,9 @@ func New() *TRouter {
 		exit:        make(chan bool),
 	}
 	cfg.Router = router
-	router.respPool.New = func() interface{} {
-		return &transport.THttpResponse{}
-	}
+	//~router.respPool.New = func() interface{} {
+	//	return &transport.THttpResponse{}
+	//}
 
 	go router.watch()   // 实时订阅
 	go router.refresh() // 定时刷新
@@ -108,7 +110,8 @@ func New() *TRouter {
 	return router
 }
 
-func Default() *TRouter {
+// FIXME 使用的话可能导致配置问题
+func __Default() *TRouter {
 	if defaultRouter == nil {
 		defaultRouter = New()
 	}
@@ -444,7 +447,12 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		self.ServeRPC(rsp, req)
 	} else { // serve as a web server
 		// Pool 提供TResponseWriter
-		rsp := self.respPool.Get().(*transport.THttpResponse)
+		var rsp *transport.THttpResponse
+		if v := self.respPool.Get(); v == nil {
+			rsp = transport.NewHttpResponse(r.Context(), r)
+		} else {
+			rsp = v.(*transport.THttpResponse)
+		}
 		rsp.Connect(w)
 
 		//获得的地址

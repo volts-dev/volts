@@ -26,20 +26,15 @@ type (
 	}
 )
 
-func NewRpcClient(opts ...Option) (*RpcClient, error) {
+func NewRpcClient(opts ...Option) *RpcClient {
 	cfg := newConfig(
 		transport.NewTCPTransport(),
 		opts...,
 	)
 
 	// 默认编码
-	if cfg.SerializeType == 0 {
-		cfg.SerializeType = codec.MsgPack
-	}
-
-	if cfg.Registry == nil {
-		cfg.Registry = registry.Default()
-		cfg.Selector = selector.New(selector.Registry(cfg.Registry))
+	if cfg.SerializeType == "" {
+		cfg.Serialize = codec.MsgPack
 	}
 
 	p := pool.NewPool(
@@ -51,7 +46,7 @@ func NewRpcClient(opts ...Option) (*RpcClient, error) {
 	return &RpcClient{
 		config: cfg,
 		pool:   p,
-	}, nil
+	}
 }
 
 func (self *RpcClient) Init(opts ...Option) error {
@@ -66,17 +61,40 @@ func (self *RpcClient) Config() *Config {
 // 新建请求
 func (self *RpcClient) NewRequest(service, method string, request interface{}, optinos ...RequestOption) (*rpcRequest, error) {
 	optinos = append(optinos,
-		WithCodec(self.config.SerializeType),
+		WithCodec(self.config.Serialize),
 	)
 	return newRpcRequest(service, method, request, optinos...)
 }
 
 func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
-	address := node.Address
+	// 验证解码器
+	msgCodece := codec.IdentifyCodec(self.config.Serialize)
+	if msgCodece == nil { // no codec specified
+		//call.Error = rpc.ErrUnsupportedCodec
+		//client.mutex.Unlock()
+		//call.done()
+		return nil, errors.UnsupportedCodec("volts.client", self.config.SerializeType)
+	}
 
+	// 获取空闲链接
+	dOpts := []transport.DialOption{
+		transport.WithStream(),
+	}
+
+	if opts.DialTimeout >= 0 {
+		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout, opts.RequestTimeout, 0))
+	}
+
+	conn, err := self.pool.Get(node.Address, dOpts...)
+	if err != nil {
+		return nil, errors.InternalServerError("volts.client", "connection error: %v", err)
+	}
+	defer self.pool.Release(conn, nil)
+
+	// 获取消息载体
 	msg := transport.GetMessageFromPool()
 	msg.SetMessageType(transport.MT_REQUEST)
-	msg.SetSerializeType(self.config.SerializeType)
+	msg.SetSerializeType(self.config.Serialize)
 
 	// init header
 	for k, v := range req.Header() {
@@ -96,30 +114,6 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	// set the accept header
 	msg.Header["Accept"] = req.ContentType()
 
-	// 获得解码器
-	msgCodece := codec.IdentifyCodec(self.config.SerializeType)
-	if msgCodece == nil { // no codec specified
-		//call.Error = rpc.ErrUnsupportedCodec
-		//client.mutex.Unlock()
-		//call.done()
-		return nil, errors.UnsupportedCodec("volts.client", self.config.SerializeType)
-	}
-
-	dOpts := []transport.DialOption{
-		transport.WithStream(),
-	}
-
-	if opts.DialTimeout >= 0 {
-		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout, opts.RequestTimeout, 0))
-	}
-
-	// 获取空闲链接
-	conn, err := self.pool.Get(address, dOpts...)
-	if err != nil {
-		return nil, errors.InternalServerError("volts.client", "connection error: %v", err)
-	}
-	defer self.pool.Release(conn, nil)
-
 	msg.Path = req.Method() // TODO msg 添加server action
 	data := req.Body().Data.Bytes()
 	if len(data) > 1024 && self.config.CompressType == transport.Gzip {
@@ -135,6 +129,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	//seq := atomic.AddUint64(&self.seq, 1) - 1
 	//codec := newRpcCodec(msg, c, cf, "")
 
+	// 开始发送消息
 	// wait for error response
 	ch := make(chan error, 1)
 	resp := &rpcResponse{}

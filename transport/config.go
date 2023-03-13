@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"crypto/tls"
+	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/config"
@@ -22,7 +23,9 @@ type (
 
 	Config struct {
 		*config.Config
-		Listener IListener
+		Name       string `field:"-"` // config name/path in config file
+		PrefixName string `field:"-"` // config prefix name
+		Listener   IListener
 		// Addrs is the list of intermediary addresses to connect to
 		Addrs []string
 		// Codec is the codec interface to use where headers are not supported
@@ -34,7 +37,7 @@ type (
 		Secure bool
 		// TLSConfig to secure the connection. The assumption is that this
 		// is mTLS keypair
-		TLSConfig *tls.Config
+		TlsConfig *tls.Config
 
 		//DialTimeout sets timeout for dialing
 		DialTimeout time.Duration
@@ -81,20 +84,31 @@ type (
 	}
 )
 
+func (self *DialConfig) Init(opts ...DialOption) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(self)
+		}
+	}
+}
+
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Name:         "transport",
 		DialTimeout:  DefaultTimeout,
 		ReadTimeout:  DefaultTimeout,
 		WriteTimeout: DefaultTimeout,
 	}
-
-	config.Default().Register(cfg)
 	cfg.Init(opts...)
+	config.Register(cfg)
 	return cfg
 }
 
 func (self *Config) String() string {
-	return "transport"
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+	}
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -170,7 +184,7 @@ func Secure(b bool) Option {
 // TLSConfig to be used for the transport.
 func TLSConfig(t *tls.Config) Option {
 	return func(cfg *Config) {
-		cfg.TLSConfig = t
+		cfg.TlsConfig = t
 	}
 }
 
@@ -247,5 +261,15 @@ func WithProxyURL(proxyURL string) DialOption {
 func WithDialer(dialer proxy.Dialer) DialOption {
 	return func(o *DialConfig) {
 		o.dialer = dialer
+	}
+}
+
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
+	return func(cfg *Config) {
+		cfg.PrefixName = prefixName
+
+		// 重新注册
+		config.Default().Register(cfg)
 	}
 }

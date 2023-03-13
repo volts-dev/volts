@@ -419,7 +419,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			var method reflect.Value
 			var contextType reflect.Type
 			useREST := utils.InStrings("REST", methods...) > -1
-			useRPC := utils.InStrings("RPC", methods...) > -1
+			useRPC := utils.InStrings("RPC", methods...) > -1 || utils.InStrings("CONNECT", methods...) > -1
 			for i := 0; i < ctrlType.NumMethod(); i++ {
 				// get the method information from the ctrl Type
 				name = ctrlType.Method(i).Name
@@ -436,13 +436,13 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 					if useREST && (contextType == HttpContextType || contextType == ContextType) {
 						// 方法为对象方法名称 url 只注册对象名称
 						// name 为create, read, update, and delete (CRUD)等
-						name = NameMapper(name) // 名称格式化
+						name = ControllerMethodNameMapper(name) // 名称格式化
 						ul := &TUrl{Path: _path.Join(url.Path, name), Controller: objName, Action: name}
 						self.addRoute(position, hanadlerType, []string{"GET", "POST"}, ul, []any{method}, mids...)
 					}
 
 					if useRPC && (contextType == RpcContextType || contextType == ContextType) {
-						name = NameMapper(name) // 名称格式化
+						name = ControllerMethodNameMapper(name) // 名称格式化
 						ul := &TUrl{Path: strings.Join([]string{url.Path, name}, "."), Controller: objName, Action: name}
 						self.addRoute(position, hanadlerType, []string{"CONNECT"}, ul, []any{method}, mids...)
 					}

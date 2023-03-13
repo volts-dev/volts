@@ -30,14 +30,20 @@ var (
 type etcdRegistry struct {
 	client *clientv3.Client
 	config *registry.Config
-
 	sync.RWMutex
 	register map[string]uint64
 	leases   map[string]clientv3.LeaseID
 }
 
+func init() {
+	registry.Register("etcd", New)
+}
+
 func New(opts ...registry.Option) registry.IRegistry {
-	opts = append(opts, registry.Timeout(time.Millisecond*100))
+	opts = append(opts,
+		registry.WithName("etcd"),
+		registry.Timeout(time.Millisecond*100),
+	)
 
 	reg := &etcdRegistry{
 		config:   registry.NewConfig(opts...),
@@ -410,5 +416,5 @@ func (e *etcdRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watcher,
 }
 
 func (e *etcdRegistry) String() string {
-	return "Etcd"
+	return e.config.Name
 }

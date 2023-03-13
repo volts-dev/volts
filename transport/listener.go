@@ -47,7 +47,7 @@ func (self *transportListener) Serve(handler Handler) error {
 		// default http2 server
 
 		// insecure connection use h2c
-		if !(self.transport.Config().Secure || self.transport.Config().TLSConfig != nil) {
+		if !(self.transport.Config().Secure || self.transport.Config().TlsConfig != nil) {
 			self.http.Handler = h2c.NewHandler(self.http.Handler, &http2.Server{})
 		}
 
@@ -63,7 +63,7 @@ func (self *transportListener) Serve(handler Handler) error {
 		// default http2 server
 
 		// insecure connection use h2c
-		if !(self.transport.Config().Secure || self.transport.Config().TLSConfig != nil) {
+		if !(self.transport.Config().Secure || self.transport.Config().TlsConfig != nil) {
 			self.http.Handler = h2c.NewHandler(self.http.Handler, &http2.Server{})
 		}
 

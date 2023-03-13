@@ -39,6 +39,25 @@ func (self *registrySelector) Config() *Config {
 	return self.config
 }
 
+func (self *registrySelector) Match(endpoint string, opts ...SelectOption) (Next, error) {
+	sopts := &SelectConfig{
+		Strategy: self.config.Strategy,
+	}
+	services, err := self.rc.Match(endpoint)
+	if err != nil {
+		if err == registry.ErrNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	// if there's nothing left, return
+	if len(services) == 0 {
+		return nil, ErrNoneAvailable
+	}
+
+	return sopts.Strategy(services), nil
+}
+
 func (self *registrySelector) Select(service string, opts ...SelectOption) (Next, error) {
 	sopts := &SelectConfig{
 		Strategy: self.config.Strategy,

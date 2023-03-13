@@ -56,9 +56,16 @@ type (
 	}
 )
 
+func init() {
+	registry.Register("mdns", New)
+}
+
 // NewMdnsRegistry
 func New(opts ...registry.Option) registry.IRegistry {
-	opts = append(opts, registry.Timeout(time.Millisecond*100))
+	opts = append(opts,
+		registry.WithName("mdns"),
+		registry.Timeout(time.Millisecond*100),
+	)
 	cfg := registry.NewConfig(opts...)
 	// set the domain
 	domain := mdnsDomain
@@ -537,7 +544,7 @@ func (m *mdnsRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watcher,
 }
 
 func (m *mdnsRegistry) String() string {
-	return "mdns"
+	return m.config.Name
 }
 
 func (m *mdnsWatcher) Next() (*registry.Result, error) {

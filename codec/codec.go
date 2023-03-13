@@ -2,6 +2,7 @@ package codec
 
 import (
 	"hash/crc32"
+	"strings"
 )
 
 type (
@@ -32,13 +33,16 @@ func (self SerializeType) String() string {
 func RegisterCodec(name string, codec ICodec) SerializeType {
 	h := HashName(name)
 	codecs[h] = codec
-	names[name] = h
+	names[strings.ToLower(name)] = h
 	return h
 }
 
 // 提供编码类型
-func CodecByName(name string) SerializeType {
-	return names[name]
+func Use(name string) SerializeType {
+	if v, has := names[strings.ToLower(name)]; has {
+		return v
+	}
+	return 0
 }
 
 func IdentifyCodec(st SerializeType) ICodec {

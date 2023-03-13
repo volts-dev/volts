@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,6 @@ import (
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/registry/cacher"
-	"github.com/volts-dev/volts/router"
 	vrouter "github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
 )
@@ -23,6 +23,8 @@ type (
 
 	Config struct {
 		*config.Config `field:"-"`
+		Name           string   // config name/path in config file
+		PrefixName     string   `field:"-"` // config prefix name
 		Uid            string   `field:"-"` // 实例
 		Bus            bus.IBus `field:"-"` // 实例
 		//Tracer    trace.Tracer
@@ -38,14 +40,16 @@ type (
 		Metadata      map[string]string           `field:"-"`
 		RegisterCheck func(context.Context) error `field:"-"` // RegisterCheck runs a check function before registering the service
 
-		Name string
-		//  host address ":35999"
-		Address          string
-		Advertise        string
-		Version          string
+		Address    string
+		Advertise  string
+		Version    string
+		AutoCreate bool //自动创建实例
+
+		// Registry
+		RegistryType     string
+		RegistryHost     string
 		RegisterTTL      time.Duration `field:"register_ttl"` // The register expiry time
 		RegisterInterval time.Duration // The interval on which to register
-		AutoCreate       bool          //自动创建实例
 	}
 )
 
@@ -62,9 +66,9 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Config:           config.New(config.DEFAULT_PREFIX),
-		Uid:              uuid.New().String(),
+		Config:           config.Default(), //      config.New(config.DEFAULT_PREFIX),
 		Name:             DefaultName,
+		Uid:              uuid.New().String(),
 		Logger:           log,
 		Bus:              bus.DefaultBus,
 		Metadata:         map[string]string{},
@@ -75,13 +79,17 @@ func newConfig(opts ...Option) *Config {
 		Version:          DefaultVersion,
 		AutoCreate:       true,
 	}
-	config.Default().Register(cfg)
 	cfg.Init(opts...)
+	config.Register(cfg)
+
 	return cfg
 }
 
 func (self *Config) String() string {
-	return "server"
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+	}
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -89,28 +97,41 @@ func (self *Config) Init(opts ...Option) {
 		opt(self)
 	}
 
-	if self.Transport == nil && self.AutoCreate {
-		self.Transport = transport.Default()
+	if self.AutoCreate {
+		if self.Transport == nil {
+			self.Transport = transport.Default()
+			self.Transport.Init(
+				transport.WithConfigPrefixName(self.String()),
+			)
+		}
+		// if not special router use create new
+		if self.Router == nil {
+			self.Router = vrouter.New()
+			self.Router.Config().Init(
+				vrouter.WithConfigPrefixName(self.String()),
+			)
+		}
 	}
-
-	// if not special router use create new
-	if self.Router == nil && self.AutoCreate {
-		self.Router = vrouter.Default()
-	}
-
-	if self.Registry == nil {
-		self.Registry = registry.Default()
+	// 初始化regsitry
+	if reg := registry.Use(self.RegistryType /*registry.WithName(self.RegistryType),*/, registry.WithConfigPrefixName(self.Name), registry.Addrs(self.RegistryHost)); reg != nil {
+		self.Registry = reg
+		self.Registry.Init(
+			registry.WithConfigPrefixName(self.String()),
+		)
 	}
 
 	if self.Debug {
 		self.Transport.Init(transport.Debug())
-		self.Router.Config().Init(router.Debug())
-		self.Registry.Config().Init(registry.Debug())
+		self.Router.Config().Init(vrouter.Debug())
+		if self.Registry == nil {
+			self.Registry.Config().Init(registry.Debug())
+		}
 	}
 }
 
 func (self *Config) Load() error {
 	return self.LoadToModel(self)
+
 }
 
 func (self *Config) Save(immed ...bool) error {
@@ -136,6 +157,38 @@ func Debug() Option {
 func Name(name string) Option {
 	return func(cfg *Config) {
 		cfg.Name = name
+		cfg.Load()
+
+		if cfg.Transport != nil {
+			cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
+		}
+
+		if cfg.Router != nil {
+			cfg.Router.Config().Init(
+				vrouter.WithConfigPrefixName(cfg.String()),
+			)
+		}
+	}
+}
+
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
+	return func(cfg *Config) {
+		cfg.PrefixName = prefixName
+
+		// 重新加载
+		cfg.Load()
+
+		if cfg.Transport != nil {
+			cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
+		}
+
+		if cfg.Router != nil {
+			cfg.Router.Config().Init(
+				vrouter.WithConfigPrefixName(cfg.String()),
+			)
+		}
+
 	}
 }
 
@@ -145,6 +198,9 @@ func Registry(r registry.IRegistry) Option {
 		cfg.Registry = r
 		cfg.Router.Config().Registry = r
 		cfg.Router.Config().RegistryCacher = cacher.New(r)
+		cfg.Registry.Init(
+			registry.WithConfigPrefixName(cfg.String()),
+		)
 	}
 }
 
@@ -152,6 +208,9 @@ func Registry(r registry.IRegistry) Option {
 func Transport(t transport.ITransport) Option {
 	return func(cfg *Config) {
 		cfg.Transport = t
+		cfg.Transport.Init(
+			transport.WithConfigPrefixName(cfg.String()),
+		)
 	}
 }
 
@@ -160,6 +219,9 @@ func Router(router vrouter.IRouter) Option {
 	return func(cfg *Config) {
 		if _, ok := router.(*vrouter.TRouter); ok {
 			cfg.Router = router
+			cfg.Router.Config().Init(
+				vrouter.WithConfigPrefixName(cfg.String()),
+			)
 		}
 	}
 }

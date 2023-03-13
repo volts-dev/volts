@@ -9,7 +9,7 @@ import (
 
 func WithPrefix(name string) Option {
 	return func(cfg *Config) {
-		cfg.Prefix = name
+		//cfg.Prefix = name
 	}
 }
 

@@ -2,6 +2,7 @@ package selector
 
 import (
 	"context"
+	"strings"
 
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
@@ -24,7 +25,9 @@ type (
 	Option func(*Config)
 	Config struct {
 		*config.Config `field:"-"`
-		Logger         logger.ILogger `field:"-"` // 实例
+		Name           string         `field:"-"` // config name/path in config file
+		PrefixName     string         `field:"-"` // config prefix name
+		Logger         logger.ILogger `field:"-"` // 保留:提供给扩展使用
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -36,17 +39,21 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Name:     "selector",
 		Logger:   log,
 		Strategy: Random,
 		Registry: registry.Default(),
 	}
-	config.Default().Register(cfg)
 	cfg.Init(opts...)
+	config.Register(cfg)
 	return cfg
 }
 
 func (self *Config) String() string {
-	return "selector"
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+	}
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -83,5 +90,22 @@ func Registry(r registry.IRegistry) Option {
 func WithFilter(fn ...Filter) SelectOption {
 	return func(cfg *SelectConfig) {
 		cfg.Filters = append(cfg.Filters, fn...)
+	}
+}
+
+func WithStrategy(name string) Option {
+	return func(cfg *Config) {
+		if fn := Use(name); fn != nil {
+			cfg.Strategy = Use(name)
+		}
+	}
+}
+
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
+	return func(cfg *Config) {
+		cfg.PrefixName = prefixName
+		// 重新加载
+		cfg.Load()
 	}
 }

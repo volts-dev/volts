@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"crypto/tls"
+	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/config"
@@ -34,15 +35,17 @@ type (
 
 	Config struct {
 		*config.Config `field:"-"`
+		Name           string          // config name/path in config file
+		PrefixName     string          `field:"-"` // config prefix name
 		Logger         logger.ILogger  `field:"-"` // 实例
 		Context        context.Context `field:"-"`
 		LocalServices  []*Service      `field:"-"` // current service information
-		Name           string
-		Addrs          []string
+		Addrs          []string        `field:"-"`
+		Type           string
 		Timeout        time.Duration
 		Secure         bool
 		TlsConfig      *tls.Config
-		Ttl            time.Duration
+		Ttl            time.Duration `field:"ttl"`
 	}
 
 	WatchConfig struct {
@@ -58,17 +61,23 @@ type (
 // new and init a config
 func NewConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Config:  config.Default(),
 		Logger:  log,
 		Context: context.Background(),
 		Timeout: time.Millisecond * 100,
 	}
-	config.Default().Register(cfg)
 	cfg.Init(opts...)
+	if cfg.Name != "" {
+		config.Register(cfg)
+	}
 	return cfg
 }
 
 func (self *Config) String() string {
-	return "registry"
+	if len(self.PrefixName) > 0 {
+		return strings.Join([]string{"registry", self.PrefixName}, ".")
+	}
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -80,10 +89,18 @@ func (self *Config) Init(opts ...Option) {
 }
 
 func (self *Config) Load() error {
+	if self.Name == "" {
+		return nil
+	}
+
 	return self.LoadToModel(self)
 }
 
 func (self *Config) Save(immed ...bool) error {
+	if self.Name == "" {
+		return nil
+	}
+
 	return self.SaveFromModel(self, immed...)
 }
 
@@ -127,5 +144,23 @@ func TLSConfig(t *tls.Config) Option {
 func RegisterTTL(t time.Duration) Option {
 	return func(cfg *Config) {
 		cfg.Ttl = t
+	}
+}
+
+// 修改Config.json的路径
+func WithName(name string) Option {
+	return func(cfg *Config) {
+		cfg.Name = name
+		// 重新加载
+		cfg.Load()
+	}
+}
+
+// 修改Config.json的路径
+func WithConfigPrefixName(prefixName string) Option {
+	return func(cfg *Config) {
+		cfg.PrefixName = prefixName
+		// 重新加载
+		cfg.Load()
 	}
 }

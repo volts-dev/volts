@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	defaultSelector  = New()
+	defaultSelector  ISelector //New()
 	log              = logger.New("selector")
 	ErrNotFound      = errors.New("not found")
 	ErrNoneAvailable = errors.New("service none available")
@@ -21,6 +21,7 @@ type (
 	ISelector interface {
 		Init(opts ...Option) error
 		Config() *Config
+		Match(endpoint string, opts ...SelectOption) (Next, error)
 		// Select returns a function which should return the next node
 		Select(service string, opts ...SelectOption) (Next, error)
 		// Mark sets the success/error against a node
@@ -45,10 +46,8 @@ type (
 )
 
 func New(opts ...Option) ISelector {
-	cfg := newConfig(opts...)
-
 	s := &registrySelector{
-		config: cfg,
+		config: newConfig(opts...),
 	}
 	s.rc = s.newCache()
 

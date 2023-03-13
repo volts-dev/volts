@@ -489,7 +489,7 @@ func (self *TTree) Endpoints() (services map[string][]*registry.Endpoint) {
 	var match func(method string, i int, node *treeNode)
 	match = func(method string, i int, node *treeNode) {
 		for _, c := range node.Children {
-			if c.Route != nil {
+			if c.Route != nil && c.Route.group != nil {
 				// TODO 检测
 				if _, ok := validator[c.Route.Path]; !ok {
 					//

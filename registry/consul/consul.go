@@ -35,11 +35,14 @@ type consulRegistry struct {
 }
 
 func init() {
-	//cmd.DefaultRegistries["consul"] = NewRegistry
+	registry.Register("consul", New)
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
-	opts = append(opts, registry.Timeout(time.Millisecond*100))
+	opts = append(opts,
+		registry.WithName("consul"),
+		registry.Timeout(time.Millisecond*100),
+	)
 
 	cr := &consulRegistry{
 		opts:        registry.NewConfig(opts...),
@@ -406,7 +409,7 @@ func (c *consulRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watche
 }
 
 func (c *consulRegistry) String() string {
-	return "consul"
+	return c.opts.Name
 }
 
 func (c *consulRegistry) Config() *registry.Config {
