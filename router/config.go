@@ -43,6 +43,7 @@ type (
 		StaticDir         []string       `field:"static_dir"` // the static dir allow to visit
 		StaticExt         []string       `field:"static_ext"` // the static file format allow to visit
 		UsePprof          bool
+		UploadBuf         int `field:"upload_buf"` // 上传文件大小MB
 	}
 
 	GroupOption func(*GroupConfig)
@@ -61,6 +62,7 @@ func newConfig(opts ...Option) *Config {
 		Logger:         log,
 		Recover:        true,
 		RecoverHandler: recoverHandler,
+		UploadBuf:      25,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)

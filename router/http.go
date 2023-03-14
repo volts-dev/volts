@@ -185,7 +185,7 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 				return self.methodParams
 			} else {
 				if ct == "multipart/form-data" {
-					self.request.ParseMultipartForm(32 << 20) // 32m
+					self.request.ParseMultipartForm(int64(self.router.Config().UploadBuf) << 20) // 32m
 				} else {
 					self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
 				}
@@ -256,7 +256,7 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THtt
 	self.response = rw
 	self.ResponseWriter = rw
 	self.TemplateSrc = ""
-	self.ContentType = ""
+	self.ContentType = req.Header().Get("Content-Type")
 	self.Result = nil
 	self.handlerIndex = 0 // -- 提示目前控制器Index
 	self.isDone = false   // -- 已经提交过
