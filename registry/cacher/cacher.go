@@ -58,13 +58,14 @@ var (
 func New(r registry.IRegistry, opts ...registry.Option) ICacher {
 	rand.Seed(time.Now().UnixNano())
 
-	opts = append(opts,
+	var defaultOpts []registry.Option
+	defaultOpts = append(defaultOpts,
 		registry.WithName(""),
 		registry.RegisterTTL(DefaultTTL))
 
 	return &cache{
 		IRegistry:   r,
-		config:      registry.NewConfig(opts...),
+		config:      registry.NewConfig(append(defaultOpts, opts...)...),
 		watched:     make(map[string]bool),
 		cache:       make(map[string][]*registry.Service),
 		endpointMap: make(map[string]string),
@@ -215,7 +216,7 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 
 func (c *cache) set(service string, services []*registry.Service) {
 	c.cache[service] = services
-	c.ttls[service] = time.Now().Add(c.config.Ttl)
+	c.ttls[service] = time.Now().Add(c.config.TTL)
 }
 
 func (c *cache) update(res *registry.Result) {
@@ -267,7 +268,7 @@ func (c *cache) update(res *registry.Result) {
 		for _, cur := range service.Nodes {
 			var seen bool
 			for _, node := range res.Service.Nodes {
-				if cur.Uid == node.Uid {
+				if cur.Id == node.Id {
 					seen = true
 					break
 				}
@@ -290,7 +291,7 @@ func (c *cache) update(res *registry.Result) {
 		for _, cur := range service.Nodes {
 			var seen bool
 			for _, del := range res.Service.Nodes {
-				if del.Uid == cur.Uid {
+				if del.Id == cur.Id {
 					seen = true
 					break
 				}

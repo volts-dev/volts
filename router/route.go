@@ -8,7 +8,7 @@ const (
 	Normal RoutePosition = iota
 	Before
 	After
-	Replace // the route replace orgin
+	Replace // the route replace origin
 )
 
 type RoutePosition byte

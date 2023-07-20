@@ -24,16 +24,15 @@ type (
 	// OptionFn configures options of server.
 	Option func(*Config)
 	Config struct {
-		*config.Config `field:"-"`
-		Name           string         `field:"-"` // config name/path in config file
-		PrefixName     string         `field:"-"` // config prefix name
-		Logger         logger.ILogger `field:"-"` // 保留:提供给扩展使用
-
+		config.Config `field:"-"`
+		Name          string             `field:"-"` // config name/path in config file
+		PrefixName    string             `field:"-"` // config prefix name
+		Logger        logger.ILogger     `field:"-"` // 保留:提供给扩展使用
+		Registry      registry.IRegistry `field:"-"`
+		Strategy      Strategy           `field:"-"`
 		// Other options for implementations of the interface
 		// can be stored in a context
-		Context  context.Context    `field:"-"`
-		Registry registry.IRegistry `field:"-"`
-		Strategy Strategy           `field:"-"`
+		Context context.Context `field:"-"`
 	}
 )
 
@@ -78,6 +77,10 @@ func Debug() Option {
 	}
 }
 
+func Logger() logger.ILogger {
+	return log
+}
+
 // Registry sets the registry used by the selector
 func Registry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
@@ -104,8 +107,8 @@ func WithStrategy(name string) Option {
 // 修改Config.json的路径
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
+		cfg.Unregister(cfg)
 		cfg.PrefixName = prefixName
-		// 重新加载
-		cfg.Load()
+		cfg.Register(cfg)
 	}
 }

@@ -24,9 +24,9 @@ type httpRequest struct {
 type aaa = httpRequest
 
 /*
-	@service: 目标URL地址
-	@method: GET/POST...
-	@data: 原始数据
+@service: 目标URL地址
+@method: GET/POST...
+@data: 原始数据
 */
 func newHttpRequest(method, url string, data interface{}, opts ...RequestOption) (*httpRequest, error) {
 	// 检测Method是否合法字符
@@ -60,7 +60,9 @@ func newHttpRequest(method, url string, data interface{}, opts ...RequestOption)
 		method: strings.ToUpper(method),
 		opts:   reqOpts,
 	}
-	req.header.Set("Accept", "*/*") // TODO 检测是否已经重复实现
+	// 检测是否已经重复实现
+	req.header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36") //
+	req.header.Set("Accept", "*/*")                                                                                                                 // TODO
 	req.header.Set("Host", u.Host)
 	err = req.write(data)
 	if err != nil {

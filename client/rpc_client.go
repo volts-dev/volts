@@ -322,6 +322,7 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 
 	return next, nil
 }
+
 func (self *RpcClient) String() string {
 	return "RpcClient"
 }

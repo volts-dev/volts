@@ -39,13 +39,14 @@ func init() {
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
-	opts = append(opts,
+	var defaultOpts []registry.Option
+	defaultOpts = append(defaultOpts,
 		registry.WithName("consul"),
 		registry.Timeout(time.Millisecond*100),
 	)
 
 	cr := &consulRegistry{
-		opts:        registry.NewConfig(opts...),
+		opts:        registry.NewConfig(append(defaultOpts, opts...)...),
 		register:    make(map[string]uint64),
 		lastChecked: make(map[string]time.Time),
 		queryOptions: &consul.QueryOptions{
@@ -179,7 +180,7 @@ func (c *consulRegistry) Deregister(s *registry.Service, opts ...registry.Option
 	c.Unlock()
 
 	node := s.Nodes[0]
-	return c.Client().Agent().ServiceDeregister(node.Uid)
+	return c.Client().Agent().ServiceDeregister(node.Id)
 }
 
 func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) error {
@@ -219,7 +220,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// if it's already registered and matches then just pass the check
 	if ok && v == h {
-		if options.Ttl == time.Duration(0) {
+		if options.TTL == time.Duration(0) {
 			// ensure that our service hasn't been deregistered by Consul
 			if time.Since(lastChecked) <= getDeregisterTTL(regInterval) {
 				return nil
@@ -227,7 +228,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 			services, _, err := c.Client().Health().Checks(s.Name, c.queryOptions)
 			if err == nil {
 				for _, v := range services {
-					if v.ServiceID == node.Uid {
+					if v.ServiceID == node.Id {
 						return nil
 					}
 				}
@@ -235,7 +236,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 		} else {
 			// if the err is nil we're all good, bail out
 			// if not, we don't know what the state is, so full re-register
-			if err := c.Client().Agent().PassTTL("service:"+node.Uid, ""); err == nil {
+			if err := c.Client().Agent().PassTTL("service:"+node.Id, ""); err == nil {
 				return nil
 			}
 		}
@@ -258,11 +259,11 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 		}
 
 		// if the TTL is greater than 0 create an associated check
-	} else if options.Ttl > time.Duration(0) {
-		deregTTL := getDeregisterTTL(options.Ttl)
+	} else if options.TTL > time.Duration(0) {
+		deregTTL := getDeregisterTTL(options.TTL)
 
 		check = &consul.AgentServiceCheck{
-			TTL:                            fmt.Sprintf("%v", options.Ttl),
+			TTL:                            fmt.Sprintf("%v", options.TTL),
 			DeregisterCriticalServiceAfter: fmt.Sprintf("%v", deregTTL),
 		}
 	}
@@ -275,7 +276,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// register the service
 	asr := &consul.AgentServiceRegistration{
-		ID:      node.Uid,
+		ID:      node.Id,
 		Name:    s.Name,
 		Tags:    tags,
 		Port:    port,
@@ -301,13 +302,13 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 	c.Unlock()
 
 	// if the TTL is 0 we don't mess with the checks
-	if options.Ttl == time.Duration(0) {
+	if options.TTL == time.Duration(0) {
 		return nil
 	}
 
 	c.opts.LocalServices = append(c.opts.LocalServices, s)
 	// pass the healthcheck
-	return c.Client().Agent().PassTTL("service:"+node.Uid, "")
+	return c.Client().Agent().PassTTL("service:"+node.Id, "")
 }
 
 func (m *consulRegistry) LocalServices() []*registry.Service {
@@ -376,7 +377,7 @@ func (c *consulRegistry) GetService(name string) ([]*registry.Service, error) {
 		}
 
 		svc.Nodes = append(svc.Nodes, &registry.Node{
-			Uid:      id,
+			Id:       id,
 			Address:  mnet.HostPort(address, s.Service.Port),
 			Metadata: decodeMetadata(s.Service.Tags),
 		})

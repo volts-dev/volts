@@ -1,17 +1,21 @@
 package server
 
 import (
-	"context"
-	"errors"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/volts-dev/volts/broker"
+	_ "github.com/volts-dev/volts/broker/http"
+	_ "github.com/volts-dev/volts/broker/memory"
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
+	_ "github.com/volts-dev/volts/registry/mdns"
+	_ "github.com/volts-dev/volts/registry/memory"
+	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/util/addr"
 	"github.com/volts-dev/volts/util/backoff"
 	"github.com/volts-dev/volts/util/metadata"
@@ -20,16 +24,6 @@ import (
 
 var defaultServer *TServer
 var log = logger.New("Server")
-
-var (
-	DefaultAddress          = ":0"
-	DefaultName             = "server"
-	DefaultVersion          = "latest"
-	DefaultRegisterCheck    = func(context.Context) error { return nil }
-	DefaultRegisterInterval = time.Second * 30
-	DefaultRegisterTTL      = time.Second * 90
-	lastStreamResponseError = errors.New("EOS")
-)
 
 type (
 	// Server is a simple volts server abstraction
@@ -42,10 +36,6 @@ type (
 		//Handle(Handler) error
 		// Create a new handler
 		//NewHandler(interface{}, ...HandlerOption) Handler
-		// Create a new subscriber
-		//NewSubscriber(string, interface{}, ...SubscriberOption) Subscriber
-		// Register a subscriber
-		//Subscribe(Subscriber) error
 
 		Start() error // Start the server
 		Stop() error  // Stop the server
@@ -55,26 +45,24 @@ type (
 
 	TServer struct {
 		//*router
-		//sync.RWMutex
+		sync.RWMutex
 		config      *Config
 		httpRspPool sync.Pool
 
 		// server status
-		started    atomic.Value // marks the serve as started
-		registered bool         // used for first registration
-		exit       chan chan error
-		wg         *sync.WaitGroup // graceful exit
-		services   []*registry.Service
+		started     atomic.Value // marks the serve as started
+		registered  bool         // used for first registration
+		exit        chan chan error
+		wg          *sync.WaitGroup // graceful exit
+		services    []*registry.Service
+		subscribers map[router.ISubscriber][]broker.ISubscriber
 	}
 )
 
 // new a server for the service node
 func New(opts ...Option) *TServer {
-	// inite HandlerPool New function
 	srv := &TServer{
-		config: newConfig(opts...),
-		//RWMutex: sync.RWMutex{},
-		//started:    atomic.Value,
+		config:     newConfig(opts...),
 		registered: false,
 		exit:       make(chan chan error),
 		wg:         &sync.WaitGroup{},
@@ -95,12 +83,14 @@ func Default(opts ...Option) *TServer {
 	return defaultServer
 }
 
+func (s *TServer) HandleEvent(e broker.IEvent) error {
+	return nil
+}
+
 // 注册到服务发现
 func (self *TServer) Register() error {
-	//self.RLock()
 	regSrv := self.services
 	config := self.config
-	//self.RUnlock()
 
 	regFunc := func(service *registry.Service) error {
 		// create registry options
@@ -178,51 +168,29 @@ func (self *TServer) Register() error {
 
 	// register service node
 	node := &registry.Node{
-		Uid:      config.Name + "-" + config.Uid,
+		Id:       config.Name + "-" + config.Uid,
 		Address:  addr,
 		Metadata: md,
 	}
 
 	node.Metadata["transport"] = config.Transport.String()
-	//node.Metadata["broker"] = config.Broker.String()
+	node.Metadata["broker"] = config.Broker.String()
 	node.Metadata["server"] = self.String()
 	node.Metadata["registry"] = config.Registry.String()
 	node.Metadata["protocol"] = "mucp"
+	/*
+		// 注册订阅列表
+		var subscriberList []ISubscriber
 
-	//self.RLock()
-	/* 是否需要
-	// Maps are ordered randomly, sort the keys for consistency
-	var handlerList []string
-	for n, e := range self.handlers {
-		// Only advertise non internal handlers
-		if !e.Options().Internal {
-			handlerList = append(handlerList, n)
+		for e := range self.subscribers {
+			// Only advertise non internal subscribers
+			if !e.Config().Internal {
+				subscriberList = append(subscriberList, e)
+			}
 		}
-	}
-
-	sort.Strings(handlerList)
-
-	var subscriberList []Subscriber
-	for e := range self.subscribers {
-		// Only advertise non internal subscribers
-		if !e.Options().Internal {
-			subscriberList = append(subscriberList, e)
-		}
-	}
-
-	sort.Slice(subscriberList, func(i, j int) bool {
-		return subscriberList[i].Topic() > subscriberList[j].Topic()
-	})
-
-	endpoints := make([]*registry.Endpoint, 0, len(handlerList)+len(subscriberList))
-
-	for _, n := range handlerList {
-		endpoints = append(endpoints, self.handlers[n].Endpoints()...)
-	}
-
-	for _, e := range subscriberList {
-		endpoints = append(endpoints, e.Endpoints()...)
-	}
+		sort.Slice(subscriberList, func(i, j int) bool {
+			return subscriberList[i].Topic() > subscriberList[j].Topic()
+		})
 	*/
 	var servics []*registry.Service
 	for name, endpoints := range config.Router.Endpoints() {
@@ -233,6 +201,11 @@ func (self *TServer) Register() error {
 		if name == "" {
 			name = config.Name // default registry service of this server
 		}
+		/*
+			for _, e := range subscriberList {
+				endpoints = append(endpoints, e.Endpoints()...)
+			}
+		*/
 		// default registry service of this server
 		service := &registry.Service{
 			Name:      name,
@@ -252,12 +225,8 @@ func (self *TServer) Register() error {
 	// get registered value
 	registered := self.registered
 
-	//self.RUnlock()
-
 	if !registered {
-		//if log.V(log.InfoLevel, log.DefaultLogger) {
-		//	、	log.Infof("Registry [%s] Registering node: %s", config.Registry.String(), node.Uid)
-		//	}
+		log.Infof("Registry [%s] Registering node: %s", config.Registry.String(), node.Id)
 	}
 
 	// already registered? don't need to register subscribers
@@ -265,53 +234,52 @@ func (self *TServer) Register() error {
 		return nil
 	}
 
-	//self.Lock()
-	//defer self.Unlock()
-
 	// set what we're advertising
 	self.config.Advertise = addr
 
-	// router can exchange messages
-	if self.config.Router != nil {
-		// subscribe to the topic with own name
-		///sub, err := self.config.Broker.Subscribe(config.Name, self.HandleEvent)
-		///if err != nil {
-		///	return err
-		///}
-
-		// save the subscriber
-		///self.subscriber = sub
-	}
-	/*
-		// subscribe for all of the subscribers
-		for sb := range self.subscribers {
-			var opts []broker.SubscribeOption
-			if queue := sb.Options().Queue; len(queue) > 0 {
-				opts = append(opts, broker.Queue(queue))
-			}
-
-			if cx := sb.Options().Context; cx != nil {
-				opts = append(opts, broker.SubscribeContext(cx))
-			}
-
-			if !sb.Options().AutoAck {
-				opts = append(opts, broker.DisableAutoAck())
-			}
-
-			sub, err := config.Broker.Subscribe(sb.Topic(), self.HandleEvent, opts...)
-			if err != nil {
-				return err
-			}
-			if log.V(log.InfoLevel, log.DefaultLogger) {
-				log.Infof("Subscribing to topic: %s", sub.Topic())
-			}
-			self.subscribers[sb] = []broker.Subscriber{sub}
-		}
-	*/
 	if cacheService {
 		self.services = servics
 	}
 	self.registered = true
+
+	// 注册订阅
+	// Router can exchange messages on broker
+	// Subscribe to the topic with its own name
+	if self.config.Router != nil {
+		sub, err := self.config.Broker.Subscribe(config.Name, self.HandleEvent)
+		if err != nil {
+			return err
+			//		return errors.Wrap(err, "failed to subscribe to service name topic")
+		}
+
+		// Save the subscriber
+		self.config.Subscriber = sub
+	}
+
+	// Subscribe for all of the subscribers
+	for sb := range self.subscribers {
+		var opts []broker.SubscribeOption
+		if queue := sb.Config().Queue; len(queue) > 0 {
+			opts = append(opts, broker.Queue(queue))
+		}
+
+		if ctx := sb.Config().Context; ctx != nil {
+			opts = append(opts, broker.SubscribeContext(ctx))
+		}
+
+		if !sb.Config().AutoAck {
+			opts = append(opts, broker.DisableAutoAck())
+		}
+
+		log.Infof("Subscribing to topic: %s", sb.Topic())
+		sub, err := self.config.Broker.Subscribe(sb.Topic(), self.HandleEvent, opts...)
+		if err != nil {
+			return err
+			//		return errors.Wrap(err, "failed to resubscribe")
+		}
+
+		self.subscribers[sb] = []broker.ISubscriber{sub}
+	}
 
 	return nil
 }
@@ -354,7 +322,7 @@ func (self *TServer) Deregister() error {
 	}
 
 	node := &registry.Node{
-		Uid:     config.Name + "-" + config.Uid,
+		Id:      config.Name + "-" + config.Uid,
 		Address: addr,
 	}
 
@@ -364,9 +332,7 @@ func (self *TServer) Deregister() error {
 		Nodes:   []*registry.Node{node},
 	}
 
-	//if log.V(log.InfoLevel, log.DefaultLogger) {
-	log.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Uid)
-	//}
+	log.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Id)
 	if err := config.Registry.Deregister(service); err != nil {
 		return err
 	}
@@ -375,30 +341,28 @@ func (self *TServer) Deregister() error {
 	self.services = nil
 
 	if !self.registered {
-		//self.Unlock()
 		return nil
 	}
 
 	self.registered = false
 
-	/*
-		// close the subscriber
-		if self.subscriber != nil {
-			self.subscriber.Unsubscribe()
-			self.subscriber = nil
-		}
+	// 订阅事宜
+	// close the subscriber
+	if self.config.Subscriber != nil {
+		self.config.Subscriber.Unsubscribe()
+		self.config.Subscriber = nil
+	}
 
-		for sb, subs := range self.subscribers {
-			for _, sub := range subs {
-				//if log.V(log.InfoLevel, log.DefaultLogger) {
-				//log.Infof("Unsubscribing %s from topic: %s", node.Uid, sub.Topic())
-				//}
-				sub.Unsubscribe()
+	for sb, subs := range self.subscribers {
+		for _, sub := range subs {
+			log.Infof("Unsubscribing %s from topic: %s", node.Id, sub.Topic())
+			if err = sub.Unsubscribe(); err != nil {
+				log.Err(err)
 			}
-			self.subscribers[sb] = nil
 		}
-	*/
-	//self.Unlock()
+		self.subscribers[sb] = nil
+	}
+
 	return nil
 }
 
@@ -414,6 +378,8 @@ func (self *TServer) Start() error {
 	// 打印
 	cfg.Router.PrintRoutes()
 
+	self.subscribers = self.config.Router.Config().Router.GetSubscribers()
+
 	// start listening on the transport
 	ts, err := cfg.Transport.Listen(cfg.Address)
 	if err != nil {
@@ -423,32 +389,22 @@ func (self *TServer) Start() error {
 	// swap address
 	addr := cfg.Address
 	cfg.Address = ts.Addr().String()
-	/*
-		bname := config.Broker.String()
+	bname := cfg.Broker.String()
 
-		// connect to the broker
-		if err := config.Broker.Connect(); err != nil {
-			if log.V(log.ErrorLevel, log.DefaultLogger) {
-				log.Errorf("Broker [%s] connect error: %v", bname, err)
-			}
-			return err
-		}
+	// connect to the broker
+	if err := cfg.Broker.Start(); err != nil {
+		log.Errf("Broker [%s] connect error: %v", bname, err)
+		return err
+	}
+	log.Infof("Broker [%s] Connected to %s", bname, cfg.Broker.Address())
 
-		if log.V(log.InfoLevel, log.DefaultLogger) {
-			log.Infof("Broker [%s] Connected to %s", bname, config.Broker.Address())
-		}
-	*/
 	// use RegisterCheck func before register
 	if err = self.config.RegisterCheck(self.config.Context); err != nil {
-		//if log.V(log.ErrorLevel, log.DefaultLogger) {
 		log.Errf("Server %s-%s register check error: %s", cfg.Name, cfg.Uid, err)
-		//}
 	} else {
 		// announce self to the world
 		if err = self.Register(); err != nil {
-			//if log.V(log.ErrorLevel, log.DefaultLogger) {
 			log.Errf("Server %s-%s register error: %s", cfg.Name, cfg.Uid, err)
-			//}
 		}
 	}
 
@@ -508,23 +464,22 @@ func (self *TServer) Start() error {
 				registered := self.registered
 				//self.RUnlock()
 				rerr := cfg.RegisterCheck(self.config.Context)
-				if rerr != nil && registered {
+				if rerr != nil {
+					if !registered {
+						log.Errf("Server %s-%s register check error: %s", cfg.Name, cfg.Uid, err)
+						continue
+					}
+
 					log.Errf("Server %s-%s register check error: %s, deregister it", cfg.Name, cfg.Uid, err)
 
 					// deregister self in case of error
 					if err := self.Deregister(); err != nil {
 						log.Errf("Server %s-%s deregister error: %s", cfg.Name, cfg.Uid, err)
-
 					}
-				} else if rerr != nil && !registered {
-					log.Errf("Server %s-%s register check error: %s", cfg.Name, cfg.Uid, err)
-
-					continue
 				}
 
 				if err := self.Register(); err != nil {
 					log.Errf("Server %s-%s register error: %s", cfg.Name, cfg.Uid, err)
-
 				}
 			// wait for exit
 			case ch = <-self.exit: // 监听来自self.Stop()信号
@@ -541,7 +496,6 @@ func (self *TServer) Start() error {
 			// deregister self
 			if err := self.Deregister(); err != nil {
 				log.Errf("Server %s-%s deregister error: %s", cfg.Name, cfg.Uid, err)
-
 			}
 		}
 
@@ -557,15 +511,11 @@ func (self *TServer) Start() error {
 		// close transport listener
 		ch <- ts.Close()
 
-		////if log.Lvl(log.LevelError) {
-		////	log.Infof("Broker [%s] Disconnected from %s", bname, config.Broker.Address())
-		//}
 		// disconnect the broker
-		//if err := config.Broker.Disconnect(); err != nil {
-		//	if log.Lvl(log.LevelError) {
-		//		log.Errf("Broker [%s] Disconnect error: %v", bname, err)
-		//	}
-		//}
+		log.Infof("Broker [%s] Disconnected from %s", bname, cfg.Broker.Address())
+		if err := cfg.Broker.Close(); err != nil {
+			log.Errf("Broker [%s] Disconnect error: %v", bname, err)
+		}
 
 		// swap back address
 		//self.Lock()

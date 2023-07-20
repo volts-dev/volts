@@ -43,8 +43,8 @@ type (
 )
 
 var (
-	loggers sync.Map
-	defualt = New("volts")
+	loggers       sync.Map
+	defaultLogger = New("volts")
 )
 
 // the output like: 2035/01/01 00:00:00 [Prefix][Action] message...
@@ -129,7 +129,7 @@ func Assert(cnd bool, format string, args ...interface{}) {
 
 // Returns true if the given level is at or lower the current logger level
 func Lvl(level Level, log ...ILogger) bool {
-	var l ILogger = defualt
+	var l ILogger = defaultLogger
 	if len(log) > 0 {
 		l = log[0]
 	}
@@ -137,39 +137,39 @@ func Lvl(level Level, log ...ILogger) bool {
 }
 
 func Atkf(fmt string, arg ...interface{}) {
-	defualt.Atkf(fmt, arg...)
+	defaultLogger.Atkf(fmt, arg...)
 }
 
 func Info(err ...interface{}) {
-	defualt.Info(err...)
+	defaultLogger.Info(err...)
 }
 
 func Infof(fmt string, arg ...interface{}) {
-	defualt.Infof(fmt, arg...)
+	defaultLogger.Infof(fmt, arg...)
 }
 
 func Warn(err ...interface{}) {
-	defualt.Warn(err...)
+	defaultLogger.Warn(err...)
 }
 
 func Warnf(fmt string, arg ...interface{}) {
-	defualt.Warnf(fmt, arg...)
+	defaultLogger.Warnf(fmt, arg...)
 }
 
 func Dbg(err ...interface{}) {
-	defualt.Dbg(err...)
+	defaultLogger.Dbg(err...)
 }
 
 func Dbgf(fmt string, arg ...interface{}) {
-	defualt.Dbgf(fmt, arg...)
+	defaultLogger.Dbgf(fmt, arg...)
 }
 
 func Err(err ...interface{}) error {
-	return defualt.Err(err...)
+	return defaultLogger.Err(err...)
 }
 
 func Errf(fmt string, arg ...interface{}) error {
-	return defualt.Errf(fmt, arg...)
+	return defaultLogger.Errf(fmt, arg...)
 }
 
 func Panicf(format string, args ...interface{}) {
@@ -177,16 +177,16 @@ func Panicf(format string, args ...interface{}) {
 }
 
 func Fatal(args ...interface{}) {
-	defualt.Fatal(args...)
+	defaultLogger.Fatal(args...)
 }
 
 func Fatalf(format string, args ...interface{}) {
-	defualt.Fatalf(format, args...)
+	defaultLogger.Fatalf(format, args...)
 }
 
 func PanicErr(err error, title ...string) bool {
 	if err != nil {
-		defualt.Dbg(err)
+		defaultLogger.Dbg(err)
 		panic(err)
 		//panic("[" + title[0] + "] " + err.Error())
 	}
@@ -195,11 +195,11 @@ func PanicErr(err error, title ...string) bool {
 
 func LogErr(err error, title ...string) bool {
 	if err != nil {
-		//defualt.ErrorLn(err)
+		//defaultLogger.ErrorLn(err)
 		if len(title) > 0 {
-			defualt.Err("[" + title[0] + "] " + err.Error())
+			defaultLogger.Err("[" + title[0] + "] " + err.Error())
 		} else {
-			defualt.Err(err.Error())
+			defaultLogger.Err(err.Error())
 		}
 
 		return true

@@ -174,7 +174,7 @@ func (self *TRpcContext) setPathParams(p Params) {
 	}
 
 	for _, param := range p {
-		self.pathParams.FieldByName(param.Name).AsInterface(param.Value)
+		self.pathParams.SetByField(param.Name, param.Value)
 	}
 }
 

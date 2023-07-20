@@ -10,10 +10,10 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		*config.Config `field:"-"`
-		Name           string `field:"-"` // config name/path in config file
-		PrefixName     string `field:"-"` // config prefix name
-		Level          Level
+		config.Config `field:"-"`
+		Name          string `field:"-"` // config name/path in config file
+		PrefixName    string `field:"-"` // config prefix name
+		Level         Level
 		//Prefix         string
 		WriterName string
 	}
@@ -25,12 +25,12 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Config: config.Default(),
-		Level:  LevelDebug,
-		Name:   "logger",
+		//Config: config.Default(),
+		Level: LevelDebug,
+		Name:  "logger",
 	}
 	cfg.Init(opts...)
-	config.Default().Register(cfg)
+	config.Register(cfg)
 	return cfg
 }
 
@@ -71,9 +71,11 @@ func WithWrite(name string) Option {
 // 修改Config.json的路径
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
+		cfg.Unregister(cfg)
 		cfg.PrefixName = prefixName
+		cfg.Register(cfg)
 		// 重新加载
-		cfg.Load()
+		//cfg.Load()
 	}
 }
 

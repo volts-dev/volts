@@ -1,28 +1,34 @@
 package config
 
 import (
-	"log"
 	"testing"
 	"time"
 )
 
 type (
 	testConfig struct {
-		*Config
+		Config
 		NameValue string `field:"name_value"`
 		Expiry    time.Duration
 		Mode      ModeType
+		CanLoad   bool
+		CanSave   bool
 	}
 )
 
 func newTestConfig() *testConfig {
-	cfg := &testConfig{}
-
-	Default().Register(cfg)
-	Default().Init(
+	Init(
 		WithFileName("config_test.json"),
 		WithWatcher(),
 	)
+
+	cfg := &testConfig{}
+
+	// 测试空结构体Init调用修改配置
+	cfg.SetValue("SetValue", "TEST")
+
+	// 注册配置
+	Register(cfg)
 	return cfg
 }
 
@@ -31,12 +37,13 @@ func (self *testConfig) String() string {
 }
 
 func (self *testConfig) Load() error {
+	self.CanLoad = true
 	self.LoadToModel(self)
-	log.Println(self.Expiry, self.Mode)
 	return nil
 }
 
 func (self *testConfig) Save(immed ...bool) error {
+	self.CanSave = true
 	self.NameValue = "123"
 	return self.SaveFromModel(self, immed...)
 }
@@ -44,16 +51,15 @@ func (self *testConfig) Save(immed ...bool) error {
 func TestLoad(t *testing.T) {
 	go func() {
 		cfg := newTestConfig()
-		cfg.Config.Load()
-		//cfg.Load()
-		//cfg.Save()
+		cfg.Config.LoadFromFile()
+		cfg.Save()
 	}()
 	<-make(chan int)
 }
 
 func TestLoadAndSave(t *testing.T) {
 	cfg := Default()
-	err := cfg.Load("config.json")
+	err := cfg.LoadFromFile("config.json")
 	if err != nil {
 		t.Log(err)
 	}
@@ -61,7 +67,7 @@ func TestLoadAndSave(t *testing.T) {
 	cfg.SetValue("project.struct", 11)
 	cfg.SetValue("project2.struct", 11)
 
-	err = cfg.Save()
+	err = cfg.SaveToFile()
 	if err != nil {
 		t.Log(err)
 	}
@@ -69,14 +75,14 @@ func TestLoadAndSave(t *testing.T) {
 
 func TestBuildJsonConfigAndGet(t *testing.T) {
 	cfg := defaultConfig
-	err := cfg.Load("config.json")
+	err := cfg.LoadFromFile("config.json")
 	if err != nil {
 		t.Log(err)
 	}
 
 	t.Log(cfg.GetInt64("project.struct", 0))
 	t.Log(cfg.GetInt64("project2.struct", 1))
-	err = cfg.Save()
+	err = cfg.SaveToFile()
 	if err != nil {
 		t.Log(err)
 	}

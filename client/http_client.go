@@ -163,7 +163,7 @@ func (self *HttpClient) NewRequest(method, url string, data interface{}, optinos
 }
 
 func (h *HttpClient) next(request *httpRequest, opts CallOptions) (selector.Next, error) {
-	if h.config.Selector == nil {
+	if h.config.Registry.String() == "" {
 		return func() (*registry.Node, error) {
 			return &registry.Node{
 				Address: request.url,

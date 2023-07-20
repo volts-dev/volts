@@ -4,6 +4,8 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+// FIXME 引用包存在不稳定转换
+
 // msgpackCodec uses messagepack marshaler and unmarshaler.
 type msgpackCodec struct{}
 

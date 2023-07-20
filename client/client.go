@@ -71,8 +71,9 @@ func New(opts ...Option) IClient {
 
 func Default(opts ...Option) IClient {
 	if defaultClient == nil {
-		defaultClient = NewRpcClient()
+		defaultClient = NewRpcClient(opts...)
+	} else {
+		defaultClient.Init(opts...)
 	}
-	defaultClient.Init(opts...)
 	return defaultClient
 }

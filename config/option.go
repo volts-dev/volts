@@ -15,7 +15,7 @@ func WithPrefix(name string) Option {
 
 func WithFileName(fileName string) Option {
 	return func(cfg *Config) {
-		cfg.FileName = fileName
+		cfg.Core().FileName = fileName
 	}
 }
 
@@ -32,13 +32,14 @@ func WithConfig(model IConfig) Option {
 // 监听配置文件变动
 func WithWatcher() Option {
 	return func(cfg *Config) {
+		core := cfg.Core()
 		// 监视文件
-		if cfg.FileName == "" {
-			cfg.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
+		if core.FileName == "" {
+			core.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
 		}
-		cfg.fmt.v.SetConfigFile(filepath.Join(AppPath, cfg.FileName))
-		cfg.fmt.v.WatchConfig()
-		cfg.fmt.v.OnConfigChange(func(e fsnotify.Event) {
+		core.fmt.v.SetConfigFile(filepath.Join(AppPath, core.FileName))
+		core.fmt.v.WatchConfig()
+		core.fmt.v.OnConfigChange(func(e fsnotify.Event) {
 			if e.Op == fsnotify.Write {
 				cfg.Reload() // 重新加载配置
 			}
@@ -49,6 +50,6 @@ func WithWatcher() Option {
 // 当无配置文件时不自动创建配置文件
 func WithNoAutoCreateFile() Option {
 	return func(cfg *Config) {
-		cfg.CreateFile = false
+		cfg.AutoCreateFile = false
 	}
 }

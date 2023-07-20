@@ -9,10 +9,12 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/broker"
 	"github.com/volts-dev/volts/config"
 )
 
@@ -39,6 +41,7 @@ type (
 		String() string
 		// 返回Module所有Routes 理论上只需被调用一次
 		GetRoutes() *TTree
+		GetSubscribers() map[ISubscriber][]broker.ISubscriber
 		GetPath() string
 		GetFilePath() string
 		GetTemplateVar() map[string]interface{}
@@ -47,6 +50,7 @@ type (
 
 	// 服务模块 每个服务代表一个对象
 	TGroup struct {
+		sync.RWMutex
 		*TemplateVar
 		config     *GroupConfig
 		middleware *TMiddlewareManager
@@ -56,6 +60,8 @@ type (
 		path       string        // URL 路径
 		//modulePath string // 当前模块文件夹路径
 		domain string // 子域名用于区分不同域名不同路由
+
+		subscribers map[ISubscriber][]broker.ISubscriber
 	}
 
 	TemplateVar struct {
@@ -207,7 +213,8 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	filePath, name := curFilePath(2)
 	if cfg.Name == "" {
 		cfg.Name = name
-	} else if cfg.FilePath == "" {
+	}
+	if cfg.FilePath == "" {
 		cfg.FilePath = filePath
 	}
 
@@ -237,6 +244,10 @@ func (self *TGroup) Config() *GroupConfig {
 
 func (self *TGroup) GetRoutes() *TTree {
 	return self.tree
+}
+
+func (self *TGroup) GetSubscribers() map[ISubscriber][]broker.ISubscriber {
+	return self.subscribers
 }
 
 // the URL path
@@ -275,33 +286,14 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		fp = root[0]
 	}
 
-	fs := http.Dir(_path.Join(fp, relativePath)) // the filesystem path
-	// 模版变量
 	urlPattern := _path.Join(self.path, relativePath)
-	self.SetTemplateVar(relativePath[1:], urlPattern)                 // set the template var value
-	absolutePath := _path.Join(self.config.PathPrefix, urlPattern)    // the url path
-	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs)) // binding a file server
-
-	handler := func(c *THttpContext) {
-		file := filepath.Join(c.pathParams.FieldByName("filepath").AsString())
-		// Check if file exists and/or if we have permission to access it
-		if _, err := fs.Open(file); err != nil {
-			// 对最后一个控制器返回404
-			if c.handlerIndex == len(c.route.handlers)-1 {
-				c.response.WriteHeader(http.StatusNotFound)
-			}
-
-			log.Err(err)
-			return
-		}
-
-		fileServer.ServeHTTP(c.response, c.request.Request)
-		c.Apply() //已经服务当前文件并结束
-	}
-
+	absolutePath := _path.Join(self.config.PathPrefix, urlPattern) // the url path
+	handler := staticHandler(absolutePath, _path.Join(fp, relativePath))
 	// 路由路径
-	urlPattern = _path.Join(self.config.PathPrefix, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
-	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: urlPattern}, []any{handler})
+	fullRoutePattern := _path.Join(self.config.PathPrefix, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
+	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: fullRoutePattern}, []any{handler})
+	// 模版变量
+	self.SetTemplateVar(relativePath[1:], urlPattern) // set the template var value
 }
 
 // StaticFile registers a single route in order to serve a single file of the local filesystem.
@@ -365,6 +357,31 @@ func (self *TGroup) Url(method string, path string, handlers ...any) *route {
 		log.Fatalf("the params in Module.Url() %v:%v is invaild", method, path)
 	}
 
+	return nil
+}
+
+// 新建订阅对象
+func (h *TGroup) NewSubscriber(topic string, handler interface{}, opts ...SubscriberOption) ISubscriber {
+	return newSubscriber(topic, handler, opts...)
+}
+
+// 订阅对象
+func (self *TGroup) Subscribe(subscriber ISubscriber) error {
+	if len(subscriber.Handlers()) == 0 {
+		return fmt.Errorf("invalid subscriber: no handler functions")
+	}
+
+	if err := validateSubscriber(subscriber); err != nil {
+		return err
+	}
+
+	self.Lock()
+	defer self.Unlock()
+	_, ok := self.subscribers[subscriber]
+	if ok {
+		return fmt.Errorf("subscriber %v already exists", self)
+	}
+	self.subscribers[subscriber] = nil
 	return nil
 }
 

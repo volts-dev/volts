@@ -799,12 +799,12 @@ func printNode(buf *bytes.Buffer, i int, node *treeNode) {
 			buf.WriteString("  ")
 		}
 		if i > 1 {
-			buf.WriteString("┗" + "  ")
+			buf.WriteString("└─" + " ")
 		}
 
-		buf.WriteString(fmt.Sprintf(`%s <Lv:%d; Type:%v; VarType:%v>\n`, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType]))
+		buf.WriteString(fmt.Sprintf(`%s ==> Lv:%d Type:%v VarType:%v `, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType]))
 		if c.Route != nil {
-			buf.WriteString(fmt.Sprintf(" <*%d>", len(c.Route.handlers)))
+			buf.WriteString(fmt.Sprintf(" (*%d Mod:%s)", len(c.Route.handlers), c.Route.group.String()))
 		}
 		//if !reflect.DeepEqual(c.Route, route{}) {
 		if c.Route != nil {

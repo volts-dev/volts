@@ -52,7 +52,7 @@ func UnsafeOutputAnyParameter() any {
 		//fmt.Println(t == tt)
 
 		if tt.String() == tt.String() && t != tt {
-			//	panic("could not convert differnt type!")
+			//	panic("could not convert different type!")
 		}
 		//*/
 		dst := (*eface)(unsafe.Pointer(&arg))

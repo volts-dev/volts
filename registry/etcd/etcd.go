@@ -40,13 +40,14 @@ func init() {
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
-	opts = append(opts,
+	var defaultOpts []registry.Option
+	defaultOpts = append(defaultOpts,
 		registry.WithName("etcd"),
 		registry.Timeout(time.Millisecond*100),
 	)
 
 	reg := &etcdRegistry{
-		config:   registry.NewConfig(opts...),
+		config:   registry.NewConfig(append(defaultOpts, opts...)...),
 		register: make(map[string]uint64),
 		leases:   make(map[string]clientv3.LeaseID),
 	}
@@ -153,7 +154,7 @@ func (e *etcdRegistry) Config() *registry.Config {
 func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, opts ...registry.Option) error {
 	// check existing lease cache
 	e.RLock()
-	leaseID, ok := e.leases[s.Name+node.Uid]
+	leaseID, ok := e.leases[s.Name+node.Id]
 	e.RUnlock()
 
 	if !ok {
@@ -162,7 +163,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 		defer cancel()
 
 		// look for the existing key
-		rsp, err := e.client.Get(ctx, nodePath(s.Name, node.Uid), clientv3.WithSerializable())
+		rsp, err := e.client.Get(ctx, nodePath(s.Name, node.Id), clientv3.WithSerializable())
 		if err != nil {
 			return err
 		}
@@ -186,8 +187,8 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 
 				// save the info
 				e.Lock()
-				e.leases[s.Name+node.Uid] = leaseID
-				e.register[s.Name+node.Uid] = h
+				e.leases[s.Name+node.Id] = leaseID
+				e.register[s.Name+node.Id] = h
 				e.Unlock()
 
 				break
@@ -219,13 +220,13 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 
 	// get existing hash for the service node
 	e.Lock()
-	v, ok := e.register[s.Name+node.Uid]
+	v, ok := e.register[s.Name+node.Id]
 	e.Unlock()
 
 	// the service is unchanged, skip registering
 	if ok && v == h && !leaseNotFound {
 		if log.GetLevel() == logger.LevelTrace {
-			log.Tracef("Service %s node %s unchanged skipping registration", s.Name, node.Uid)
+			log.Tracef("Service %s node %s unchanged skipping registration", s.Name, node.Id)
 		}
 		return nil
 	}
@@ -247,22 +248,22 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	defer cancel()
 
 	var lgr *clientv3.LeaseGrantResponse
-	if options.Ttl.Seconds() > 0 {
+	if options.TTL.Seconds() > 0 {
 		// get a lease used to expire keys since we have a ttl
-		lgr, err = e.client.Grant(ctx, int64(options.Ttl.Seconds()))
+		lgr, err = e.client.Grant(ctx, int64(options.TTL.Seconds()))
 		if err != nil {
 			return err
 		}
 	}
 
 	//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-	log.Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Uid, lgr, lgr.ID, options.Ttl)
+	log.Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Id, lgr, lgr.ID, options.TTL)
 	//}
 	// create an entry for the node
 	if lgr != nil {
-		_, err = e.client.Put(ctx, nodePath(service.Name, node.Uid), encode(service), clientv3.WithLease(lgr.ID))
+		_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), encode(service), clientv3.WithLease(lgr.ID))
 	} else {
-		_, err = e.client.Put(ctx, nodePath(service.Name, node.Uid), encode(service))
+		_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), encode(service))
 	}
 	if err != nil {
 		return err
@@ -270,10 +271,10 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 
 	e.Lock()
 	// save our hash of the service
-	e.register[s.Name+node.Uid] = h
+	e.register[s.Name+node.Id] = h
 	// save our leaseID of the service
 	if lgr != nil {
-		e.leases[s.Name+node.Uid] = lgr.ID
+		e.leases[s.Name+node.Id] = lgr.ID
 	}
 	e.Unlock()
 
@@ -288,18 +289,18 @@ func (e *etcdRegistry) Deregister(s *registry.Service, opts ...registry.Option) 
 	for _, node := range s.Nodes {
 		e.Lock()
 		// delete our hash of the service
-		delete(e.register, s.Name+node.Uid)
+		delete(e.register, s.Name+node.Id)
 		// delete our lease of the service
-		delete(e.leases, s.Name+node.Uid)
+		delete(e.leases, s.Name+node.Id)
 		e.Unlock()
 
 		ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 		defer cancel()
 
 		//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-		log.Dbgf("Deregistering %s id %s", s.Name, node.Uid)
+		log.Dbgf("Deregistering %s id %s", s.Name, node.Id)
 		//}
-		_, err := e.client.Delete(ctx, nodePath(s.Name, node.Uid))
+		_, err := e.client.Delete(ctx, nodePath(s.Name, node.Id))
 		if err != nil {
 			return err
 		}

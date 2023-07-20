@@ -103,7 +103,7 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 		}
 
 		svc.Nodes = append(svc.Nodes, &registry.Node{
-			Uid:      id,
+			Id:       id,
 			Address:  fmt.Sprintf("%s:%d", address, e.Service.Port),
 			Metadata: decodeMetadata(e.Service.Tags),
 		})
@@ -150,7 +150,7 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 			for _, oldNode := range oldService.Nodes {
 				var seen bool
 				for _, newNode := range newService.Nodes {
-					if newNode.Uid == oldNode.Uid {
+					if newNode.Id == oldNode.Id {
 						seen = true
 						break
 					}

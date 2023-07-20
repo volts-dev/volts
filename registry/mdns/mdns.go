@@ -62,11 +62,12 @@ func init() {
 
 // NewMdnsRegistry
 func New(opts ...registry.Option) registry.IRegistry {
-	opts = append(opts,
+	var defaultOpts []registry.Option
+	defaultOpts = append(defaultOpts,
 		registry.WithName("mdns"),
 		registry.Timeout(time.Millisecond*100),
 	)
-	cfg := registry.NewConfig(opts...)
+	cfg := registry.NewConfig(append(defaultOpts, opts...)...)
 	// set the domain
 	domain := mdnsDomain
 	d, ok := cfg.Context.Value("mdns.domain").(string)
@@ -195,7 +196,7 @@ func (m *mdnsRegistry) Register(service *registry.Service, opts ...registry.Opti
 		var e *mdnsEntry
 
 		for _, entry := range entries {
-			if node.Uid == entry.id {
+			if node.Id == entry.id {
 				seen = true
 				e = entry
 				break
@@ -234,7 +235,7 @@ func (m *mdnsRegistry) Register(service *registry.Service, opts ...registry.Opti
 		//}
 		// we got here, new node
 		s, err := mdns.NewMDNSService(
-			node.Uid,
+			node.Id,
 			service.Name,
 			m.domain+".",
 			"",
@@ -253,7 +254,7 @@ func (m *mdnsRegistry) Register(service *registry.Service, opts ...registry.Opti
 			continue
 		}
 
-		e.id = node.Uid
+		e.id = node.Id
 		e.node = srv
 		entries = append(entries, e)
 	}
@@ -278,7 +279,7 @@ func (m *mdnsRegistry) Deregister(service *registry.Service, opts ...registry.Op
 		var remove bool
 
 		for _, node := range service.Nodes {
-			if node.Uid == entry.id {
+			if node.Id == entry.id {
 				entry.node.Shutdown()
 				remove = true
 				break
@@ -367,7 +368,7 @@ func (m *mdnsRegistry) GetService(service string) ([]*registry.Service, error) {
 					continue
 				}
 				s.Nodes = append(s.Nodes, &registry.Node{
-					Uid:      strings.TrimSuffix(e.Name, "."+p.Service+"."+p.Domain+"."),
+					Id:       strings.TrimSuffix(e.Name, "."+p.Service+"."+p.Domain+"."),
 					Address:  fmt.Sprintf("%s:%d", addr, e.Port),
 					Metadata: txt.Metadata,
 				})
@@ -594,7 +595,7 @@ func (m *mdnsWatcher) Next() (*registry.Result, error) {
 			}
 
 			service.Nodes = append(service.Nodes, &registry.Node{
-				Uid:      strings.TrimSuffix(e.Name, suffix),
+				Id:       strings.TrimSuffix(e.Name, suffix),
 				Address:  fmt.Sprintf("%s:%d", addr, e.Port),
 				Metadata: txt.Metadata,
 			})

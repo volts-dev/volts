@@ -116,9 +116,6 @@ func (self *service) Run() error {
 				defer self.opts.Profile.Stop()
 			}
 	*/
-	//if logger.V(logger.InfoLevel, logger.DefaultLogger) {
-	//	logger.Infof("Starting [service] %s", self.Name())
-	//}
 
 	if err := self.Start(); err != nil {
 		return err
@@ -148,5 +145,9 @@ func (self *service) Server() server.IServer {
 }
 
 func (self *service) String() string {
+	if self.config.Server != nil {
+		return self.config.Server.String()
+	}
+
 	return "volts service"
 }

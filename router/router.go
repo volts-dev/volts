@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/volts-dev/volts/transport"
 )
 
-var defaultRouter *TRouter
 var log = logger.New("router")
 
 type (
@@ -89,8 +89,8 @@ func Validate(e *registry.Endpoint) error {
 
 // 新建路由
 // NOTE 路由不支持线程安全 不推荐多服务器调用！
-func New() *TRouter {
-	cfg := newConfig()
+func New(opts ...Option) *TRouter {
+	cfg := newConfig(opts...)
 	router := &TRouter{
 		TGroup:      *NewGroup(),
 		config:      cfg,
@@ -108,15 +108,6 @@ func New() *TRouter {
 	go router.refresh() // 定时刷新
 
 	return router
-}
-
-// FIXME 使用的话可能导致配置问题
-func __Default() *TRouter {
-	if defaultRouter == nil {
-		defaultRouter = New()
-	}
-
-	return defaultRouter
 }
 
 func (self *TRouter) PrintRoutes() {
@@ -152,7 +143,7 @@ func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
 				log.Err(err)
 			}
 
-			if n.Uid == node.Uid {
+			if n.Id == node.Id {
 				goto out
 			}
 
@@ -184,7 +175,7 @@ func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
 				nodes := make([]*registry.Node, 0)
 				var node *registry.Node
 				for _, n := range service.Nodes {
-					if n.Uid == node.Uid {
+					if n.Id == node.Id {
 						continue
 					}
 
@@ -390,7 +381,28 @@ func (self *TRouter) Deregister(ep *registry.Endpoint) error {
 }
 
 func (self *TRouter) Endpoints() (services map[string][]*registry.Endpoint) {
-	return self.tree.Endpoints()
+	// 注册订阅列表
+	var subscriberList []ISubscriber
+
+	for e := range self.subscribers {
+		// Only advertise non internal subscribers
+		if !e.Config().Internal {
+			subscriberList = append(subscriberList, e)
+		}
+	}
+	sort.Slice(subscriberList, func(i, j int) bool {
+		return subscriberList[i].Topic() > subscriberList[j].Topic()
+	})
+
+	eps := self.tree.Endpoints()
+	for name, endpoints := range eps {
+		for _, e := range subscriberList {
+			endpoints = append(endpoints, e.Endpoints()...)
+		}
+		eps[name] = endpoints
+	}
+
+	return eps
 }
 
 // 注册中间件
@@ -415,6 +427,27 @@ func (self *TRouter) RegisterMiddleware(middlewares ...func() IMiddleware) {
 func (self *TRouter) RegisterGroup(groups ...IGroup) {
 	for _, group := range groups {
 		self.tree.Conbine(group.GetRoutes())
+
+		for sub, lst := range group.GetSubscribers() {
+			if rawLst, has := self.TGroup.subscribers[sub]; !has {
+				self.TGroup.subscribers[sub] = lst
+			} else {
+				/*
+					var news []broker.ISubscriber
+					// 排除重复的
+					for _, sb := range lst {
+						for _, s := range rawLst {
+							if s.Topic() == sb.Topic() {
+								goto next
+							}
+						}
+						news = append(news, sb)
+					next:
+					}*/
+
+				self.TGroup.subscribers[sub] = append(rawLst, lst...)
+			}
+		}
 	}
 }
 
@@ -476,13 +509,14 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		ctx := p.Get().(*THttpContext)
 		if !ctx.inited {
 			ctx.router = self
-			ctx.route = *route
+			ctx.route = *route // fixme 复制
 			ctx.inited = true
 			ctx.Template = template.Default()
 		}
 
 		ctx.reset(rsp, r)
 		ctx.setPathParams(params)
+		ctx.route = *route // TODO 优化重复使用
 
 		self.route(route, ctx)
 

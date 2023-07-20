@@ -210,9 +210,11 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 
 	var l net.Listener
 	var err error
-
-	// TODO: support use of listen options
-	if self.config.Secure || self.config.TlsConfig != nil {
+	if self.config.EnableACME && self.config.ACMEProvider != nil {
+		// should we check the address to make sure its using :443?
+		l, err = self.config.ACMEProvider.Listen(self.config.ACMEHosts...)
+	} else if self.config.Secure || self.config.TlsConfig != nil {
+		// TODO: support use of listen options
 		config := self.config.TlsConfig
 
 		fn := func(addr string) (net.Listener, error) {

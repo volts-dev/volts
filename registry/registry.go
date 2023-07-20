@@ -14,7 +14,7 @@ var (
 	ErrNotFound       = errors.New("service not found") // Not found error when GetService is called
 	ErrWatcherStopped = errors.New("watcher stopped")   // Watcher stopped error when watcher is stopped
 	registryMap       = make(map[string]func(opts ...Option) IRegistry)
-	rehistryHost      sync.Map
+	registryHost      sync.Map
 )
 
 type (
@@ -42,7 +42,7 @@ type (
 
 	// 微服务节点 相当于每个程序/Port一个节点
 	Node struct {
-		Uid      string            `json:"id"`
+		Id       string            `json:"id"`
 		Address  string            `json:"address"`
 		Metadata map[string]string `json:"metadata"`
 	}
@@ -86,7 +86,8 @@ func Register(name string, creator func(opts ...Option) IRegistry) {
 }
 
 func Use(name string, opts ...Option) IRegistry {
-	cfg := NewConfig(opts...)
+	cfg := &Config{Name: name}
+	cfg.Init(opts...)
 
 	// 加载存在的服务
 	for _, addr := range cfg.Addrs {
@@ -94,8 +95,8 @@ func Use(name string, opts ...Option) IRegistry {
 			continue
 		}
 
-		regName := fmt.Sprintf("%s-%s", cfg.String(), addr)
-		if reg, has := rehistryHost.Load(regName); has {
+		regName := fmt.Sprintf("%s-%s", cfg.Name, addr)
+		if reg, has := registryHost.Load(regName); has {
 			return reg.(IRegistry)
 		}
 	}
@@ -107,21 +108,21 @@ func Use(name string, opts ...Option) IRegistry {
 				continue
 			}
 
-			regName := fmt.Sprintf("%s-%s", cfg.String(), addr)
-			rehistryHost.Store(regName, reg)
+			regName := fmt.Sprintf("%s-%s", cfg.Name, addr)
+			registryHost.Store(regName, reg)
 		}
 		return reg
 	}
 
-	return newNoopRegistry()
+	return newNopRegistry()
 }
 
-// NoopRegistry as default registry
+// NopRegistry as default registry
 func Default(new ...IRegistry) IRegistry {
 	if new != nil {
 		defaultRegistry = new[0]
 	} else if defaultRegistry == nil {
-		defaultRegistry = newNoopRegistry()
+		defaultRegistry = newNopRegistry()
 	}
 
 	return defaultRegistry
@@ -135,7 +136,7 @@ func (self *Service) Equal(to *Service) bool {
 		for _, node := range self.Nodes {
 			macth = false
 			for _, n := range to.Nodes {
-				if node.Uid == n.Uid {
+				if node.Id == n.Id {
 					macth = true
 					break
 				}

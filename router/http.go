@@ -173,7 +173,7 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 			// # parse the data from GET method #
 			q := self.request.URL.Query()
 			for key := range q {
-				self.methodParams.FieldByName(key).AsInterface(q.Get(key))
+				self.methodParams.SetByField(key, q.Get(key))
 			}
 
 			// # parse the data from POST method #
@@ -192,7 +192,7 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 
 				for key := range self.request.Form {
 					//Debug("key2:", key)
-					self.methodParams.FieldByName(key).AsInterface(self.request.FormValue(key))
+					self.methodParams.SetByField(key, self.request.FormValue(key))
 				}
 			}
 		}
@@ -214,6 +214,7 @@ func (self *THttpContext) WriteStream(data interface{}) error {
 	return self.response.WriteStream(data)
 }
 
+// TODO 改为Route Params
 // 如果返回 nil 代表 Url 不含改属性
 func (self *THttpContext) PathParams() *TParamsSet {
 	return self.pathParams
@@ -232,7 +233,7 @@ func (self *THttpContext) setPathParams(p Params) {
 	}
 
 	for _, param := range p {
-		self.pathParams.FieldByName(param.Name).AsInterface(param.Value)
+		self.pathParams.SetByField(param.Name, param.Value)
 	}
 }
 

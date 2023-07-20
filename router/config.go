@@ -27,7 +27,7 @@ var (
 type (
 	Option func(*Config)
 	Config struct {
-		*config.Config `field:"-"`
+		config.Config  `field:"-"`
 		Name           string             `field:"-"` // config name/path in config file
 		PrefixName     string             `field:"-"` // config prefix name
 		Logger         logger.ILogger     `field:"-"` // 实例
@@ -48,17 +48,17 @@ type (
 
 	GroupOption func(*GroupConfig)
 	GroupConfig struct {
-		Name        string // 当前源代码文件夹名称
-		_PrefixPath string
-		FilePath    string // 当前源代码文件夹路径
-		IsService   bool   // 是否在registry注册为独立的服务
-		PathPrefix  string
+		Name          string // 当前源代码文件夹名称
+		_PrefixPath   string
+		FilePath      string // 当前源代码文件夹路径
+		IsService     bool   // 是否在registry注册为独立的服务
+		PathPrefix    string
+		StaticHandler func(IContext) `field:"-"`
 	}
 )
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Name:           "router",
 		Logger:         log,
 		Recover:        true,
 		RecoverHandler: recoverHandler,
@@ -69,7 +69,7 @@ func newConfig(opts ...Option) *Config {
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.Default()
-		cfg.RegistryCacher = cacher.New(cfg.Registry)
+		cfg.RegistryCacher = cacher.New(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
 	}
 
 	return cfg
@@ -77,7 +77,7 @@ func newConfig(opts ...Option) *Config {
 
 func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+		return strings.Join([]string{self.PrefixName, "router"}, ".")
 	}
 	return self.Name
 }
@@ -102,6 +102,10 @@ func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
 	}
+}
+
+func Logger() logger.ILogger {
+	return log
 }
 
 func WithNameMapper(fn func(string) string) config.Option {
@@ -138,10 +142,15 @@ func WithRecover(on bool) Option {
 	}
 }
 
-// Register the service with a TTL
 func WithRecoverHandler(handler func(IContext)) Option {
 	return func(cfg *Config) {
 		cfg.RecoverHandler = handler
+	}
+}
+
+func WithStaticHandler(handler func(IContext)) GroupOption {
+	return func(cfg *GroupConfig) {
+		cfg.StaticHandler = handler
 	}
 }
 
@@ -179,10 +188,8 @@ func WithAloneService(asService bool, servicsName string, prefix ...string) Grou
 // 修改Config.json的路径
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
+		cfg.Unregister(cfg)
 		cfg.PrefixName = prefixName
-		// 重新加载
-		cfg.Load()
-		// 重新注册
-		config.Register(cfg)
+		cfg.Register(cfg)
 	}
 }

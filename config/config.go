@@ -3,12 +3,10 @@ package config
 import (
 	"log"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/spf13/cast"
 	"github.com/volts-dev/utils"
 )
 
@@ -28,14 +26,24 @@ var (
 
 type (
 	Option func(*Config)
+	core   struct {
+		name     string
+		fmt      *format
+		models   sync.Map
+		FileName string
+		Mode     ModeType
+	}
 
 	Config struct {
-		fmt        *format
-		models     sync.Map
-		CreateFile bool `field:"-"`
-		Mode       ModeType
-		FileName   string
-		Debug      bool
+		//name string
+		//fmt        *format
+		//models     sync.Map
+		AutoCreateFile bool `field:"-"`
+		//Mode       ModeType
+		//FileName   string
+		Debug   bool
+		core    *core // 配置文件核心 为了支持继承nil指针问题
+		changed bool
 	}
 
 	IConfig interface {
@@ -73,58 +81,91 @@ func Unregister(cfg IConfig) {
 }
 
 func Load(fileName ...string) error {
-	return defaultConfig.Load(fileName...)
+	return defaultConfig.LoadFromFile(fileName...)
 }
 
-func New(prefix string, opts ...Option) *Config {
+func New(name string, opts ...Option) *Config {
 	// 取缓存
-	var cfg *Config
-	if c, ok := cfgs.Load(prefix); ok {
-		cfg = c.(*Config)
+	var c *core
+	if c, ok := cfgs.Load(name); ok {
+		c = c.(*core)
 	} else {
-		cfg = &Config{
-			fmt:        newFormat(), // 配置主要文件格式读写实现,
-			CreateFile: true,
-			Mode:       MODE_NORMAL,
-			//Prefix:     prefix,
+		c = &core{
+			fmt:      newFormat(), // 配置主要文件格式读写实现,
 			FileName: CONFIG_FILE_NAME,
+			Mode:     MODE_NORMAL,
+			name:     name,
 		}
+		cfgs.Store(name, c)
 	}
 
+	cfg := &Config{
+		core:           c,
+		AutoCreateFile: true,
+		changed:        false,
+	}
 	// 初始化程序硬配置
 	cfg.Init(opts...)
 	// 加载文件配置
-	cfg.Load()
+	cfg.LoadFromFile()
 
-	//cfgs.Store(cfg.Prefix, cfg)
 	return cfg
 }
 
-func (self *Config) checkSelf(c *Config, cfg IConfig) {
-	if self == nil {
-		val := reflect.ValueOf(cfg).Elem()
-		val.FieldByName("Config").Set(reflect.ValueOf(c))
+func (self *Config) Core() *core {
+	if self.core == nil {
+		c, ok := cfgs.Load(DEFAULT_PREFIX)
+		if ok {
+			self.core = c.(*core)
+		}
 	}
+
+	return self.core
 }
 
 // 注册添加其他配置
 func (self *Config) Register(cfg IConfig) {
-	if c, ok := cfg.(iConfig); ok {
-		c.checkSelf(self, cfg)
+	cfgStr := cfg.String()
+	if cfgStr == "" {
+		return
 	}
 
-	self.models.Store(cfg.String(), cfg)
+	core := self.Core()
+
+	if !core.fmt.v.InConfig(cfgStr) {
+		if cfgStr == "registry." {
+			log.Println(cfgStr)
+		}
+
+		// 保存配置到core
+		err := cfg.Save()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 保存配置到文件
+		err = self.SaveToFile()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// 直接覆盖
+	core.models.Store(cfgStr, cfg)
+
+	// 加载配置
+	if err := cfg.Load(); err != nil {
+		log.Fatalf("load %v config failed!", cfgStr)
+	}
 }
 
 func (self *Config) Unregister(cfg IConfig) {
-	self.models.Delete(cfg.String())
+	self.Core().models.Delete(cfg.String())
 }
 
 // config: the config struct with binding the options
 func (self *Config) Init(opts ...Option) {
-	if self == nil {
-		*self = *New(DEFAULT_PREFIX)
-	}
+	self.Core()
 
 	for _, opt := range opts {
 		opt(self)
@@ -133,7 +174,7 @@ func (self *Config) Init(opts ...Option) {
 
 func (self *Config) Reload() {
 	// 重新加载配置
-	defaultConfig.models.Range(func(key any, value any) bool {
+	self.Core().models.Range(func(key any, value any) bool {
 		v := value.(IConfig)
 		err := v.Load()
 		if err != nil {
@@ -145,161 +186,106 @@ func (self *Config) Reload() {
 
 // 检测配置路径是否在Config里出现了
 func (self *Config) InConfig(path string) bool {
-	return defaultConfig.fmt.v.InConfig(path)
+	return self.Core().fmt.v.InConfig(path)
 }
 
-// 校正
-func (self *Config) Trim(fileName ...string) {
+func (self *Config) LoadFromFile(fileName ...string) error {
+	core := self.Core()
+
+	if core.FileName == "" {
+		core.FileName = CONFIG_FILE_NAME
+	}
+	filePath := filepath.Join(AppPath, core.FileName)
+	core.fmt.v.SetConfigFile(filePath)
+
+	fileExists := utils.FileExists(filePath) && self.AutoCreateFile
+
+	// Find and read the config file
+	// Handle errors reading the config file
+	if fileExists {
+		err := core.fmt.v.ReadInConfig()
+		if err != nil {
+			return err
+		}
+	}
+
+	// 校正
 	// 保存默认配置
-	self.models.Range(func(key any, value any) bool {
+	core.models.Range(func(key any, value any) bool {
 		if v, ok := value.(IConfig); ok {
 			if key != v.String() {
 				// 配置路径被更改过
-				self.models.Delete(key)
-				self.models.Store(v.String(), v)
+				core.models.Delete(key)
+				core.models.Store(v.String(), v)
 			}
 		}
 		return true
 	})
-}
-
-func (self *Config) Load(fileName ...string) error {
-	if self.FileName == "" {
-		self.FileName = CONFIG_FILE_NAME
-	}
-	filePath := filepath.Join(AppPath, self.FileName)
-	self.fmt.v.SetConfigFile(filePath)
-
-	self.Trim()
-
-	if self.CreateFile && !utils.FileExists(filePath) {
-		// 保存默认配置
-		self.models.Range(func(key any, value any) bool {
-			if v, ok := value.(IConfig); ok {
-				if err := v.Save(false); err != nil {
-					log.Fatalf("reload %v config failed!", v.String())
-					return false
-				}
-			}
-			return true
-		})
-		return self.fmt.v.WriteConfig()
-	}
-	// Find and read the config file
-	// Handle errors reading the config file
-	err := self.fmt.v.ReadInConfig()
-	if err != nil {
-		return err
-	}
 
 	changed := 0
-	self.models.Range(func(key any, value any) bool {
+	core.models.Range(func(key any, value any) bool {
 		if v, ok := value.(IConfig); ok {
-			if !self.fmt.v.InConfig(v.String()) {
+			if !fileExists || !core.fmt.v.InConfig(v.String()) {
+				// 没有配置文件则保存默认配置
 				if err := v.Save(false); err != nil {
-					log.Fatalf("save %v config failed!", key)
+					log.Fatalf("save %v config failed!", v.String())
 					return false
 				}
 				changed++
-			} else if err := v.Load(); err != nil {
-				log.Fatalf("reload %v config failed!", key)
+			} else {
+				if err := v.Load(); err != nil {
+					log.Fatalf("save %v config failed!", key)
+				}
 			}
+
 		}
 		return true
 	})
+
 	if changed > 0 {
 		// 保存新的配置
-		return self.fmt.v.WriteConfig()
+		return core.fmt.v.WriteConfig()
 	}
 
 	return nil
 }
 
 func (self *Config) LoadToModel(model IConfig) error {
-	err := defaultConfig.fmt.UnmarshalKey(model.String(), model)
-	if err != nil {
-		return err
+	core := self.Core()
+
+	// 如果配置不存于V
+	if !core.fmt.v.InConfig(model.String()) {
+		err := model.Save()
+		if err != nil {
+			return err
+		}
+	} else {
+		err := core.fmt.UnmarshalKey(model.String(), model)
+		if err != nil {
+			return err
+		}
 	}
 
 	// 保存但不覆盖注册的Model
-	if _, ok := defaultConfig.models.Load(model.String()); !ok {
-		defaultConfig.models.Store(model.String(), model)
+	if _, has := core.models.Load(model.String()); !has {
+		self.Register(model)
 	}
 	return nil
 }
 
-// TODO 支持字段结构
-// save settings data from the config model
-func (self *Config) ___LoadToModel(model IConfig) error {
-	mapper := utils.NewStructMapper(model)
-	for _, field := range mapper.Fields() {
-		// 过滤自己
-		if strings.ToLower("config") == strings.ToLower(field.Name()) {
-			continue
-		}
+func (self *Config) SaveToFile(opts ...Option) error {
+	core := self.Core()
 
-		// 字段赋值
-		key := strings.Join([]string{model.String(), utils.SnakeCasedName(field.Name())}, ".")
-		if val := self.fmt.v.Get(key); val != nil {
-			log.Println(field.Value())
-			// 初始化值以供接下来转换
-			if field.Value() == nil {
-				if err := field.Zero(); err != nil {
-					log.Fatal(err)
-				}
-			}
-
-			// 转换类型
-			switch field.Kind() {
-			case reflect.Bool:
-				val = cast.ToBool(val)
-			case reflect.String:
-				val = cast.ToString(val)
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				field.SetInt(cast.ToInt64(val))
-				continue
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				field.SetUint(cast.ToUint64(val))
-				continue
-			case reflect.Float64, reflect.Float32:
-				val = cast.ToFloat64(val)
-			default:
-				switch field.Value().(type) {
-				case time.Time:
-					val = cast.ToTime(val)
-				case []string:
-					val = cast.ToStringSlice(val)
-				case []int:
-					val = cast.ToIntSlice(val)
-				}
-			}
-
-			err := field.Set(val)
-			if err != nil {
-				log.Fatalf("load to model failed! Key:%s Value:%v Err:%s", key, self.fmt.v.Get(key), err.Error())
-			}
-		}
-
-	}
-
-	// 保存但不覆盖注册的Model
-	if _, ok := self.models.Load(model.String()); !ok {
-		self.models.Store(model.String(), model)
-	}
-	return nil
-}
-
-func (self *Config) Save(opts ...Option) error {
 	for _, opt := range opts {
 		opt(self)
 	}
 
-	if self.FileName == "" {
-		self.FileName = CONFIG_FILE_NAME
+	if core.FileName == "" {
+		core.FileName = CONFIG_FILE_NAME
 	}
 
-	self.fmt.v.SetConfigFile(filepath.Join(AppPath, self.FileName))
-	return self.fmt.v.WriteConfig()
+	core.fmt.v.SetConfigFile(filepath.Join(AppPath, core.FileName))
+	return core.fmt.v.WriteConfig()
 }
 
 // 从数据类型加载数据
@@ -320,7 +306,7 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 		// 立即保存
 		on := immed[0]
 		if on {
-			return self.Save()
+			return self.SaveToFile()
 		}
 	}
 
@@ -328,52 +314,52 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 }
 
 func (self *Config) GetBool(field string, defaultValue bool) bool {
-	return self.fmt.GetBool(field, defaultValue)
+	return self.Core().fmt.GetBool(field, defaultValue)
 }
 
 // GetStringValue from default namespace
 func (self *Config) GetString(field, defaultValue string) string {
-	return self.fmt.GetString(field, defaultValue)
+	return self.Core().fmt.GetString(field, defaultValue)
 }
 
 // GetIntValue from default namespace
 func (self *Config) GetInt(field string, defaultValue int) int {
-	return self.fmt.GetInt(field, defaultValue)
+	return self.Core().fmt.GetInt(field, defaultValue)
 }
 
 func (self *Config) GetInt32(field string, defaultValue int32) int32 {
-	return self.fmt.GetInt32(field, defaultValue)
+	return self.Core().fmt.GetInt32(field, defaultValue)
 }
 
 func (self *Config) GetInt64(field string, defaultValue int64) int64 {
-	return self.fmt.GetInt64(field, defaultValue)
+	return self.Core().fmt.GetInt64(field, defaultValue)
 }
 
 func (self *Config) GetIntSlice(field string, defaultValue []int) []int {
-	return self.fmt.GetIntSlice(field, defaultValue)
+	return self.Core().fmt.GetIntSlice(field, defaultValue)
 }
 
 func (self *Config) GetTime(field string, defaultValue time.Time) time.Time {
-	return self.fmt.GetTime(field, defaultValue)
+	return self.Core().fmt.GetTime(field, defaultValue)
 }
 
 func (self *Config) GetDuration(field string, defaultValue time.Duration) time.Duration {
-	return self.fmt.GetDuration(field, defaultValue)
+	return self.Core().fmt.GetDuration(field, defaultValue)
 }
 
 func (self *Config) GetFloat64(field string, defaultValue float64) float64 {
-	return self.fmt.GetFloat64(field, defaultValue)
+	return self.Core().fmt.GetFloat64(field, defaultValue)
 }
 
 func (self *Config) SetValue(field string, value interface{}) {
-	self.fmt.SetValue(field, value)
+	self.Core().fmt.SetValue(field, value)
 }
 
 func (self *Config) xUnmarshal(rawVal interface{}) error {
-	return self.fmt.Unmarshal(rawVal)
+	return self.Core().fmt.Unmarshal(rawVal)
 }
 
 // 反序列字段映射到数据类型
 func (self *Config) xUnmarshalField(field string, rawVal interface{}) error {
-	return self.fmt.UnmarshalKey(field, rawVal)
+	return self.Core().fmt.UnmarshalKey(field, rawVal)
 }

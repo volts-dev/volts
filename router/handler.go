@@ -2,6 +2,7 @@ package router
 
 // TODO 修改主控制器对应Handler名称让其可以转为统一接口完全规避反射缓慢缺陷
 import (
+	"fmt"
 	"hash/crc32"
 	"net/http"
 	"path/filepath"
@@ -20,16 +21,18 @@ type HandlerType byte
 type TransportType byte
 
 func (self HandlerType) String() string {
-	return [...]string{"LocalHandler", "ProxyHandler"}[self]
+	return [...]string{"LocalHandler", "ProxyHandler", "SubscribeHandler"}[self]
 }
 
 const (
 	// type of handler
 	LocalHandler HandlerType = iota
 	ProxyHandler
+	SubscriberHandler
 
 	HttpHandler TransportType = iota
 	RpcHandler
+	SubscribeHandler
 	ReflectHandler // TODO废弃
 )
 
@@ -51,10 +54,11 @@ type (
 	}
 
 	handle struct {
-		IsFunc     bool                // 是否以函数调用
-		Middleware IMiddleware         // 以供调用初始化和其他使用接口调用以达到直接调用的效率
-		HttpFunc   func(*THttpContext) // 实际调用的HTTP处理器
-		RpcFunc    func(*TRpcContext)  // 实际调用的RPC处理器
+		IsFunc     bool                      // 是否以函数调用
+		Middleware IMiddleware               // 以供调用初始化和其他使用接口调用以达到直接调用的效率
+		HttpFunc   func(*THttpContext)       // 实际调用的HTTP处理器
+		RpcFunc    func(*TRpcContext)        // 实际调用的RPC处理器
+		SubFunc    func(*TSubscriberContext) // 订阅处理器
 	}
 
 	// 路由节点绑定的控制器 func(Handler)
@@ -74,8 +78,8 @@ type (
 		funcs []*handle
 
 		// 控制器提供[结构控制器]数据和中间件载体
-		ctrlType  reflect.Type  // 供生成新的控制器
 		ctrlName  string        // 区别不同[结构型控制器]
+		ctrlType  reflect.Type  // 供生成新的控制器
 		ctrlValue reflect.Value // 每个handler的控制器必须是唯一的
 		ctrlModel interface{}   // 提供Ctx特殊调用
 	}
@@ -197,8 +201,8 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 		pos:      -1,
 	}
 	// 生成唯一标识用于缓存
-	h.Name = GetFuncName(handlers[0], filepath.Separator)
-	h.Id = int(crc32.ChecksumIEEE([]byte(h.Name)))
+	h.Id = int(crc32.ChecksumIEEE([]byte(url.Path)))
+	h.Name = fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), h.Id)
 
 	switch val := handlers[0].(type) {
 	case func(*THttpContext):

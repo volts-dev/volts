@@ -82,9 +82,9 @@ type (
 	}
 
 	Config struct {
-		*config.Config `field:"-"`
-		Name           string `field:"-"` // config name/path in config file
-		PrefixName     string `field:"-"` // config prefix name
+		config.Config `field:"-"`
+		Name          string `field:"-"` // config name/path in config file
+		PrefixName    string `field:"-"` // config prefix name
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Logger      logger.ILogger         `field:"-"` // 保留:提供给扩展使用
@@ -153,8 +153,8 @@ type (
 
 func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
-		Name:      "client",
-		Config:    config.Default(),
+		Name: "client",
+		//Config:    config.Default(),
 		Logger:    log,
 		Transport: tr,
 		Retries:   3,
@@ -184,19 +184,19 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg.Init(opts...)
 
 	config.Register(cfg)
-
-	// 保存/加载
-	if !config.Default().InConfig(cfg.String()) {
-		// 保存到内存
-		if err := cfg.Save(false); err != nil {
-			log.Fatalf("save %v config failed!", cfg.String())
+	/*
+		// 保存/加载
+		if !config.Default().InConfig(cfg.String()) {
+			// 保存到内存
+			if err := cfg.Save(false); err != nil {
+				log.Fatalf("save %v config failed!", cfg.String())
+			}
+			// 保存到配置文件
+			config.Default().Save()
+		} else if err := cfg.Load(); err != nil {
+			log.Fatalf("load %v config failed!", cfg.String())
 		}
-		// 保存到配置文件
-		config.Default().Save()
-	} else if err := cfg.Load(); err != nil {
-		log.Fatalf("load %v config failed!", cfg.String())
-	}
-
+	*/
 	// 初始化序列
 	if st := codec.Use(cfg.SerializeType); st != 0 {
 		cfg.Serialize = st
@@ -205,8 +205,9 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	// 初始化 transport
 	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
 
-	// 初始化regsitry
-	if reg := registry.Use(cfg.RegistryType /*registry.WithName(cfg.RegistryType),*/, registry.WithConfigPrefixName(cfg.Name), registry.Addrs(cfg.RegistryHost)); reg != nil {
+	// 初始化 registry
+	if reg := registry.Use(cfg.RegistryType,
+		registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost)); reg != nil {
 		cfg.Registry = reg
 		cfg.Selector = selector.New(
 			selector.WithConfigPrefixName(cfg.String()), // 配置路径
@@ -219,7 +220,7 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 
 func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.Name, self.PrefixName}, ".")
+		return strings.Join([]string{"client", self.PrefixName}, ".")
 	}
 	return self.Name
 }
@@ -253,6 +254,10 @@ func Debug() Option {
 			transport.WriteTimeout(cfg.CallOptions.DialTimeout),
 		)
 	}
+}
+
+func Logger() logger.ILogger {
+	return log
 }
 
 func WithCodec(c codec.SerializeType) RequestOption {
@@ -329,6 +334,13 @@ func WithRegistry(r registry.IRegistry) Option {
 	}
 }
 
+func WithRegistries(typ string, Host string) Option {
+	return func(cfg *Config) {
+		cfg.RegistryType = typ
+		cfg.RegistryHost = Host
+	}
+}
+
 // Transport to use for communication e.g http, rabbitmq, etc
 func WithTransport(t transport.ITransport) Option {
 	return func(cfg *Config) {
@@ -389,8 +401,8 @@ func WithHost(adr ...string) Option {
 // 修改Config.json的路径
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
+		cfg.Unregister(cfg)
 		cfg.PrefixName = prefixName
-		// 重新加载
-		cfg.Load()
+		cfg.Register(cfg)
 	}
 }

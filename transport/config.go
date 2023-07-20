@@ -8,6 +8,7 @@ import (
 
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/util/acme"
 	"golang.org/x/net/proxy"
 )
 
@@ -22,7 +23,7 @@ type (
 	ListenOption func(*ListenConfig)
 
 	Config struct {
-		*config.Config
+		config.Config
 		Name       string `field:"-"` // config name/path in config file
 		PrefixName string `field:"-"` // config prefix name
 		Listener   IListener
@@ -31,6 +32,11 @@ type (
 		// Codec is the codec interface to use where headers are not supported
 		// by the transport and the entire payload must be encoded
 		//Codec codec.Marshaler
+
+		// 证书
+		EnableACME   bool          `field:"enable_acme"`
+		ACMEHosts    []string      `field:"acme_hosts"`
+		ACMEProvider acme.Provider `field:"-"`
 		// Secure tells the transport to secure the connection.
 		// In the case TLSConfig is not specified best effort self-signed
 		// certs should be used
@@ -94,7 +100,7 @@ func (self *DialConfig) Init(opts ...DialOption) {
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Name:         "transport",
+		//Name:         "transport",
 		DialTimeout:  DefaultTimeout,
 		ReadTimeout:  DefaultTimeout,
 		WriteTimeout: DefaultTimeout,
@@ -106,7 +112,7 @@ func newConfig(opts ...Option) *Config {
 
 func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+		return strings.Join([]string{self.PrefixName, "transport"}, ".")
 	}
 	return self.Name
 }
@@ -134,6 +140,10 @@ func Debug() Option {
 		cfg.WriteTimeout = 60 * time.Second
 		cfg.DialTimeout = 60 * time.Second
 	}
+}
+
+func Logger() logger.ILogger {
+	return log
 }
 
 // Addrs to use for transport
@@ -170,6 +180,23 @@ func WriteTimeout(t time.Duration) Option {
 func DialTimeout(t time.Duration) Option {
 	return func(cfg *Config) {
 		cfg.DialTimeout = t
+	}
+}
+
+func EnableACME(b bool) Option {
+	return func(cfg *Config) {
+		cfg.EnableACME = b
+	}
+}
+func ACMEHosts(hosts ...string) Option {
+	return func(o *Config) {
+		o.ACMEHosts = hosts
+	}
+}
+
+func ACMEProvider(p acme.Provider) Option {
+	return func(o *Config) {
+		o.ACMEProvider = p
 	}
 }
 
@@ -267,9 +294,12 @@ func WithDialer(dialer proxy.Dialer) DialOption {
 // 修改Config.json的路径
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
+		// 注销配置
+		config.Unregister(cfg)
+
 		cfg.PrefixName = prefixName
 
 		// 重新注册
-		config.Default().Register(cfg)
+		config.Register(cfg)
 	}
 }
