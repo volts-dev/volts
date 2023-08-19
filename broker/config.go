@@ -174,39 +174,39 @@ func WithConfigPrefixName(prefixName string) Option {
 	}
 }
 
-func RegisterTTL(t time.Duration) Option {
+func WithRegisterTTL(t time.Duration) Option {
 	return func(cfg *Config) {
 		cfg.RegisterTTL = t
 	}
 }
 
-func RegisterInterval(t time.Duration) Option {
+func WithRegisterInterval(t time.Duration) Option {
 	return func(cfg *Config) {
 		cfg.RegisterInterval = t
 	}
 }
 
-func Registry(r registry.IRegistry) Option {
+func WithRegistry(r registry.IRegistry) Option {
 	return func(o *Config) {
 		o.Registry = r
 	}
 }
 
 // Secure communication with the broker.
-func Secure(b bool) Option {
+func WithSecure(b bool) Option {
 	return func(o *Config) {
 		o.Secure = b
 	}
 }
 
 // Specify TLS Config.
-func TLSConfig(t *tls.Config) Option {
+func WithTLSConfig(t *tls.Config) Option {
 	return func(o *Config) {
 		o.TLSConfig = t
 	}
 }
 
-func Context(ctx context.Context) Option {
+func WithContext(ctx context.Context) Option {
 	return func(cfg *Config) {
 		cfg.Context = ctx
 	}
@@ -214,13 +214,13 @@ func Context(ctx context.Context) Option {
 
 // Codec sets the codec used for encoding/decoding used where
 // a broker does not support headers.
-func Codec(c codec.SerializeType) Option {
+func WithCodec(c codec.SerializeType) Option {
 	return func(cfg *Config) {
 		cfg.Codec = codec.IdentifyCodec(c)
 	}
 }
 
-func WithCodec(c codec.SerializeType) PublishOption {
+func WithPublishCodec(c codec.SerializeType) PublishOption {
 	return func(cfg *PublishConfig) {
 		cfg.SerializeType = c
 		cfg.Codec = codec.IdentifyCodec(c)

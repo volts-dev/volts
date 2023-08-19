@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/volts-dev/volts/broker"
+	maddr "github.com/volts-dev/volts/internal/addr"
+	mnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/logger"
-	maddr "github.com/volts-dev/volts/util/addr"
-	mnet "github.com/volts-dev/volts/util/net"
 )
 
 var log = logger.New("broker")
@@ -52,7 +52,7 @@ func New(opts ...broker.Option) broker.IBroker {
 	var defaultOpts []broker.Option
 	defaultOpts = append(defaultOpts,
 		broker.WithName("memory"),
-		broker.Context(context.Background()),
+		broker.WithContext(context.Background()),
 	)
 
 	cfg := broker.NewConfig(append(defaultOpts, opts...)...)

@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/volts-dev/volts/internal/mdns"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/util/mdns"
 )
 
 var log = registry.Logger()

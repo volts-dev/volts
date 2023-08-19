@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/internal/body"
 )
 
 type RpcResponse struct {

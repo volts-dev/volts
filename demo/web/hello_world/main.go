@@ -44,7 +44,7 @@ func main() {
 
 	srv := server.New(
 		server.Address(":16888"),
-		server.Router(r),
+		server.WithRouter(r),
 	)
 
 	app := volts.New(

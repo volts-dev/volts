@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/config"
+	"github.com/volts-dev/volts/internal/acme"
 	"github.com/volts-dev/volts/logger"
-	"github.com/volts-dev/volts/util/acme"
 	"golang.org/x/net/proxy"
 )
 

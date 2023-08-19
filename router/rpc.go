@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"reflect"
 
+	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
-	"github.com/volts-dev/volts/util/body"
 )
 
 var (
@@ -188,7 +188,7 @@ func (self *TRpcContext) Abort(message ...string) {
 	if len(message) > 0 {
 		self.Write([]byte(message[0]))
 	}
-	self.isDone = true
+	self.response.Write(nil)
 }
 
 func (self *TRpcContext) NotFound(message ...string) {
@@ -197,6 +197,7 @@ func (self *TRpcContext) NotFound(message ...string) {
 	if len(message) > 0 {
 		self.Write([]byte(message[0]))
 	}
+	self.response.Write(nil)
 }
 
 func (self *TRpcContext) Forbidden(message ...string) {
@@ -205,4 +206,5 @@ func (self *TRpcContext) Forbidden(message ...string) {
 	if len(message) > 0 {
 		self.Write([]byte(message[0]))
 	}
+	self.response.Write(nil)
 }

@@ -44,7 +44,7 @@ func main() {
 	r.Url("GET", "/", ctrls.index)
 
 	srv := server.New(
-		server.Router(r),
+		server.WithRouter(r),
 	)
 
 	// serve as a http server

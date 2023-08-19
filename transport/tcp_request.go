@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/util/body"
-	"github.com/volts-dev/volts/util/header"
+	"github.com/volts-dev/volts/internal/body"
+	"github.com/volts-dev/volts/internal/header"
 )
 
 type RpcRequest struct {

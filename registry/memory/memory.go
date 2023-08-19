@@ -188,6 +188,8 @@ func (m *memRegistry) Register(s *registry.Service, opts ...registry.Option) err
 		}
 	}
 
+	cfg.LocalServices = append(cfg.LocalServices, s)
+
 	if addedNodes {
 		log.Dbgf("Registry added new node to service: %s, version: %s", s.Name, s.Version)
 		go m.sendEvent(&registry.Result{Action: "update", Service: s})

@@ -7,8 +7,8 @@ import (
 	_url "net/url"
 	"strings"
 
-	"github.com/volts-dev/volts/util/body"
-	"github.com/volts-dev/volts/util/header"
+	"github.com/volts-dev/volts/internal/body"
+	"github.com/volts-dev/volts/internal/header"
 )
 
 type httpRequest struct {

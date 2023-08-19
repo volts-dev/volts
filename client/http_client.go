@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/errors"
+	"github.com/volts-dev/volts/internal/body"
+	"github.com/volts-dev/volts/internal/errors"
+	"github.com/volts-dev/volts/internal/metadata"
+	"github.com/volts-dev/volts/internal/pool"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 	"github.com/volts-dev/volts/transport"
-	"github.com/volts-dev/volts/util/body"
-	"github.com/volts-dev/volts/util/metadata"
-	"github.com/volts-dev/volts/util/pool"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/proxy"
 )

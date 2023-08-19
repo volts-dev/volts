@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/internal/body"
 )
 
 // 参考Tango

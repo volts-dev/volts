@@ -3,10 +3,10 @@ package main
 import (
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
+	"github.com/volts-dev/volts/internal/test"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
-	"github.com/volts-dev/volts/test"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -34,7 +34,7 @@ func main() {
 	r.Url("CONNECT", "Arith", new(arith))
 
 	srv := server.New(
-		server.Router(r),
+		server.WithRouter(r),
 	)
 
 	app := volts.New(

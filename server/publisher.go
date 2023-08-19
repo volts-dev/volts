@@ -9,8 +9,8 @@ import (
 	"github.com/volts-dev/volts/broker"
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/errors"
-	"github.com/volts-dev/volts/util/metadata"
+	"github.com/volts-dev/volts/internal/errors"
+	"github.com/volts-dev/volts/internal/metadata"
 )
 
 type (
@@ -133,7 +133,7 @@ func WithClient(cli client.IClient) PublisherOption {
 	}
 }
 
-func WithBroker(brok broker.IBroker) PublisherOption {
+func WithPublisherBroker(brok broker.IBroker) PublisherOption {
 	return func(publisher *Publisher) {
 		publisher.Broker = brok
 	}

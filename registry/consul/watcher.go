@@ -8,8 +8,8 @@ import (
 
 	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/consul/api/watch"
+	regutil "github.com/volts-dev/volts/internal/registry"
 	"github.com/volts-dev/volts/registry"
-	regutil "github.com/volts-dev/volts/util/registry"
 )
 
 type consulWatcher struct {

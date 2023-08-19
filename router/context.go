@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/volts-dev/dataset"
-	"github.com/volts-dev/volts/util/body"
+	"github.com/volts-dev/volts/internal/body"
 )
 
 var ContextType = reflect.TypeOf(new(IContext)).Elem()

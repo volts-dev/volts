@@ -15,7 +15,7 @@ func main() {
 
 	r.SetTemplateVar("VOLTS", "Hi Guy")
 	srv := server.New(
-		server.Router(r),
+		server.WithRouter(r),
 	)
 
 	// serve as a http server

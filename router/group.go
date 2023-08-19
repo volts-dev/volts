@@ -62,6 +62,7 @@ type (
 		domain string // 子域名用于区分不同域名不同路由
 
 		subscribers map[ISubscriber][]broker.ISubscriber
+		Metadata    map[string]string // 存储Group数据
 	}
 
 	TemplateVar struct {
@@ -223,6 +224,9 @@ func NewGroup(opts ...GroupOption) *TGroup {
 		TemplateVar: newTemplateVar(),
 		tree:        NewRouteTree(WithIgnoreCase()),
 		path:        _path.Join("/", cfg.Name),
+		Metadata:    map[string]string{
+			//"name": cfg.Name,
+		},
 	}
 
 	// init router tree
@@ -281,14 +285,18 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		panic("URL parameters can not be used when serving a static folder")
 	}
 
-	fp := self.config.FilePath
+	groupFilepath := ""
 	if len(root) > 0 {
-		fp = root[0]
+		// 如果定义固定路径
+		groupFilepath = root[0]
+	} else {
+		// 非固定路径使用组所在路径+URL路径
+		groupFilepath = _path.Join(self.config.FilePath, relativePath)
 	}
 
 	urlPattern := _path.Join(self.path, relativePath)
 	absolutePath := _path.Join(self.config.PathPrefix, urlPattern) // the url path
-	handler := staticHandler(absolutePath, _path.Join(fp, relativePath))
+	handler := staticHandler(absolutePath, groupFilepath)
 	// 路由路径
 	fullRoutePattern := _path.Join(self.config.PathPrefix, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
 	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: fullRoutePattern}, []any{handler})

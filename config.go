@@ -40,7 +40,7 @@ func newConfig(opts ...Option) *Config {
 	if cfg.Server == nil {
 		cfg.Server = server.New(
 			//server.Name(self.Name),
-			server.Transport(
+			server.WithTransport(
 				transport.NewHTTPTransport(),
 			),
 		)
@@ -112,7 +112,7 @@ func Registry(r registry.IRegistry) Option {
 		}
 
 		if cfg.Server != nil {
-			cfg.Server.Config().Init(server.Registry(r))
+			cfg.Server.Config().Init(server.WithRegistry(r))
 		}
 	}
 }
@@ -127,7 +127,7 @@ func Transport(t transport.ITransport) Option {
 		}
 
 		if cfg.Server != nil {
-			cfg.Server.Config().Init(server.Transport(t))
+			cfg.Server.Config().Init(server.WithTransport(t))
 		}
 
 	}

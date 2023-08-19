@@ -2,11 +2,14 @@ module github.com/volts-dev/volts
 
 go 1.20
 
+//replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
+
 require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/consul/api v1.21.0
+	github.com/hzmsrv/sonic v0.0.0-20230818022710-2d31107fc442
 	github.com/miekg/dns v1.1.54
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/mitchellh/mapstructure v1.5.0
@@ -26,7 +29,10 @@ require (
 )
 
 require (
-	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
+	github.com/bytedance/sonic v1.10.0-rc // indirect
+	github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d // indirect
+	github.com/chenzhuoyu/iasm v0.9.0 // indirect
 	github.com/gaukas/godicttls v0.0.3 // indirect
 	github.com/jinzhu/copier v0.3.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
@@ -38,7 +44,6 @@ require (
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/armon/go-metrics v0.4.0 // indirect
-	github.com/bytedance/sonic v1.9.2
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -65,6 +70,7 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/volts-dev/cacher v0.0.0-20230411044110-7a8e99cea547 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.9 // indirect
+	go.mongodb.org/mongo-driver v1.12.1
 	go.uber.org/multierr v1.8.0 // indirect
 	golang.org/x/crypto v0.9.0
 	golang.org/x/mod v0.10.0 // indirect

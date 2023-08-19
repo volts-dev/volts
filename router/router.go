@@ -30,7 +30,7 @@ type (
 		// Deregister endpoint from router
 		Deregister(ep *registry.Endpoint) error
 		// list all endpiont from router
-		Endpoints() (services map[string][]*registry.Endpoint)
+		Endpoints() (services map[*TGroup][]*registry.Endpoint)
 		RegisterMiddleware(middlewares ...func() IMiddleware)
 		RegisterGroup(groups ...IGroup)
 		PrintRoutes()
@@ -116,245 +116,6 @@ func (self *TRouter) PrintRoutes() {
 	}
 }
 
-func (self *TRouter) isClosed() bool {
-	select {
-	case <-self.exit:
-		return true
-	default:
-		return false
-	}
-}
-
-// 过滤自己
-func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
-	localServices := self.config.Registry.LocalServices()
-
-	nodes := make([]*registry.Node, 0)
-	for _, n := range service.Nodes {
-		//  TODO 解决监控拉取registry服务器服务列表比LocalServices获取注册的本地早
-		if len(localServices) == 0 && self.tree.Count.Load() > 0 {
-			break
-		}
-
-		for _, curSrv := range localServices {
-			node := curSrv.Nodes[0]
-			host, port, err := net.SplitHostPort(node.Address)
-			if err != nil {
-				log.Err(err)
-			}
-
-			if n.Id == node.Id {
-				goto out
-			}
-
-			h, p, err := net.SplitHostPort(n.Address)
-			if err != nil {
-				log.Err(err)
-			}
-
-			// 同个服务器
-			if host == h && port == p {
-				goto out
-			}
-
-		}
-		nodes = append(nodes, n)
-	out:
-	}
-
-	service.Nodes = nodes
-	/*
-		for _, curSrv := range localServices {
-			if curSrv != nil && service.Name == curSrv.Name {
-				node := curSrv.Nodes[0]
-				host, port, err := net.SplitHostPort(node.Address)
-				if err != nil {
-					log.Err(err)
-				}
-
-				nodes := make([]*registry.Node, 0)
-				var node *registry.Node
-				for _, n := range service.Nodes {
-					if n.Id == node.Id {
-						continue
-					}
-
-					h, p, err := net.SplitHostPort(n.Address)
-					if err != nil {
-						log.Err(err)
-					}
-
-					// 同个服务器
-					if host == h && port == p {
-						continue
-					}
-
-					nodes = append(nodes, n)
-				}
-				service.Nodes = nodes
-			}
-		}
-	*/
-	return service
-}
-
-// store local endpoint
-func (self *TRouter) store(services []*registry.Service) {
-	// services
-	//names := map[string]bool{}
-
-	// create a new endpoint mapping
-	for _, service := range services {
-		// set names we need later
-		//names[service.Name] = true
-		service = self.filteSelf(service)
-		if len(service.Nodes) > 0 {
-			// map per endpoint
-			for _, sep := range service.Endpoints {
-				//method = sep.Metadata["method"]
-				//path = sep.Metadata["path"]
-				r := EndpiontToRoute(sep)
-				if utils.InStrings("CONNECT", sep.Method...) > 0 {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, nil, []*registry.Service{service}))
-				} else {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, nil, []*registry.Service{service}))
-				}
-
-				err := self.tree.AddRoute(r)
-				if err != nil {
-					log.Err(err)
-				}
-			}
-		}
-	}
-}
-
-// watch for endpoint changes
-func (self *TRouter) watch() {
-	var attempts int
-
-	// 5秒后才启动监测
-	time.Sleep(5 * time.Second)
-
-	for {
-		if self.isClosed() {
-			break
-		}
-
-		// watch for changes
-		w, err := self.config.Registry.Watcher()
-		if err != nil {
-			attempts++
-			log.Errf("error watching endpoints: %v", err)
-			//time.Sleep(time.Duration(attempts) * time.Second)
-			continue
-		}
-
-		// 无监视者等待
-		if w == nil {
-			time.Sleep(60 * time.Second)
-			continue
-		}
-
-		ch := make(chan bool)
-
-		go func() {
-			select {
-			case <-ch:
-				w.Stop()
-			case <-self.exit:
-				w.Stop()
-			}
-		}()
-
-		// reset if we get here
-		attempts = 0
-
-		for {
-			// process next event
-			res, err := w.Next()
-			if err != nil {
-				log.Errf("error getting next endoint: %v", err)
-				close(ch)
-				break
-			}
-
-			// skip these things
-			if res == nil || res.Service == nil {
-				break
-			}
-
-			// get entry from cache
-			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
-			if err != nil {
-				log.Errf("unable to get service: %v", err)
-				break
-			}
-
-			// update our local endpoints
-			self.store(services)
-		}
-	}
-}
-
-// refresh list of api services
-func (self *TRouter) refresh() {
-	// 5秒后才启动监测
-	time.Sleep(5 * time.Second)
-
-	var (
-		err      error
-		services []*registry.Service
-		list     []*registry.Service
-		attempts int
-	)
-
-	for {
-		list, err = self.config.Registry.ListServices()
-		if err != nil {
-			attempts++
-			log.Warnf("registry unable to list services: %v", err)
-			time.Sleep(time.Duration(attempts) * time.Second)
-			continue
-		}
-		// 无监视者等待
-		if len(list) == 0 {
-			time.Sleep(60 * time.Second)
-			continue
-		}
-
-		attempts = 0
-
-		// for each service, get service and store endpoints
-		for _, s := range list {
-			for _, local := range self.config.Registry.LocalServices() {
-				if local.Equal(s) {
-					// 不添加自己
-					goto out
-				}
-
-			}
-
-			services, err = self.config.RegistryCacher.GetService(s.Name)
-			if err != nil {
-				log.Errf("unable to get service: %v", err)
-				continue
-			}
-			self.store(services)
-
-		out:
-		}
-
-		// refresh list in 10 minutes... cruft
-		// use registry watching
-		select {
-		case <-time.After(time.Minute * 10):
-		case <-self.exit:
-			return
-		}
-	}
-}
-
 func (self *TRouter) Config() *Config {
 	return self.config
 }
@@ -380,7 +141,7 @@ func (self *TRouter) Deregister(ep *registry.Endpoint) error {
 	return self.tree.DelRoute(path, EndpiontToRoute(ep))
 }
 
-func (self *TRouter) Endpoints() (services map[string][]*registry.Endpoint) {
+func (self *TRouter) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
 	// 注册订阅列表
 	var subscriberList []ISubscriber
 
@@ -395,11 +156,11 @@ func (self *TRouter) Endpoints() (services map[string][]*registry.Endpoint) {
 	})
 
 	eps := self.tree.Endpoints()
-	for name, endpoints := range eps {
+	for grp, endpoints := range eps {
 		for _, e := range subscriberList {
 			endpoints = append(endpoints, e.Endpoints()...)
 		}
-		eps[name] = endpoints
+		eps[grp] = endpoints
 	}
 
 	return eps
@@ -639,5 +400,240 @@ func (self *TRouter) route(route *route, ctx IContext) {
 	for _, handler := range route.handlers {
 		// TODO 回收需要特殊通道 直接调用占用了处理时间
 		handler.init(self).Invoke(ctx).recycle()
+	}
+}
+
+func (self *TRouter) isClosed() bool {
+	select {
+	case <-self.exit:
+		return true
+	default:
+		return false
+	}
+}
+
+// 过滤自己
+func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
+	localServices := self.config.Registry.LocalServices()
+
+	nodes := make([]*registry.Node, 0)
+	for _, n := range service.Nodes {
+		//  TODO 解决监控拉取registry服务器服务列表比LocalServices获取注册的本地早
+		if len(localServices) == 0 && self.tree.Count.Load() > 0 {
+			break
+		}
+
+		for _, curSrv := range localServices {
+			node := curSrv.Nodes[0]
+			host, port, err := net.SplitHostPort(node.Address)
+			if err != nil {
+				log.Err(err)
+			}
+
+			if n.Id == node.Id {
+				goto out
+			}
+
+			h, p, err := net.SplitHostPort(n.Address)
+			if err != nil {
+				log.Err(err)
+			}
+
+			// 同个服务器
+			if host == h && port == p {
+				goto out
+			}
+
+		}
+		nodes = append(nodes, n)
+	out:
+	}
+
+	service.Nodes = nodes
+	/*
+		for _, curSrv := range localServices {
+			if curSrv != nil && service.Name == curSrv.Name {
+				node := curSrv.Nodes[0]
+				host, port, err := net.SplitHostPort(node.Address)
+				if err != nil {
+					log.Err(err)
+				}
+
+				nodes := make([]*registry.Node, 0)
+				var node *registry.Node
+				for _, n := range service.Nodes {
+					if n.Id == node.Id {
+						continue
+					}
+
+					h, p, err := net.SplitHostPort(n.Address)
+					if err != nil {
+						log.Err(err)
+					}
+
+					// 同个服务器
+					if host == h && port == p {
+						continue
+					}
+
+					nodes = append(nodes, n)
+				}
+				service.Nodes = nodes
+			}
+		}
+	*/
+	return service
+}
+
+// store local endpoint
+func (self *TRouter) store(services []*registry.Service) {
+	// create a new endpoint mapping
+	for _, service := range services {
+		service = self.filteSelf(service)
+		if len(service.Nodes) > 0 {
+			// map per endpoint
+			for _, sep := range service.Endpoints {
+				url := &TUrl{
+					Path: sep.Path,
+				}
+				r := EndpiontToRoute(sep)
+				if utils.InStrings("CONNECT", sep.Method...) != -1 {
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, []*registry.Service{service}))
+				} else {
+					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, []*registry.Service{service}))
+				}
+
+				err := self.tree.AddRoute(r)
+				if err != nil {
+					log.Err(err)
+				}
+			}
+		}
+	}
+}
+
+// watch for endpoint changes
+func (self *TRouter) watch() {
+	var attempts int
+
+	// 5秒后才启动监测
+	time.Sleep(5 * time.Second)
+
+	for {
+		if self.isClosed() {
+			break
+		}
+
+		// watch for changes
+		w, err := self.config.Registry.Watcher()
+		if err != nil {
+			attempts++
+			log.Errf("error watching endpoints: %v", err)
+			//time.Sleep(time.Duration(attempts) * time.Second)
+			continue
+		}
+
+		// 无监视者等待
+		if w == nil {
+			time.Sleep(60 * time.Second)
+			continue
+		}
+
+		ch := make(chan bool)
+
+		go func() {
+			select {
+			case <-ch:
+				w.Stop()
+			case <-self.exit:
+				w.Stop()
+			}
+		}()
+
+		// reset if we get here
+		attempts = 0
+
+		for {
+			// process next event
+			res, err := w.Next()
+			if err != nil {
+				log.Errf("error getting next endoint: %v", err)
+				close(ch)
+				break
+			}
+
+			// skip these things
+			if res == nil || res.Service == nil {
+				break
+			}
+
+			// get entry from cache
+			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
+			if err != nil {
+				log.Errf("unable to get service: %v", err)
+				break
+			}
+
+			// update our local endpoints
+			self.store(services)
+		}
+	}
+}
+
+// refresh list of api services
+func (self *TRouter) refresh() {
+	// 5秒后才启动监测
+	time.Sleep(5 * time.Second)
+
+	var (
+		err      error
+		services []*registry.Service
+		list     []*registry.Service
+		attempts int
+	)
+
+	for {
+		list, err = self.config.Registry.ListServices()
+		if err != nil {
+			attempts++
+			log.Warnf("registry unable to list services: %v", err)
+			time.Sleep(time.Duration(attempts) * time.Second)
+			continue
+		}
+		// 无监视者等待
+		if len(list) == 0 {
+			time.Sleep(60 * time.Second)
+			continue
+		}
+
+		attempts = 0
+
+		// for each service, get service and store endpoints
+		for _, s := range list {
+			for _, local := range self.config.Registry.LocalServices() {
+				if local.Equal(s) {
+					// 不添加自己
+					goto out
+				}
+
+			}
+
+			services, err = self.config.RegistryCacher.GetService(s.Name)
+			if err != nil {
+				log.Errf("unable to get service: %v", err)
+				continue
+			}
+			self.store(services)
+
+		out:
+		}
+
+		// refresh list in 10 minutes... cruft
+		// use registry watching
+		select {
+		case <-time.After(time.Minute * 10):
+		case <-self.exit:
+			return
+		}
 	}
 }

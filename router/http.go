@@ -18,9 +18,9 @@ import (
 
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
-	"github.com/volts-dev/volts/util/body"
 	//httpx "github.com/volts-dev/volts/server/listener/http"
 )
 
@@ -315,10 +315,6 @@ func (self *THttpContext) Handler(index ...int) *handler {
 	return self.route.handlers[idx]
 }
 
-func (self *THttpContext) _CtrlCount() int {
-	return len(self.route.handlers)
-}
-
 // 数据缓存供传递用
 func (self *THttpContext) Data() *TParamsSet {
 	if self.data == nil {
@@ -335,11 +331,6 @@ func (self *THttpContext) GetCookie(name, key string) (value string, err error) 
 	}
 
 	return url.QueryUnescape(ck.Value)
-}
-
-func (self *THttpContext) ___GetGroupPath() string {
-	//return self.route.FileName
-	return ""
 }
 
 func (self *THttpContext) IP() (res []string) {

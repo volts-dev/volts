@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/volts/util/buf"
+	"github.com/volts-dev/volts/internal/buf"
 )
 
 type (

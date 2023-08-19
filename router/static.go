@@ -18,7 +18,7 @@ func staticHandler(urlPattern string, filePath string) func(c *THttpContext) {
 				c.response.WriteHeader(http.StatusNotFound)
 			}
 
-			log.Err(err)
+			log.Warn(err)
 			return
 		}
 

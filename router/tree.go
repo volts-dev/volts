@@ -483,27 +483,23 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 	return nil
 }
 
-func (self *TTree) Endpoints() (services map[string][]*registry.Endpoint) {
-	services = make(map[string][]*registry.Endpoint, 0)
+func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
+	services = make(map[*TGroup][]*registry.Endpoint, 0)
 	validator := make(map[string]*route)
 	var match func(method string, i int, node *treeNode)
 	match = func(method string, i int, node *treeNode) {
 		for _, c := range node.Children {
 			if c.Route != nil && c.Route.group != nil {
+				grp := c.Route.group
 				// TODO 检测
 				if _, ok := validator[c.Route.Path]; !ok {
 					//
 				}
 
-				srvName := ""
-				if c.Route.group.IsService() {
-					srvName = c.Route.group.Name()
-				}
-
-				if eps, has := services[srvName]; has {
-					services[srvName] = append(eps, RouteToEndpiont(c.Route))
+				if eps, has := services[grp]; has {
+					services[grp] = append(eps, RouteToEndpiont(c.Route))
 				} else {
-					services[srvName] = []*registry.Endpoint{RouteToEndpiont(c.Route)}
+					services[grp] = []*registry.Endpoint{RouteToEndpiont(c.Route)}
 				}
 			}
 			match(method, i+1, c)
@@ -695,7 +691,7 @@ func (self *TTree) PrintTrees() {
 	for method, node := range self.root {
 		if len(node.Children) > 0 {
 			buf.WriteString(method + "\n")
-			printNode(buf, 1, node)
+			printNode(buf, 1, node, "")
 			buf.WriteString("\n")
 		}
 	}
@@ -793,26 +789,37 @@ func validNodes(nodes []*treeNode) bool {
 	return true
 }
 
-func printNode(buf *bytes.Buffer, i int, node *treeNode) {
-	for _, c := range node.Children {
-		for j := 0; j < i; j++ { // 空格距离ss
-			buf.WriteString("  ")
-		}
-		if i > 1 {
-			buf.WriteString("└─" + " ")
+func printNode(buf *bytes.Buffer, lv int, node *treeNode, path string) {
+	cnt := len(node.Children)
+	isLast := false
+	subPath := ""
+	for idx, c := range node.Children {
+		isLast = idx == cnt-1
+
+		// 计算子路径打印方式
+		if isLast { // 如果是最后一个
+			subPath = path + "     " // 空格距离
+		} else {
+			subPath = path + " |   "
 		}
 
-		buf.WriteString(fmt.Sprintf(`%s ==> Lv:%d Type:%v VarType:%v `, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType]))
+		buf.WriteString(path + " |-- ")
+		buf.WriteString(fmt.Sprintf(`%s ==> Lv:%d  Type:%v  VarType:%v `, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType]))
 		if c.Route != nil {
-			buf.WriteString(fmt.Sprintf(" (*%d Mod:%s)", len(c.Route.handlers), c.Route.group.String()))
+			if c.Route.group != nil {
+				buf.WriteString(fmt.Sprintf(" (*%d Mod:%s)", len(c.Route.handlers), c.Route.group.String()))
+			} else {
+				buf.WriteString(fmt.Sprintf(" (*%d)", len(c.Route.handlers)))
+			}
 		}
+
 		//if !reflect.DeepEqual(c.Route, route{}) {
 		if c.Route != nil {
 			//fmt.Print("  ", c.Route.HandleType.String())
 			//fmt.Printf("  %p", c.handle.method.Interface())
 		}
 		buf.WriteString("\n")
-		printNode(buf, i+1, c)
+		printNode(buf, lv+1, c, subPath)
 	}
 }
 

@@ -14,7 +14,6 @@ import (
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/cacher"
 	vrouter "github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
 )
@@ -45,7 +44,7 @@ type (
 		Address    string
 		Advertise  string
 		Version    string
-		AutoCreate bool //自动创建实例
+		AutoCreate bool // TODO 没必要 自动创建实例
 
 		// broker
 		BrokerType string
@@ -96,17 +95,25 @@ func newConfig(opts ...Option) *Config {
 	config.Register(cfg)
 
 	// 同过截取配置初始化对象
-	if cfg.Broker == nil {
-		if bk := broker.Use(cfg.BrokerType, broker.WithConfigPrefixName(cfg.String()), broker.Addrs(cfg.BrokerHost)); bk != nil {
-			cfg.Broker = bk
-		}
-	}
-
 	// 初始化 registry
 	if cfg.Registry == nil {
 		if reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost)); reg != nil {
-			cfg.Registry = reg
+			cfg.Init(WithRegistry(reg))
 		}
+	}
+
+	if cfg.Broker == nil {
+		if bk := broker.Use(cfg.BrokerType, broker.WithConfigPrefixName(cfg.String()), broker.Addrs(cfg.BrokerHost)); bk != nil {
+			cfg.Init(WithBroker(bk))
+		}
+	}
+
+	if cfg.Transport == nil {
+		cfg.Init(WithTransport(transport.Default()))
+	}
+	// if not special router use create new
+	if cfg.Router == nil {
+		cfg.Init(WithRouter(vrouter.New()))
 	}
 
 	return cfg
@@ -123,22 +130,9 @@ func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		opt(self)
 	}
+	/*
 
-	if self.AutoCreate {
-		if self.Transport == nil {
-			self.Transport = transport.Default()
-			self.Transport.Init(
-				transport.WithConfigPrefixName(self.String()),
-			)
-		}
-		// if not special router use create new
-		if self.Router == nil {
-			self.Router = vrouter.New(
-				vrouter.WithConfigPrefixName(self.String()),
-			)
-		}
-	}
-
+	 */
 	if self.Debug {
 		self.Transport.Init(transport.Debug())
 		self.Router.Config().Init(vrouter.Debug())
@@ -220,7 +214,7 @@ func WithConfigPrefixName(prefixName string) Option {
 	}
 }
 
-func Broker(bk broker.IBroker) Option {
+func WithBroker(bk broker.IBroker) Option {
 	return func(cfg *Config) {
 		bk.Init(broker.WithConfigPrefixName(cfg.String()))
 		cfg.Broker = bk
@@ -230,37 +224,44 @@ func Broker(bk broker.IBroker) Option {
 }
 
 // Registry used for discovery
-func Registry(r registry.IRegistry) Option {
+func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		r.Init(registry.WithConfigPrefixName(cfg.String()))
 		cfg.Registry = r
-		cfg.Router.Config().Registry = r
-		cfg.Router.Config().RegistryCacher = cacher.New(r)
 		cfg.RegistryType = r.Config().Name
 		///cfg.RegistryHost     = r.Config(). // FIXME
 
 		// Update Broker
 		if cfg.Broker != nil {
-			cfg.Broker.Init(broker.Registry(r))
+			cfg.Broker.Init(broker.WithRegistry(r))
+		}
+
+		if cfg.Router != nil {
+			cfg.Router.Config().Init(vrouter.WithRegistry(r))
+		}
+	}
+}
+
+// not accept other router
+func WithRouter(router vrouter.IRouter) Option {
+	return func(cfg *Config) {
+		if _, ok := router.(*vrouter.TRouter); ok {
+			router.Config().Init(vrouter.WithConfigPrefixName(cfg.String()))
+			cfg.Router = router
+
+			// 避免执行顺序在WithRegistry后面
+			if cfg.Registry != nil {
+				cfg.Router.Config().Init(vrouter.WithRegistry(cfg.Registry))
+			}
 		}
 	}
 }
 
 // Transport mechanism for communication e.g http, rabbitmq, etc
-func Transport(t transport.ITransport) Option {
+func WithTransport(t transport.ITransport) Option {
 	return func(cfg *Config) {
 		t.Init(transport.WithConfigPrefixName(cfg.String()))
 		cfg.Transport = t
-	}
-}
-
-// not accept other router
-func Router(router vrouter.IRouter) Option {
-	return func(cfg *Config) {
-		if _, ok := router.(*vrouter.TRouter); ok {
-			router.Config().Init(vrouter.WithConfigPrefixName(cfg.String()))
-			cfg.Router = router
-		}
 	}
 }
 

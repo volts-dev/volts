@@ -12,9 +12,9 @@ import (
 	"time"
 
 	utls "github.com/refraction-networking/utls"
-	vaddr "github.com/volts-dev/volts/util/addr"
-	vnet "github.com/volts-dev/volts/util/net"
-	mls "github.com/volts-dev/volts/util/tls"
+	vaddr "github.com/volts-dev/volts/internal/addr"
+	vnet "github.com/volts-dev/volts/internal/net"
+	mls "github.com/volts-dev/volts/internal/tls"
 )
 
 // Time wraps time.Time overriddin the json marshal/unmarshal to pass

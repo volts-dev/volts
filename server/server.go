@@ -11,15 +11,15 @@ import (
 	_ "github.com/volts-dev/volts/broker/http"
 	_ "github.com/volts-dev/volts/broker/memory"
 	"github.com/volts-dev/volts/config"
+	"github.com/volts-dev/volts/internal/addr"
+	"github.com/volts-dev/volts/internal/backoff"
+	"github.com/volts-dev/volts/internal/metadata"
+	vnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	_ "github.com/volts-dev/volts/registry/mdns"
 	_ "github.com/volts-dev/volts/registry/memory"
 	"github.com/volts-dev/volts/router"
-	"github.com/volts-dev/volts/util/addr"
-	"github.com/volts-dev/volts/util/backoff"
-	"github.com/volts-dev/volts/util/metadata"
-	vnet "github.com/volts-dev/volts/util/net"
 )
 
 var defaultServer *TServer
@@ -193,11 +193,12 @@ func (self *TServer) Register() error {
 		})
 	*/
 	var servics []*registry.Service
-	for name, endpoints := range config.Router.Endpoints() {
+	for grp, endpoints := range config.Router.Endpoints() {
 		if len(endpoints) == 0 {
 			continue
 		}
 
+		name := grp.Name()
 		if name == "" {
 			name = config.Name // default registry service of this server
 		}
@@ -210,6 +211,7 @@ func (self *TServer) Register() error {
 		service := &registry.Service{
 			Name:      name,
 			Version:   config.Version,
+			Metadata:  grp.Metadata,
 			Nodes:     []*registry.Node{node},
 			Endpoints: endpoints,
 		}

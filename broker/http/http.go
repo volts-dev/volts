@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/broker"
+	maddr "github.com/volts-dev/volts/internal/addr"
+	vnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
-	maddr "github.com/volts-dev/volts/util/addr"
-	vnet "github.com/volts-dev/volts/util/net"
 
 	"github.com/google/uuid"
 	"github.com/volts-dev/volts/codec"
@@ -104,9 +104,9 @@ func New(opts ...broker.Option) broker.IBroker {
 	var defaultOpts []broker.Option
 	defaultOpts = append(defaultOpts,
 		broker.WithName("http"),
-		broker.Codec(codec.JSON),
-		broker.Registry(registry.Default()),
-		broker.Context(context.TODO()),
+		broker.WithCodec(codec.JSON),
+		broker.WithRegistry(registry.Default()),
+		broker.WithContext(context.TODO()),
 	)
 
 	cfg := broker.NewConfig(append(defaultOpts, opts...)...)

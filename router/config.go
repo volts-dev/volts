@@ -148,6 +148,13 @@ func WithRecoverHandler(handler func(IContext)) Option {
 	}
 }
 
+func WithRegistry(r registry.IRegistry) Option {
+	return func(cfg *Config) {
+		cfg.Registry = r
+		cfg.RegistryCacher = cacher.New(r)
+	}
+}
+
 func WithStaticHandler(handler func(IContext)) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.StaticHandler = handler

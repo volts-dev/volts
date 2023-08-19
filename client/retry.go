@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	"github.com/volts-dev/volts/errors"
+	"github.com/volts-dev/volts/internal/errors"
 )
 
 // note that returning either false or a non-nil error will result in the call not being retried

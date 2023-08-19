@@ -13,8 +13,8 @@ import (
 
 	consul "github.com/hashicorp/consul/api"
 	hash "github.com/mitchellh/hashstructure"
+	mnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/registry"
-	mnet "github.com/volts-dev/volts/util/net"
 )
 
 type consulRegistry struct {

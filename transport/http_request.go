@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/logger"
-	"github.com/volts-dev/volts/util/body"
 )
 
 type (
