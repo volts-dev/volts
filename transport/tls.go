@@ -30,7 +30,7 @@ func (e ErrExtensionNotExist) Error() string {
 	return fmt.Sprintf("Extension does not exist: %s\n", string(e))
 }
 
-/// extMap maps extension values to the TLSExtension object associated with the
+// / extMap maps extension values to the TLSExtension object associated with the
 // number. Some values are not put in here because they must be applied in a
 // special way. For example, "10" is the SupportedCurves extension which is also
 // used to calculate the JA3 signature. These JA3-dependent values are applied
@@ -65,7 +65,7 @@ func newExtMap() map[string]utls.TLSExtension {
 		"21": &utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle},
 		"22": &utls.GenericExtension{Id: 22}, // encrypt_then_mac
 		//"22": &utls.GenericExtension{Id: 0x16, Data: []uint8{}},
-		"23": &utls.UtlsExtendedMasterSecretExtension{},
+		"23": &utls.ExtendedMasterSecretExtension{},
 		//"27": &utls.FakeCertCompressionAlgsExtension{},
 		"27": &utls.UtlsCompressCertExtension{
 			Algorithms: []utls.CertCompressionAlgo{utls.CertCompressionBrotli},
@@ -141,7 +141,7 @@ func extsMapping(token string) utls.TLSExtension {
 		return &utls.GenericExtension{Id: 22} // encrypt_then_mac
 		//case "22": &utls.GenericExtension{Id: 0x16, Data: []uint8{}},
 	case "23":
-		return &utls.UtlsExtendedMasterSecretExtension{}
+		return &utls.ExtendedMasterSecretExtension{}
 		//"27": &utls.FakeCertCompressionAlgsExtension{},
 	case "27":
 		return &utls.UtlsCompressCertExtension{

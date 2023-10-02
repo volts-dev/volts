@@ -26,7 +26,8 @@ var (
 
 type (
 	Option func(*Config)
-	core   struct {
+
+	core struct {
 		name     string
 		fmt      *format
 		models   sync.Map

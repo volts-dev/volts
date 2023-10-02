@@ -33,7 +33,7 @@ func NewRpcClient(opts ...Option) *RpcClient {
 
 	// 默认编码
 	if cfg.SerializeType == "" {
-		cfg.Serialize = codec.MsgPack
+		cfg.Serialize = codec.JSON
 	}
 
 	p := pool.NewPool(
@@ -309,9 +309,13 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 			return nodes[time.Now().Unix()%int64(len(nodes))], nil
 		}, nil
 	}
+	// only get the things that are of http protocol
+	selectOptions := append(opts.SelectOptions, selector.WithFilter(
+		selector.FilterLabel("protocol", r.config.Transport.Protocol()),
+	))
 
 	// get next nodes from the selector
-	next, err := r.config.Selector.Select(service, opts.SelectOptions...)
+	next, err := r.config.Selector.Select(service, selectOptions...)
 	if err != nil {
 		if err == selector.ErrNotFound {
 			return nil, errors.InternalServerError("volts.client", "service %s: %s", service, err.Error())

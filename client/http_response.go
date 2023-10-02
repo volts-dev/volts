@@ -1,7 +1,7 @@
 package client
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -19,10 +19,12 @@ type httpResponse struct {
 }
 
 func (self *httpResponse) Body() *body.TBody {
-	// parse response
-	b, err := ioutil.ReadAll(self.response.Body)
-	if err == nil {
-		//return nil //, errors.InternalServerError("http.client", err.Error())
+	if self.body.Data.Len() == 0 {
+		b, err := io.ReadAll(self.response.Body)
+		if err == nil {
+			//return nil //, errors.InternalServerError("http.client", err.Error())
+			log.Err(err)
+		}
 		self.body.Data.Write(b)
 	}
 

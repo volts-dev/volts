@@ -184,7 +184,6 @@ func curFilePath(skip int) (string, string) {
 	_, file, _, _ := runtime.Caller(skip)
 	filePath, _ := _path.Split(file)
 	dirName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
-	//log.Dbg(config.AppPath, " ", filePath)
 	// 过滤由router创建的组群
 	if dirName == "router" {
 		return config.AppPath, "" // filepath.Base(AppPath)

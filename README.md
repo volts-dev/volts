@@ -1,3 +1,4 @@
+Warning: This package is a work in progress. After some preliminary testing, I think I might change a lot of how this package is structured.
 # volts.dev
 a golang web+rpc framework
 

@@ -14,6 +14,7 @@ type (
 		Dial(addr string, opts ...DialOption) (IClient, error)       // for client 详细查看pool.NewPool
 		Listen(addr string, opts ...ListenOption) (IListener, error) // for server
 		String() string
+		Protocol() string
 	}
 
 	ISocket interface {

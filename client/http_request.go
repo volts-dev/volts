@@ -21,7 +21,7 @@ type httpRequest struct {
 	body          *body.TBody
 	opts          RequestOptions
 }
-type aaa = httpRequest
+type HttpRequest = httpRequest
 
 /*
 @service: 目标URL地址

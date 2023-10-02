@@ -279,5 +279,15 @@ func (self *HttpTransport) Config() *Config {
 }
 
 func (self *HttpTransport) String() string {
-	return "Http Transport"
+	if self.config.Secure || self.config.TlsConfig != nil {
+		return "HttpsTransport"
+	}
+	return "HttpTransport"
+}
+
+func (self *HttpTransport) Protocol() string {
+	if self.config.Secure || self.config.TlsConfig != nil {
+		return "https"
+	}
+	return "http"
 }

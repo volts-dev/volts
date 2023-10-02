@@ -104,7 +104,7 @@ func TestOrderHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body().Close()
+	defer resp.Body().Reset()
 
 	for v, k := range resp.Header() {
 		log.Dbg(v, k)

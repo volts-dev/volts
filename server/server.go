@@ -177,7 +177,7 @@ func (self *TServer) Register() error {
 	node.Metadata["broker"] = config.Broker.String()
 	node.Metadata["server"] = self.String()
 	node.Metadata["registry"] = config.Registry.String()
-	node.Metadata["protocol"] = "mucp"
+	node.Metadata["protocol"] = config.Transport.Protocol()
 	/*
 		// 注册订阅列表
 		var subscriberList []ISubscriber
@@ -550,7 +550,7 @@ func (self *TServer) Name() string {
 }
 
 func (self *TServer) String() string {
-	return self.config.Transport.String() + "+" + self.config.Router.String() + " Server"
+	return self.config.Router.String() + self.config.Transport.String() + "+" + " Server"
 }
 
 func (self *TServer) Config() *Config {

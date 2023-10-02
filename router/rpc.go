@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 
+	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
@@ -138,6 +139,12 @@ func (self *TRpcContext) Write(data []byte) (int, error) {
 
 func (self *TRpcContext) WriteStream(data interface{}) error {
 	self.isDone = true
+	return self.response.WriteStream(data)
+}
+
+func (self *TRpcContext) WriteStreamWithCodec(data interface{}, c codec.ICodec) error {
+	self.isDone = true
+	self.response.Body().Codec = c
 	return self.response.WriteStream(data)
 }
 

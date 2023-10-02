@@ -124,6 +124,10 @@ func (t *tcpTransport) Config() *Config {
 	return t.config
 }
 
-func (t *tcpTransport) String() string {
-	return "TCP Transport"
+func (*tcpTransport) String() string {
+	return "TcpTransport"
+}
+
+func (*tcpTransport) Protocol() string {
+	return "TCP"
 }

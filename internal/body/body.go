@@ -19,7 +19,7 @@ type (
 	}
 )
 
-func (self *TBody) Close() error {
+func (self *TBody) Reset() error {
 	self.Data.Reset()
 	return nil
 }

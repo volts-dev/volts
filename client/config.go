@@ -40,6 +40,8 @@ type (
 		Codec         codec.ICodec
 		Encoded       bool // 传入的数据已经是编码器过的
 		SerializeType codec.SerializeType
+
+		Service string // 为该请求指定微服务名称
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context
@@ -200,6 +202,7 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	// 初始化序列
 	if st := codec.Use(cfg.SerializeType); st != 0 {
 		cfg.Serialize = st
+		cfg.SerializeType = st.String()
 	}
 
 	// 初始化 transport
@@ -270,6 +273,12 @@ func WithCodec(c codec.SerializeType) RequestOption {
 func Encoded(on bool) RequestOption {
 	return func(cfg *RequestOptions) {
 		cfg.Encoded = on
+	}
+}
+
+func WithServiceName(name string) RequestOption {
+	return func(cfg *RequestOptions) {
+		cfg.Service = name
 	}
 }
 

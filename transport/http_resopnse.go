@@ -41,6 +41,10 @@ func NewHttpResponse(ctx context.Context, req *THttpRequest) *THttpResponse {
 	return resp
 }
 
+func (self *THttpResponse) Body() *body.TBody {
+	return self.body
+}
+
 func (self *THttpResponse) WriteHeader(s int) {
 	self.status = s
 	self.ResponseWriter.WriteHeader(s)
@@ -114,6 +118,9 @@ func (self *THttpResponse) Close() {
 // Inite and Connect a new ResponseWriter when a new request is coming
 func (self *THttpResponse) Connect(w http.ResponseWriter) {
 	self.ResponseWriter = w
+	if self.body.Data.Len() > 0 {
+		self.body.Data.Reset()
+	}
 	self.status = 0
 	self.size = 0
 }

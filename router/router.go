@@ -226,11 +226,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			log.Errf("rpc hijacking %v:%v", r.RemoteAddr, ": ", err.Error())
 		}
 		io.WriteString(conn, "HTTP/1.0 200 Connected to RPC\n\n")
-		/*
-			s.mu.Lock()
-			s.activeConn[conn] = struct{}{}
-			s.mu.Unlock()
-		*/
+
 		msg, err := transport.ReadMessage(conn)
 		if err != nil {
 			log.Errf("rpc Read %s", err.Error())
@@ -384,8 +380,8 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 }
 
 func (self *TRouter) route(route *route, ctx IContext) {
-	defer func() {
-		if self.config.Recover {
+	if self.config.Recover {
+		defer func() {
 			if err := recover(); err != nil {
 				log.Err(err)
 
@@ -393,8 +389,8 @@ func (self *TRouter) route(route *route, ctx IContext) {
 					self.config.RecoverHandler(ctx)
 				}
 			}
-		}
-	}()
+		}()
+	}
 
 	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
 	for _, handler := range route.handlers {

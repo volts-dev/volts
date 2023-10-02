@@ -5,6 +5,7 @@ import (
 	"context"
 	_errors "errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -163,51 +164,64 @@ func (self *HttpClient) NewRequest(method, url string, data interface{}, optinos
 }
 
 func (h *HttpClient) next(request *httpRequest, opts CallOptions) (selector.Next, error) {
-	if h.config.Registry.String() == "" {
-		return func() (*registry.Node, error) {
-			return &registry.Node{
-				Address: request.url,
+
+	/*
+		// TODO 修改环境变量名称 get proxy
+		if prx := os.Getenv("MICRO_PROXY"); len(prx) > 0 {
+			service = prx
+		}
+
+	*/
+
+	{
+		// get proxy address
+		if prx := os.Getenv("MICRO_PROXY_ADDRESS"); len(prx) > 0 {
+			opts.Address = []string{prx}
+		}
+
+		// return remote address
+		if len(opts.Address) > 0 {
+			return func() (*registry.Node, error) {
+				return &registry.Node{
+					Address: opts.Address[0],
+					Metadata: map[string]string{
+						"protocol": "http",
+					},
+				}, nil
 			}, nil
+		}
+	}
+
+	if request.opts.Service != "" && h.config.Registry.String() != "" {
+		// 连接微服务
+		var service string
+		service = request.opts.Service
+
+		// only get the things that are of http protocol
+		selectOptions := append(opts.SelectOptions, selector.WithFilter(
+			selector.FilterLabel("protocol", h.config.Transport.Protocol()),
+		))
+
+		// get next nodes from the selector
+		next, err := h.config.Selector.Select(service, selectOptions...)
+		if err != nil && err == selector.ErrNotFound {
+			return nil, errors.NotFound("http.client", err.Error())
+		} else if err != nil {
+			return nil, errors.InternalServerError("http.client", err.Error())
+		}
+
+		return next, nil
+	}
+
+	if request.URL.Host == "" {
+		return nil, errors.NotFound("http.client", "target host is inavailable!")
+	}
+
+	return func() (*registry.Node, error) {
+		return &registry.Node{
+			Address: request.URL.Host,
 		}, nil
-	}
-	service := request.Service()
-
-	// TODO 修改环境变量名称 get proxy
-	if prx := os.Getenv("MICRO_PROXY"); len(prx) > 0 {
-		service = prx
-	}
-
-	// get proxy address
-	if prx := os.Getenv("MICRO_PROXY_ADDRESS"); len(prx) > 0 {
-		opts.Address = []string{prx}
-	}
-
-	// return remote address
-	if len(opts.Address) > 0 {
-		return func() (*registry.Node, error) {
-			return &registry.Node{
-				Address: opts.Address[0],
-				Metadata: map[string]string{
-					"protocol": "http",
-				},
-			}, nil
-		}, nil
-	}
-
-	// only get the things that are of mucp protocol
-	selectOptions := append(opts.SelectOptions, selector.WithFilter(
-		selector.FilterLabel("protocol", "http"),
-	))
-
-	// get next nodes from the selector
-	next, err := h.config.Selector.Select(service, selectOptions...)
-	if err != nil && err == selector.ErrNotFound {
-		return nil, errors.NotFound("http.client", err.Error())
-	} else if err != nil {
-		return nil, errors.InternalServerError("http.client", err.Error())
-	}
-
-	return next, nil
+	}, nil
 }
 
 func newHTTPCodec(contentType string) (codec.ICodec, error) {
@@ -319,7 +333,8 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 	defer buf.Close()
 
 	u := req.URL
-	u.Host = removeEmptyPort(u.Host)
+	u.Scheme = h.config.Transport.Protocol()
+	u.Host = removeEmptyPort(node.Address)
 	hreq := &http.Request{
 		Method:        req.method,
 		URL:           u,
@@ -338,21 +353,21 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 		pr = bytes.NewBufferString("")
 		h.printRequest(pr, hreq, nil)
 	}
+
 	// make the request
 	hrsp, err := h.client.Do(hreq.WithContext(ctx))
 	if err != nil {
 		return nil, errors.InternalServerError("http.client", err.Error())
 	}
 
-	// parse response
-	/*b, err := ioutil.ReadAll(hrsp.Body)
+	// NOTE 提前读取避免Ctx被取消而出错
+	b, err := io.ReadAll(hrsp.Body)
 	if err != nil {
 		return nil, errors.InternalServerError("http.client", err.Error())
 	}
-	defer hrsp.Body.Close()
-	*/
+
 	bd := body.New(req.body.Codec)
-	//bd.Data.Write(b) // NOTED 存入编码数据
+	bd.Data.Write(b) // NOTED 存入编码数据
 	rsp := &httpResponse{
 		response:   hrsp,
 		body:       bd,

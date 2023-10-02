@@ -3,6 +3,7 @@ package transport
 import (
 	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/internal/body"
@@ -31,7 +32,7 @@ func NewHttpRequest(req *http.Request) *THttpRequest {
 func (self *THttpRequest) Codec() codec.ICodec {
 	if self.codec == nil {
 		ct := self.Request.Header.Get("Content-Type")
-
+		ct = strings.Split(ct, ";")[0] // 分割“application/json;charset=UTF-8”
 		// TODO 添加更多
 		var st codec.SerializeType
 		switch ct {
