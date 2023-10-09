@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/volts-dev/cacher/memory"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/registry"
 )
@@ -43,7 +44,7 @@ type (
 	}
 
 	handlerManager struct {
-		handlerPool map[int]*sync.Pool
+		handlerPool sync.Map // map[int]*sync.Pool
 		router      *TRouter
 	}
 
@@ -54,11 +55,12 @@ type (
 	}
 
 	handle struct {
-		IsFunc     bool                      // 是否以函数调用
-		Middleware IMiddleware               // 以供调用初始化和其他使用接口调用以达到直接调用的效率
-		HttpFunc   func(*THttpContext)       // 实际调用的HTTP处理器
-		RpcFunc    func(*TRpcContext)        // 实际调用的RPC处理器
-		SubFunc    func(*TSubscriberContext) // 订阅处理器
+		IsFunc            bool // 是否以函数调用
+		MiddlewareCreator func(IRouter) IMiddleware
+		Middleware        IMiddleware               // 以供调用初始化和其他使用接口调用以达到直接调用的效率
+		HttpFunc          func(*THttpContext)       // 实际调用的HTTP处理器
+		RpcFunc           func(*TRpcContext)        // 实际调用的RPC处理器
+		SubFunc           func(*TSubscriberContext) // 订阅处理器
 	}
 
 	// 路由节点绑定的控制器 func(Handler)
@@ -153,8 +155,33 @@ func GetFuncName(i interface{}, seps ...rune) string {
 
 func newHandlerManager() *handlerManager {
 	return &handlerManager{
-		handlerPool: make(map[int]*sync.Pool),
+		// handlerPool: make(map[int]*sync.Pool),
 	}
+}
+
+func (self *handlerManager) Get(id int) *handler {
+	if v, ok := self.handlerPool.Load(id); ok {
+		if h := v.(memory.StackCache).Pop(); h != nil {
+			return h.(*handler)
+		}
+	}
+
+	return nil
+}
+
+func (self *handlerManager) Put(id int, h *handler) {
+	var c memory.StackCache
+	if v, ok := self.handlerPool.Load(id); ok {
+		c = v.(memory.StackCache)
+	} else {
+		c = memory.NewStack(
+			memory.WithInterval(10),
+			memory.WithExpire(3600),
+		) // cacher
+		self.handlerPool.Store(id, c)
+	}
+
+	c.Push(h)
 }
 
 /*
@@ -170,9 +197,9 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 				h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
 			case func(*THttpContext):
 				h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: v})
-			case func() IMiddleware: // 创建新的中间件状态实例并调用传递中间件
-				middleware := v()
-				h.funcs = append(h.funcs, &handle{IsFunc: true, Middleware: middleware, HttpFunc: WrapHttp(middleware.Handler)})
+			case func(IRouter) IMiddleware: // 创建新的中间件状态实例并调用传递中间件
+				//middleware := v()
+				h.funcs = append(h.funcs, &handle{IsFunc: true, MiddlewareCreator: v /*, Middleware: middleware, HttpFunc: WrapHttp(middleware.Handler)*/})
 			default:
 				log.Errf("unknow middleware %v", v)
 			}
@@ -185,9 +212,9 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 				h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
 			case func(*TRpcContext):
 				h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: v})
-			case func() IMiddleware:
-				middleware := v()
-				h.funcs = append(h.funcs, &handle{IsFunc: true, Middleware: middleware, RpcFunc: WrapRpc(middleware.Handler)})
+			case func(IRouter) IMiddleware:
+				//middleware := v()
+				h.funcs = append(h.funcs, &handle{IsFunc: true, MiddlewareCreator: v /* Middleware: middleware, RpcFunc: WrapRpc(middleware.Handler)*/})
 			default:
 				log.Errf("unknow middleware %v", v)
 			}
@@ -347,18 +374,22 @@ func (self *handler) Controller() any {
 // 任务:创建/缓存/初始化
 // 调用Recycle回收
 func (self *handler) init(router *TRouter) *handler {
-	p, has := self.Manager.handlerPool[self.Id]
+	/*p, has := self.Manager.handlerPool[self.Id]
 	if !has {
 		p = &sync.Pool{}
-		self.Manager.handlerPool[self.Id] = p
+		self.Manager.handlerPool[self.Id] = p // FIXME map 有风险崩溃
 	}
 
 	itf := p.Get()
 	if itf != nil {
 		return itf.((*handler))
+	}*/
+	h := self.Manager.Get(self.Id)
+	if h != nil {
+		return h
 	}
 
-	h := &handler{}
+	h = &handler{}
 	*h = *self //复制handler原型
 	if h.ctrlName != "" {
 		// 新建控制器
@@ -415,7 +446,7 @@ func (self *handler) init(router *TRouter) *handler {
 				log.Panicf("Controller %s need middleware %s to be registered!", h.ctrlName, midName)
 			}
 
-			midNewVal := reflect.ValueOf(ml())
+			midNewVal := reflect.ValueOf(ml(router))
 			/***	!过滤指针中间件!
 				type Controller struct {
 					Session *TSession
@@ -477,6 +508,16 @@ func (self *handler) init(router *TRouter) *handler {
 		// 所有的指针准备就绪后生成Interface
 		// NOTE:必须初始化结构指针才能生成完整的Model,之后修改CtrlValue将不会有效果
 		h.ctrlModel = h.ctrlValue.Interface()
+	}
+
+	/* 初始化中间件 */
+	for _, handle := range h.funcs {
+		if handle.Middleware == nil && handle.MiddlewareCreator != nil {
+			middleware := handle.MiddlewareCreator(router)
+			handle.Middleware = middleware
+			handle.HttpFunc = WrapHttp(middleware.Handler)
+			handle.RpcFunc = WrapRpc(middleware.Handler)
+		}
 	}
 
 	h.reset()
@@ -557,9 +598,8 @@ func (self *handler) reset() *handler {
 }
 
 func (self *handler) recycle() *handler {
-	p := self.Manager.handlerPool[self.Id]
 	self.reset()
-	p.Put(self)
-
+	//p.Put(self)
+	self.Manager.Put(self.Id, self)
 	return self
 }
