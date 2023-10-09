@@ -19,7 +19,7 @@ type (
 	}
 )
 
-func NewEvent() router.IMiddleware {
+func NewEvent(router router.IRouter) router.IMiddleware {
 	return &TEvent{}
 }
 

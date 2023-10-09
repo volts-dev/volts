@@ -687,7 +687,7 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 
 func (self *TTree) PrintTrees() {
 	buf := bytes.NewBufferString("")
-	buf.WriteString("\n")
+	buf.WriteString("Print routes tree:\n")
 	for method, node := range self.root {
 		if len(node.Children) > 0 {
 			buf.WriteString(method + "\n")

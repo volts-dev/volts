@@ -65,6 +65,7 @@ type (
 		AppDir = utils.AppDir()
 	}
 */
+
 func Default() *Config {
 	return defaultConfig
 }

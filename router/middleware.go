@@ -23,7 +23,7 @@ type (
 	}
 
 	TMiddlewareManager struct {
-		middlewares map[string]func() IMiddleware
+		middlewares map[string]func(IRouter) IMiddleware
 		names       []string     //
 		lock        sync.RWMutex // 同步性不重要暂时不加锁
 	}
@@ -31,7 +31,7 @@ type (
 
 func newMiddlewareManager() *TMiddlewareManager {
 	return &TMiddlewareManager{
-		middlewares: make(map[string]func() IMiddleware),
+		middlewares: make(map[string]func(IRouter) IMiddleware),
 	}
 
 }
@@ -48,7 +48,7 @@ func (self *TMiddlewareManager) Contain(key string) bool {
 	return ok
 }
 
-func (self *TMiddlewareManager) Add(key string, value func() IMiddleware) {
+func (self *TMiddlewareManager) Add(key string, value func(IRouter) IMiddleware) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -60,7 +60,7 @@ func (self *TMiddlewareManager) Add(key string, value func() IMiddleware) {
 	}
 }
 
-func (self *TMiddlewareManager) Set(key string, value func() IMiddleware) {
+func (self *TMiddlewareManager) Set(key string, value func(IRouter) IMiddleware) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -71,7 +71,7 @@ func (self *TMiddlewareManager) Set(key string, value func() IMiddleware) {
 	}
 }
 
-func (self *TMiddlewareManager) Get(key string) func() IMiddleware {
+func (self *TMiddlewareManager) Get(key string) func(IRouter) IMiddleware {
 	self.lock.RLock()
 	defer self.lock.RUnlock()
 	return self.middlewares[key]

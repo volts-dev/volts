@@ -8,7 +8,7 @@ type (
 	}
 )
 
-func NewTestSession() router.IMiddleware {
+func NewTestSession(router router.IRouter) router.IMiddleware {
 	return &TestSession{}
 
 }

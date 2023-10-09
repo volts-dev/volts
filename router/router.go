@@ -31,7 +31,7 @@ type (
 		Deregister(ep *registry.Endpoint) error
 		// list all endpiont from router
 		Endpoints() (services map[*TGroup][]*registry.Endpoint)
-		RegisterMiddleware(middlewares ...func() IMiddleware)
+		RegisterMiddleware(middlewares ...func(IRouter) IMiddleware)
 		RegisterGroup(groups ...IGroup)
 		PrintRoutes()
 	}
@@ -167,10 +167,10 @@ func (self *TRouter) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
 }
 
 // 注册中间件
-func (self *TRouter) RegisterMiddleware(middlewares ...func() IMiddleware) {
+func (self *TRouter) RegisterMiddleware(middlewares ...func(IRouter) IMiddleware) {
 	for _, creator := range middlewares {
 		// 新建中间件
-		middleware := creator()
+		middleware := creator(self)
 		if mm, ok := middleware.(IMiddlewareName); ok {
 			self.middleware.Add(mm.Name(), creator)
 		} else {
