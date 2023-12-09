@@ -324,18 +324,22 @@ RPC: "CONNECT"
 
 Match rules
 Base: <type:name> if difine type than the route only match the string same to the type
-Example: string:id only match "abc"
-         int:id only match number "123"
-         :id could match all kind of type with name id
-'//' -- 生成"/abc/"而非"/abc"
-'/web/content/<string:xmlid>',
-'/web/content/<string:xmlid>/<string:filename>',
-'/web/content/<int:id>',
-'/web/content/<int:id>/<string:filename>',
-'/web/content/<int:id>-<string:unique>',
-'/web/content/<int:id>-<string:unique>/<string:filename>',
-'/web/content/<string:model>/<int:id>/<string:field>',
-'/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
+Example:
+		<string:id> 	only match "abc"
+		   <int:id> 	only match number "123"
+		      <:id> 	could match all kind of type with name id
+
+		'//' -- 生成"/abc/"而非"/abc"
+		'/web/<string:id>',
+		'/web/<string:id>/<string:name>',
+		'/web/<int:id>',
+		'/web/<int:id>/<string:name>',
+		'/web/<int:id>-<string:unique>',
+		'/web/<int:id>-<string:unique>/<string:name>',
+		'/web/<string:model>/<int:id>/<string:field>',
+		'/web/<string:model>/<int:id>/<string:field>/<string:name>'
+		'/web/*'
+
 for details please read tree.go
 */
 // @handlers 第一个将会被用于主要控制器其他将被归为中间件

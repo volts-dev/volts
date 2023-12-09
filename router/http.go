@@ -425,7 +425,6 @@ func (self *THttpContext) SetCookie(name string, value string, others ...interfa
 		if aName == "" && aValue == "" { // 不能少于两个参数
 			return
 		}
-		fmt.Println(args, len(args))
 		var (
 			//name    string
 			//value   string

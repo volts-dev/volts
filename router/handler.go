@@ -113,20 +113,6 @@ func WrapHd(h http.Handler) func(*THttpContext) {
 	}
 }
 
-// add which middleware name blocked handler name
-func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
-	if self.midFilter == nil {
-		self.midFilter = make(map[string][]string)
-	}
-	lst := self.midFilter[middleware]
-	for _, name := range handlers {
-		if utils.InStrings(name, lst...) == -1 {
-			lst = append(lst, name)
-		}
-	}
-	self.midFilter[middleware] = lst
-}
-
 func GetFuncName(i interface{}, seps ...rune) string {
 	// 获取函数名称
 	var fn string
@@ -157,31 +143,6 @@ func newHandlerManager() *handlerManager {
 	return &handlerManager{
 		// handlerPool: make(map[int]*sync.Pool),
 	}
-}
-
-func (self *handlerManager) Get(id int) *handler {
-	if v, ok := self.handlerPool.Load(id); ok {
-		if h := v.(memory.StackCache).Pop(); h != nil {
-			return h.(*handler)
-		}
-	}
-
-	return nil
-}
-
-func (self *handlerManager) Put(id int, h *handler) {
-	var c memory.StackCache
-	if v, ok := self.handlerPool.Load(id); ok {
-		c = v.(memory.StackCache)
-	} else {
-		c = memory.NewStack(
-			memory.WithInterval(10),
-			memory.WithExpire(3600),
-		) // cacher
-		self.handlerPool.Store(id, c)
-	}
-
-	c.Push(h)
 }
 
 /*
@@ -353,6 +314,45 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 		log.Panicf("can not gen handler by this type")
 	}
 	return h
+}
+
+// add which middleware name blocked handler name
+func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
+	if self.midFilter == nil {
+		self.midFilter = make(map[string][]string)
+	}
+	lst := self.midFilter[middleware]
+	for _, name := range handlers {
+		if utils.InStrings(name, lst...) == -1 {
+			lst = append(lst, name)
+		}
+	}
+	self.midFilter[middleware] = lst
+}
+
+func (self *handlerManager) Get(id int) *handler {
+	if v, ok := self.handlerPool.Load(id); ok {
+		if h := v.(memory.StackCache).Pop(); h != nil {
+			return h.(*handler)
+		}
+	}
+
+	return nil
+}
+
+func (self *handlerManager) Put(id int, h *handler) {
+	var c memory.StackCache
+	if v, ok := self.handlerPool.Load(id); ok {
+		c = v.(memory.StackCache)
+	} else {
+		c = memory.NewStack(
+			memory.WithInterval(60),
+			memory.WithExpire(3600),
+		) // cacher
+		self.handlerPool.Store(id, c)
+	}
+
+	c.Push(h)
 }
 
 // 处理器名称

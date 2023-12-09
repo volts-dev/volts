@@ -76,10 +76,6 @@ func (self *TRpcContext) Route() route {
 	return self.route
 }
 
-func (self *TRpcContext) setControllerIndex(num int) {
-	self.handlerIndex = num
-}
-
 func (self *TRpcContext) HandlerIndex() int {
 	return self.handlerIndex
 }
@@ -174,21 +170,6 @@ func (self *TRpcContext) PathParams() *TParamsSet {
 	return self.pathParams
 }
 
-func (self *TRpcContext) setPathParams(p Params) {
-	// init dy url parm to handler
-	if len(p) > 0 {
-		self.pathParams = NewParamsSet(self)
-	}
-
-	for _, param := range p {
-		self.pathParams.SetByField(param.Name, param.Value)
-	}
-}
-
-func (self *TRpcContext) setHandler(h *handler) {
-	self.handler = h
-}
-
 func (self *TRpcContext) Abort(message ...string) {
 	self.isDone = true
 	self.response.WriteHeader(transport.StatusAborted)
@@ -214,4 +195,23 @@ func (self *TRpcContext) Forbidden(message ...string) {
 		self.Write([]byte(message[0]))
 	}
 	self.response.Write(nil)
+}
+
+func (self *TRpcContext) setControllerIndex(num int) {
+	self.handlerIndex = num
+}
+
+func (self *TRpcContext) setPathParams(p Params) {
+	// init dy url parm to handler
+	if len(p) > 0 {
+		self.pathParams = NewParamsSet(self)
+	}
+
+	for _, param := range p {
+		self.pathParams.SetByField(param.Name, param.Value)
+	}
+}
+
+func (self *TRpcContext) setHandler(h *handler) {
+	self.handler = h
 }

@@ -207,19 +207,16 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isD
 					startOffset = i
 				}
 
-				//fmt.Println("/")
 				// # 重置计数
 				target = nil
 				level = 0 // #开始计数
 			}
 		case LBracket:
 			{
-				//fmt.Println("(")
 				bracket = 1
 			}
 		case ':':
 			{
-				//fmt.Println(":", bracket, path[j:i-bracket])
 				var typ ContentType = AllType
 				if path[i-1] == LBracket { //#like (:var)
 					// 添加变量前的静态字符节点
@@ -242,7 +239,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isD
 					default:
 						typ = AllType
 					}
-					//fmt.Println("type:", typ)
 					bracket = 1
 				}
 
@@ -288,7 +284,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isD
 				if target != nil && ((i == l) || (i != l && path[startOffset+1] == delimitChar)) {
 					level++
 					target.Level = level
-					//fmt.Println("ok:", node.Text, target.Text, level)
 
 					// # 重置计数
 					target = nil
@@ -309,7 +304,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isD
 					}
 
 					level++
-					//fmt.Println("leve:", node.Text, target.Text, level)
 				}
 			}
 		case '*':
@@ -353,7 +347,6 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 	if node.Type == StaticNode { // 静态节点
 		// match static node
 		if strings.HasPrefix(path, node.Text) {
-			//fmt.Println("J态", path, " | ", node.Text)
 			if len(path) == len(node.Text) {
 				return node
 			}
@@ -371,10 +364,8 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 		//	*aParams = append(*aParams, param{node.Text[1:], path})
 		//	return node
 		//}
-		//fmt.Println("Any态", path, " | ", node.Text)
 		for _, c := range node.Children {
 			idx := strings.LastIndex(path, c.Text)
-			//fmt.Println("LastIndex", path, c.Text)
 			if idx > -1 {
 				h := r.matchNode(c, path[idx:], delimitChar, aParams)
 				if h != nil {
@@ -383,8 +374,6 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 				}
 
 			}
-			//fmt.Println("Any态2", path, idx, c.Text[1:])
-
 		}
 
 		*aParams = append(*aParams, param{node.Text[1:], path})
@@ -397,11 +386,11 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 			for _, c := range node.Children {
 				h := r.matchNode(c, path[0:], delimitChar, aParams)
 				if h != nil {
-					/*fmt.Println("类型1", path[:idx], node.ContentType)
-					if !validType(path[:idx], node.ContentType) {
-						fmt.Println("错误类型", path[:idx], node.ContentType)
-						return nil
-					}
+					/*
+						if !validType(path[:idx], node.ContentType) {
+							fmt.Println("错误类型", path[:idx], node.ContentType)
+							return nil
+						}
 					*/
 					*aParams = append(*aParams, param{node.Text[1:], path[:0]})
 					return h
@@ -423,12 +412,10 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 						continue
 					}
 
-					//fmt.Println("类型2", path[:idx], contentType[node.ContentType], contentType[c.ContentType])
 					if !validType(path[:idx], node.ContentType) {
 						continue
 					}
 
-					//fmt.Println("类型3", path[idx:], node.Text[1:], path[:idx])
 					h := r.matchNode(c, path[idx:], delimitChar, aParams)
 					if h != nil {
 						*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
@@ -438,7 +425,6 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams
 				}
 			}
 
-			//fmt.Println("动态a", retnil, len(node.Children))
 			if retnil || len(node.Children) > 0 {
 				return nil
 			}
@@ -543,7 +529,6 @@ func (r *TTree) Match(method string, path string) (*route, Params) {
 
 // add nodes to trees
 func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
-	//fmt.Println("self.Root", self.Root)
 	// 获得对应方法[POST,GET...]
 	cn := self.root[method]
 	if cn == nil {
