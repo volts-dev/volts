@@ -334,7 +334,6 @@ func (m Message) Encode() []byte {
 func (m *Message) Decode(r io.Reader) error {
 	var err error
 	// validate rest length for each step?
-	//log.Dbg("TMessage.Decode", m.Bom[:])
 
 	//buf := make([]byte, 1)
 	/*	_, err = r.Read(m.Bom[:1])

@@ -532,7 +532,6 @@ func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
 	// 获得对应方法[POST,GET...]
 	cn := self.root[method]
 	if cn == nil {
-
 		// 初始化Root node
 		cn = &treeNode{
 			Children: subNodes{},

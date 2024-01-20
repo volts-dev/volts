@@ -17,7 +17,7 @@ func homeDir() string {
 }
 
 func cacheDir() string {
-	const base = "golang-autocert"
+	const base = "autocert"
 	switch runtime.GOOS {
 	case "darwin":
 		return filepath.Join(homeDir(), "Library", "Caches", base)

@@ -22,6 +22,7 @@ type (
 	IString interface {
 		String() string
 	}
+
 	// [scheme:][//[userinfo@]host][/[path]/controller.action][?query][#fragment]
 	TUrl struct {
 		Scheme     string
@@ -169,13 +170,14 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 
 // get current source codes file path without file name
 func curFilePath(skip int) (string, string) {
-	/*s := 0
+	/* just for dbg
+	s := 0
 	for {
 		if pc, file, _, ok := runtime.Caller(s); ok {
 			// Note that the test line may be different on
 			// distinct calls for the same test.  Showing
 			// the "internal" line is helpful when debugging.
-			logger.Dbg(config.AppPath, pc, " ", file, s)
+			log.Dbg(config.AppPath, pc, " ", file, s)
 		} else {
 			break
 		}
@@ -183,19 +185,14 @@ func curFilePath(skip int) (string, string) {
 	}*/
 	_, file, _, _ := runtime.Caller(skip)
 	filePath, _ := _path.Split(file)
-	dirName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
+	pkgName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
 	// 过滤由router创建的组群
-	if dirName == "router" {
-		return config.AppPath, "" // filepath.Base(AppPath)
+	if pkgName == "router" {
+		return config.AppPath, ""
 	}
 
-	// 废除 有BUG // 确保路径在APP内
-	//if !strings.HasPrefix(filePath, config.AppPath) {
-	//	log.Err("Get current group path failed!")
-	//	return "", ""
-	//}
-
-	return filePath, dirName
+	filePath = config.AppPath + "/" + MODULE_DIR + "/" + pkgName
+	return filePath, pkgName
 }
 
 // new a module

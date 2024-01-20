@@ -8,6 +8,7 @@ import (
 
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/internal/acme"
+	"github.com/volts-dev/volts/internal/acme/autocert"
 	"github.com/volts-dev/volts/logger"
 	"golang.org/x/net/proxy"
 )
@@ -126,7 +127,17 @@ func (self *Config) Init(opts ...Option) {
 }
 
 func (self *Config) Load() error {
-	return self.LoadToModel(self)
+	if err := self.LoadToModel(self); err != nil {
+		return err
+	}
+
+	// 打开了SSL需要指定自动更新服务者
+	if self.EnableACME && self.ACMEProvider == nil {
+		// 默认是 Let’s Encrypt
+		self.ACMEProvider = autocert.NewProvider()
+	}
+
+	return nil
 }
 
 func (self *Config) Save(immed ...bool) error {

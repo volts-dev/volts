@@ -398,7 +398,6 @@ func (self *TServer) Start() error {
 		log.Errf("Broker [%s] connect error: %v", bname, err)
 		return err
 	}
-	log.Infof("Broker [%s] Connected to %s", bname, cfg.Broker.Address())
 
 	// use RegisterCheck func before register
 	if err = self.config.RegisterCheck(self.config.Context); err != nil {
@@ -429,7 +428,6 @@ func (self *TServer) Start() error {
 			default:
 				if err != nil {
 					log.Errf("Accept error: %v", err)
-
 					time.Sleep(time.Second)
 					continue
 				}

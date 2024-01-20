@@ -212,7 +212,23 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 	var err error
 	if self.config.EnableACME && self.config.ACMEProvider != nil {
 		// should we check the address to make sure its using :443?
-		l, err = self.config.ACMEProvider.Listen(self.config.ACMEHosts...)
+		//l, err = self.config.ACMEProvider.Listen(self.config.ACMEHosts...)
+		config, err := self.config.ACMEProvider.TLSConfig(self.config.ACMEHosts...)
+		if err != nil {
+			return nil, err
+		}
+
+		fn := func(addr string) (net.Listener, error) {
+			// generate a certificate
+			cert, err := mls.Certificate(self.config.ACMEHosts...)
+			if err != nil {
+				return nil, err
+			}
+			config.Certificates = []tls.Certificate{cert}
+			return tls.Listen("tcp", addr, config)
+		}
+
+		l, err = vnet.Listen(addr, fn)
 	} else if self.config.Secure || self.config.TlsConfig != nil {
 		// TODO: support use of listen options
 		config := self.config.TlsConfig

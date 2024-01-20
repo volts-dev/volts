@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/volts-dev/volts"
-
-	"github.com/volts-dev/volts/registry/etcd"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 )
@@ -36,6 +34,13 @@ func main() {
 	r.Url("GET", "/<:all>", ctrls.MacthAll)
 	r.Url("GET", "/<:all>/<:all2>/1", ctrls.MacthAll)
 
+	g1 := router.NewGroup(router.WithGroupPathPrefix("/<:lang>"))
+	{
+		g1.Url("GET", "/", ctrls.HelloWorld)
+		g1.Url("GET", "/<:all>", ctrls.MacthAll)
+	}
+
+	r.RegisterGroup(g1)
 	r.Config().Init(
 		router.WithRoutesTreePrinter(),
 		router.WithRequestPrinter(),
@@ -49,7 +54,7 @@ func main() {
 
 	app := volts.New(
 		volts.Server(srv),
-		volts.Registry(etcd.New()),
+		//volts.Registry(etcd.New()),
 	)
 	app.Run()
 }
