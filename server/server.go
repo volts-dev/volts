@@ -375,7 +375,10 @@ func (self *TServer) Start() error {
 
 	cfg := self.config
 	//config.Register(cfg) // 注册服务器配置
-	config.Load() // 加载所有配置
+	err := config.Load() // 加载所有配置
+	if err != nil {
+		return err
+	}
 
 	// 打印
 	cfg.Router.PrintRoutes()

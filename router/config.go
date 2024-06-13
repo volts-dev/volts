@@ -44,12 +44,14 @@ type (
 		StaticExt         []string       `field:"static_ext"` // the static file format allow to visit
 		UsePprof          bool
 		UploadBuf         int `field:"upload_buf"` // 上传文件大小MB
+		UseRootStatics    bool
 	}
 
 	GroupOption func(*GroupConfig)
 	GroupConfig struct {
 		Name          string // 当前源代码文件夹名称
 		_PrefixPath   string
+		Path          string // URL 路径
 		FilePath      string // 当前源代码文件夹路径
 		IsService     bool   // 是否在registry注册为独立的服务
 		PathPrefix    string
@@ -63,6 +65,7 @@ func newConfig(opts ...Option) *Config {
 		Recover:        true,
 		RecoverHandler: recoverHandler,
 		UploadBuf:      25,
+		UseRootStatics: true,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)
@@ -91,7 +94,15 @@ func (self *Config) Init(opts ...Option) {
 }
 
 func (self *Config) Load() error {
-	return self.LoadToModel(self)
+	if err := self.LoadToModel(self); err != nil {
+		return err
+	}
+
+	if self.UseRootStatics && self.Router != nil {
+		self.Router.Url("GET", "/<:fileName>.<:ext>", rootStaticHandler)
+	}
+
+	return nil
 }
 
 func (self *Config) Save(immed ...bool) error {
@@ -158,6 +169,12 @@ func WithRegistry(r registry.IRegistry) Option {
 func WithStaticHandler(handler func(IContext)) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.StaticHandler = handler
+	}
+}
+
+func WithModuleFilePath(path string) GroupOption {
+	return func(cfg *GroupConfig) {
+		cfg.FilePath = path
 	}
 }
 

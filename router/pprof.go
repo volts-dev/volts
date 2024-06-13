@@ -17,7 +17,6 @@ func pprofGroup() *TGroup {
 	group.Url("GET", "//", pprof.Index) //  "//" will tansfer to "/" like "/debug/pprof/"
 	group.Url("GET", "/cmdline", pprof.Cmdline)
 	group.Url("GET", "/profile", pprof.Profile)
-	group.Url("POST", "/symbol", pprof.Symbol)
 	group.Url("GET", "/symbol", pprof.Symbol)
 	group.Url("GET", "/trace", pprof.Trace)
 	group.Url("GET", "/allocs", pprof.Handler("allocs"))
@@ -26,6 +25,7 @@ func pprofGroup() *TGroup {
 	group.Url("GET", "/heap", pprof.Handler("heap"))
 	group.Url("GET", "/mutex", pprof.Handler("mutex"))
 	group.Url("GET", "/threadcreate", pprof.Handler("threadcreate"))
+	group.Url("POST", "/symbol", pprof.Symbol)
 
 	return group
 }

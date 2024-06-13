@@ -187,7 +187,7 @@ func (self *TRouter) RegisterMiddleware(middlewares ...func(IRouter) IMiddleware
 // register module
 func (self *TRouter) RegisterGroup(groups ...IGroup) {
 	for _, group := range groups {
-		group := group
+		//group := group
 		self.tree.Conbine(group.GetRoutes())
 
 		for sub, lst := range group.GetSubscribers() {

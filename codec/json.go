@@ -29,8 +29,7 @@ func (c jsonCodec) Encode(i interface{}) ([]byte, error) {
 func (c jsonCodec) Decode(data []byte, i interface{}) error {
 	// FIXME TODO 时间转换错误
 	dc := decoder.NewStreamDecoder(bytes.NewReader(data))
-	dc.UseInt64()
-	//dc.UseNumber()
+	dc.UseNumber()
 	return dc.Decode(&i)
 }
 

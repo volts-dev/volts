@@ -42,16 +42,13 @@ type (
 		SerializeType codec.SerializeType
 
 		Service string // 为该请求指定微服务名称
+		// Request/Response timeout
+		RequestTimeout time.Duration
+
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context
 	}
-
-	HttpOption func(*Config)
-	// Option contains all options for creating clients.
-	Option func(*Config)
-	// CallOption used by Call or Stream
-	CallOption func(*CallOptions)
 
 	CallOptions struct {
 		SelectOptions []selector.SelectOption
@@ -62,10 +59,10 @@ type (
 		//Backoff BackoffFunc
 		// Check if retriable func
 		Retry RetryFunc
-		// Transport Dial Timeout
-		DialTimeout time.Duration
 		// Number of Call attempts
 		Retries int
+		// Transport Dial Timeout
+		DialTimeout time.Duration
 		// Request/Response timeout
 		RequestTimeout time.Duration
 		// Stream timeout for the stream
@@ -82,6 +79,12 @@ type (
 		// can be stored in a context
 		Context context.Context
 	}
+
+	HttpOption func(*Config)
+	// Option contains all options for creating clients.
+	Option func(*Config)
+	// CallOption used by Call or Stream
+	CallOption func(*CallOptions)
 
 	Config struct {
 		config.Config `field:"-"`
@@ -282,11 +285,23 @@ func WithServiceName(name string) RequestOption {
 	}
 }
 
-// WithRequestTimeout is a CallOption which overrides that which
+func WithRequestTimeout(d time.Duration) RequestOption {
+	return func(opts *RequestOptions) {
+		opts.RequestTimeout = d
+	}
+}
+
+// WithDialTimeout is a CallOption which overrides that which
 // set in Options.CallOptions
-func WithRequestTimeout(d time.Duration) CallOption {
+func WithDialTimeout(d time.Duration) CallOption {
 	return func(o *CallOptions) {
-		o.RequestTimeout = d
+		o.DialTimeout = d
+	}
+}
+
+func WithStreamTimeout(d time.Duration) CallOption {
+	return func(o *CallOptions) {
+		o.StreamTimeout = d
 	}
 }
 

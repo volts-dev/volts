@@ -53,15 +53,13 @@ type (
 	TGroup struct {
 		sync.RWMutex
 		*TemplateVar
-		config     *GroupConfig
-		middleware *TMiddlewareManager
-		tree       *TTree
-		rcvr       reflect.Value // receiver of methods for the module
-		typ        reflect.Type  // type of the receiver
-		path       string        // URL 路径
-		//modulePath string // 当前模块文件夹路径
-		domain string // 子域名用于区分不同域名不同路由
-
+		config      *GroupConfig
+		middleware  *TMiddlewareManager
+		tree        *TTree
+		rcvr        reflect.Value // receiver of methods for the module
+		typ         reflect.Type  // type of the receiver
+		domain      string        // 子域名用于区分不同域名不同路由
+		subgroup    []IGroup
 		subscribers map[ISubscriber][]broker.ISubscriber
 		Metadata    map[string]string // 存储Group数据
 	}
@@ -72,7 +70,7 @@ type (
 )
 
 /*
-	"""Return the path of the given module.
+"""Return the path of the given module.
 
 Search the addons paths and return the first path where the given
 module is found. If downloaded is True, return the default addons
@@ -101,8 +99,8 @@ func GetModulePath(module string, downloaded bool, display_warning bool) (res st
 	//return ""
 }
 
-/*
-   """Return the full path of a resource of the given module.
+/*"""
+Return the full path of a resource of the given module.
 
    :param module: module name
    :param list(str) args: resource path components within module
@@ -111,7 +109,8 @@ func GetModulePath(module string, downloaded bool, display_warning bool) (res st
    :return: absolute path to the resource
 
    TODO make it available inside on osv object (self.get_resource_path)
-   """*/
+"""
+*/
 
 func GetResourcePath(module_src_path string) (res string) {
 	//filepath.SplitList(module_src_path)
@@ -214,13 +213,14 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	if cfg.FilePath == "" {
 		cfg.FilePath = filePath
 	}
+	cfg.Path = _path.Join("/", cfg.Name)
 
 	grp := &TGroup{
 		config:      cfg,
 		TemplateVar: newTemplateVar(),
 		tree:        NewRouteTree(WithIgnoreCase()),
-		path:        _path.Join("/", cfg.Name),
-		Metadata:    map[string]string{
+		//path:        _path.Join("/", cfg.Name),
+		Metadata: map[string]string{
 			//"name": cfg.Name,
 		},
 	}
@@ -252,7 +252,7 @@ func (self *TGroup) GetSubscribers() map[ISubscriber][]broker.ISubscriber {
 
 // the URL path
 func (self *TGroup) GetPath() string {
-	return self.path
+	return self.config.Path
 }
 
 // 获取组的绝对路径
@@ -262,7 +262,7 @@ func (self *TGroup) GetFilePath() string {
 
 // 获取组的链接路径
 func (self *TGroup) SetPath(path string) {
-	self.path = path
+	self.config.Path = path
 }
 
 func (self *TGroup) SetFilePath(path string) {
@@ -290,7 +290,7 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		groupFilepath = _path.Join(self.config.FilePath, relativePath)
 	}
 
-	urlPattern := _path.Join(self.path, relativePath)
+	urlPattern := _path.Join(self.config.Path, relativePath)
 	absolutePath := _path.Join(self.config.PathPrefix, urlPattern) // the url path
 	handler := staticHandler(absolutePath, groupFilepath)
 	// 路由路径
@@ -391,6 +391,24 @@ func (self *TGroup) Subscribe(subscriber ISubscriber) error {
 	}
 	self.subscribers[subscriber] = nil
 	return nil
+}
+
+func (self *TGroup) Conbine(groups ...IGroup) {
+	for _, group := range groups {
+		self.tree.Conbine(group.GetRoutes())
+	}
+}
+
+func (self *TGroup) NewSubGroup(relativePath string) *TGroup {
+	group := NewGroup(
+		WithModuleFilePath(self.GetFilePath()), // 继承module路径
+		WithGroupPathPrefix(relativePath),
+	)
+	group.TemplateVar = self.TemplateVar
+	group.tree = self.tree
+	group.Metadata = self.Metadata
+	self.subgroup = append(self.subgroup, group)
+	return group
 }
 
 /*

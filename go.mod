@@ -2,14 +2,14 @@ module github.com/volts-dev/volts
 
 go 1.20
 
-replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
+//replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
 
 require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.1
 	github.com/hashicorp/consul/api v1.25.1
-	github.com/hzmsrv/sonic v0.0.0-00010101000000-000000000000
+	github.com/hzmsrv/sonic v0.0.0-20230927155719-8ab26b70f3c7
 	github.com/miekg/dns v1.1.56
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/mitchellh/mapstructure v1.5.0

@@ -43,6 +43,10 @@ type (
 		Init(*ControllerConfig)
 	}
 
+	controllerReady interface {
+		Ready(*ControllerConfig)
+	}
+
 	handlerManager struct {
 		handlerPool sync.Map // map[int]*sync.Pool
 		router      *TRouter
@@ -323,7 +327,7 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 	}
 	lst := self.midFilter[middleware]
 	for _, name := range handlers {
-		if utils.InStrings(name, lst...) == -1 {
+		if utils.InStrings(name, lst...) == -1 || len(lst) == 0 {
 			lst = append(lst, name)
 		}
 	}
@@ -396,6 +400,7 @@ func (self *handler) init(router *TRouter) *handler {
 		h.ctrlValue = reflect.New(h.ctrlType)
 		ctrl := h.ctrlValue.Elem()
 
+		/* 代码位置不可移动 */
 		// 初始化控制器配置
 		// 断言必须非Elem()
 		if c, ok := h.ctrlValue.Interface().(controllerInit); ok {
@@ -508,6 +513,12 @@ func (self *handler) init(router *TRouter) *handler {
 		// 所有的指针准备就绪后生成Interface
 		// NOTE:必须初始化结构指针才能生成完整的Model,之后修改CtrlValue将不会有效果
 		h.ctrlModel = h.ctrlValue.Interface()
+
+		// 初始化控制器配置
+		// 断言必须非Elem()
+		if c, ok := h.ctrlValue.Interface().(controllerReady); ok {
+			c.Ready(h.Config)
+		}
 	}
 
 	/* 初始化中间件 */
@@ -521,6 +532,7 @@ func (self *handler) init(router *TRouter) *handler {
 	}
 
 	h.reset()
+
 	return h
 }
 
@@ -599,7 +611,6 @@ func (self *handler) reset() *handler {
 
 func (self *handler) recycle() *handler {
 	self.reset()
-	//p.Put(self)
 	self.Manager.Put(self.Id, self)
 	return self
 }

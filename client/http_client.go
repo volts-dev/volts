@@ -407,13 +407,16 @@ func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpRes
 	if !ok {
 		// no deadline so we create a new one
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, callOpts.RequestTimeout)
+
+		ctx, cancel = context.WithTimeout(ctx, request.opts.RequestTimeout)
 		defer cancel()
 	} else {
 		// got a deadline so no need to setup context
 		// but we need to set the timeout we pass along
-		opt := WithRequestTimeout(d.Sub(time.Now()))
-		opt(&callOpts)
+		callOpts.RequestTimeout = time.Until(d)
+
+		//opt := WithRequestTimeout(d.Sub(time.Now()))
+		//opt(&callOpts)
 	}
 
 	// should we noop right here?

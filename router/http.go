@@ -566,10 +566,21 @@ func (self *THttpContext) ServeFile(file_path string) {
 // render the template and return to the end
 func (self *THttpContext) RenderTemplate(tmpl string, args interface{}) {
 	self.ContentType = "text/html; charset=utf-8"
+
+	/* 添加Router的全局变量到Templete */
 	if vars, ok := args.(map[string]interface{}); ok {
-		self.templateVar = utils.MergeMaps(self.router.templateVar, self.route.group.templateVar, vars) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(
+			self.router.templateVar,
+			self.route.group.templateVar,
+			self.templateVar,
+			vars,
+		)
 	} else {
-		self.templateVar = utils.MergeMaps(self.router.templateVar, self.route.group.templateVar) // 添加Router的全局变量到Templete
+		self.templateVar = utils.MergeMaps(
+			self.router.templateVar,
+			self.route.group.templateVar,
+			self.templateVar,
+		)
 	}
 
 	if self.route.FilePath == "" {

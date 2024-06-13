@@ -17,16 +17,16 @@ var White = "\033[97m"
 
 // RFC5424 log message levels.
 const (
-	LevelAttack    Level = iota // under attack
-	LevelCritical               //
-	LevelAlert                  //
-	LevelEmergency              //
-	LevelNone                   // logger is close
-	LevelInfo                   //
-	LevelWarn                   //
-	LevelError                  //
-	LevelTrace                  // 跟踪
-	LevelDebug                  // under debug mode
+	LevelAttack    Level = iota // 0 under attack
+	LevelCritical               // 1
+	LevelAlert                  // 2
+	LevelEmergency              // 3
+	LevelNone                   // 4 logger is close
+	LevelInfo                   // 5
+	LevelWarn                   // 6
+	LevelError                  // 7
+	LevelTrace                  // 8 跟踪
+	LevelDebug                  // 9 under debug mode
 )
 
 func (lv Level) Color(msg string) string {
