@@ -275,26 +275,32 @@ func (self *TGroup) SetFilePath(path string) {
 // To use the operating system's file system implementation,
 // use :
 //
-//	router.Static("/static", "/var/www")
+//	router.Static("./static", "/var/www") 网站 Root 文件夹
+//	router.Static("/static", "/var/www") 模块文件夹
 func (self *TGroup) SetStatic(relativePath string, root ...string) {
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
 		panic("URL parameters can not be used when serving a static folder")
 	}
 
-	groupFilepath := ""
-	if len(root) > 0 {
-		// 如果定义固定路径
-		groupFilepath = root[0]
-	} else {
-		// 非固定路径使用组所在路径+URL路径
-		groupFilepath = _path.Join(self.config.FilePath, relativePath)
+	groupFilepath := relativePath
+	urlPattern := strings.TrimPrefix(relativePath, ".")
+	absolutePath := urlPattern
+	if !strings.HasPrefix(relativePath, ".") {
+		if len(root) > 0 {
+			// 如果定义固定路径
+			groupFilepath = root[0]
+		} else {
+			// 非固定路径使用组所在路径+URL路径
+			groupFilepath = _path.Join(self.config.FilePath, relativePath)
+		}
+
+		urlPattern = _path.Join(self.config.Path, relativePath)
+		absolutePath = _path.Join(self.config.PathPrefix, urlPattern) // the url path
 	}
 
-	urlPattern := _path.Join(self.config.Path, relativePath)
-	absolutePath := _path.Join(self.config.PathPrefix, urlPattern) // the url path
 	handler := staticHandler(absolutePath, groupFilepath)
 	// 路由路径
-	fullRoutePattern := _path.Join(self.config.PathPrefix, urlPattern, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
+	fullRoutePattern := _path.Join(absolutePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
 	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: fullRoutePattern}, []any{handler})
 	// 模版变量
 	self.SetTemplateVar(relativePath[1:], urlPattern) // set the template var value

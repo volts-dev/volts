@@ -393,6 +393,10 @@ github.com/volts-dev/template v0.0.0-20221214170606-ef35448bdc6c/go.mod h1:bvGyJ
 github.com/volts-dev/utils v0.0.0-20191020084914-72dcd57777e6/go.mod h1:0SKzbdZHLvrlZByCsbzLoWh8Zba0XFSynF8daygjvcs=
 github.com/volts-dev/utils v0.0.0-20230825084438-5f6ac6716a71 h1:AVoKun6BfA7jZhp3L6YplI26ZF0Y2hmOpVuCg6jC5d4=
 github.com/volts-dev/utils v0.0.0-20230825084438-5f6ac6716a71/go.mod h1:TODvPD1m6eFUenwyxUSS1unXP95G4RMa6oLy7AwX33E=
+github.com/volts-dev/utils v0.0.0-20240219154825-d1eba93edd3f h1:rRPxSynQ+NxJTn1vDiZu3lT1MdZFFfYIJdS4BiCjAO4=
+github.com/volts-dev/utils v0.0.0-20240219154825-d1eba93edd3f/go.mod h1:TODvPD1m6eFUenwyxUSS1unXP95G4RMa6oLy7AwX33E=
+github.com/volts-dev/utils v0.0.0-20240701185618-78901418ef24 h1:H5oT9+uiWAGSPIHRBbU3jKKZM8MNJOIR1LJjt4Q4q+Q=
+github.com/volts-dev/utils v0.0.0-20240701185618-78901418ef24/go.mod h1:TODvPD1m6eFUenwyxUSS1unXP95G4RMa6oLy7AwX33E=
 github.com/volts-dev/volts v0.0.0-20200503182809-04484fd814bb/go.mod h1:NwNqkHwcSHc8VW0CTeVtUaAoxsiDt8BSx4uuthjS0EQ=
 github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee h1:WOrAdlehv/k0OLha/Qp6lNFB7xScxEYItCExczlPrOc=
 github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee/go.mod h1:AWI0tKGYGsbcwNq3YyLjIpKxRfi4XT8D6TqnmkhOecA=

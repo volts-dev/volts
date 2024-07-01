@@ -48,6 +48,9 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 	if hd, ok := handler.Handler().(http.Handler); ok {
 		h.http = &http.Server{
 			Handler: hd,
+			// slowloris 攻击防护
+			ReadTimeout:  h.transport.config.ReadTimeout,
+			WriteTimeout: h.transport.config.WriteTimeout,
 		}
 	}
 
@@ -56,6 +59,9 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 			Handler: &customxx{
 				hd: hd,
 			},
+			// slowloris 攻击防护
+			ReadTimeout:  h.transport.config.ReadTimeout,
+			WriteTimeout: h.transport.config.WriteTimeout,
 		}
 	}
 	// default http2 server

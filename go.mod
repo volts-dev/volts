@@ -18,7 +18,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.0
 	github.com/volts-dev/dataset v0.0.0-20230815171127-94bd9ac8dc74
 	github.com/volts-dev/template v0.0.0-20221214170606-ef35448bdc6c
-	github.com/volts-dev/utils v0.0.0-20230825084438-5f6ac6716a71
+	github.com/volts-dev/utils v0.0.0-20240701185618-78901418ef24
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
 	go.etcd.io/etcd/api/v3 v3.5.9
 	go.etcd.io/etcd/client/v3 v3.5.9

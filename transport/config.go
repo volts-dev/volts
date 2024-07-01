@@ -15,7 +15,7 @@ import (
 
 var (
 	log            = logger.New("Transport")
-	DefaultTimeout = time.Second * 15
+	DefaultTimeout = 15 * time.Second
 )
 
 type (

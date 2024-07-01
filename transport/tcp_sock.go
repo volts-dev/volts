@@ -31,6 +31,7 @@ func NewTcpTransportSocket(conn net.Conn, readTimeout, writeTimeout time.Duratio
 		//dec:       gob.NewDecoder(conn),   // FIXME
 	}
 }
+
 func (t *tcpTransportSocket) Conn() net.Conn {
 	return t.conn
 }

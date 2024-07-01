@@ -225,8 +225,9 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 	} else {
 		// got a deadline so no need to setup context
 		// but we need to set the timeout we pass along
-		opt := WithRequestTimeout(time.Until(d))
-		opt(&callOpts)
+		callOpts.RequestTimeout = time.Until(d)
+		//opt := WithRequestTimeout(time.Until(d))
+		//opt(&callOpts)
 	}
 
 	// should we noop right here?
