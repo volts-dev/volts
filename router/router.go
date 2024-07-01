@@ -494,7 +494,7 @@ func (self *TRouter) store(services []*registry.Service) {
 					Path: sep.Path,
 				}
 				r := EndpiontToRoute(sep)
-				if utils.InStrings("CONNECT", sep.Method...) != -1 {
+				if utils.IndexOf("CONNECT", sep.Method...) != -1 {
 					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, []*registry.Service{service}))
 				} else {
 					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, []*registry.Service{service}))

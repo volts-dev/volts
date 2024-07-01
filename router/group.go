@@ -467,8 +467,8 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			var name string
 			var method reflect.Value
 			var contextType reflect.Type
-			useREST := utils.InStrings("REST", methods...) > -1
-			useRPC := utils.InStrings("RPC", methods...) > -1 || utils.InStrings("CONNECT", methods...) > -1
+			useREST := utils.IndexOf("REST", methods...) > -1
+			useRPC := utils.IndexOf("RPC", methods...) > -1 || utils.IndexOf("CONNECT", methods...) > -1
 			for i := 0; i < ctrlType.NumMethod(); i++ {
 				// get the method information from the ctrl Type
 				name = ctrlType.Method(i).Name
@@ -509,7 +509,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 
 			// First arg must be context.Context
 			// RPC route validate
-			if utils.InStrings("CONNECT", methods...) > -1 {
+			if utils.IndexOf("CONNECT", methods...) > -1 {
 				ctxType := ctrlType.In(1)
 				if ctxType != RpcContextType && ctxType != ContextType {
 					log.Fatalf("method %s must use context pointer as the first parameter", url.Action)

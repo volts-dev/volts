@@ -38,7 +38,7 @@ func rootStaticHandler(ctx *THttpContext) {
 	p := ctx.PathParams()
 	//fileName := strings.ToLower(p.FieldByName("fileName").AsString())
 	fileExt := strings.ToLower(p.FieldByName("ext").AsString())
-	if utils.In(fileExt, "", "html", "txt", "xml") == -1 {
+	if utils.IndexOf(fileExt, "", "html", "txt", "xml") == -1 {
 		ctx.NotFound()
 	}
 

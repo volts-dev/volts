@@ -327,7 +327,7 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 	}
 	lst := self.midFilter[middleware]
 	for _, name := range handlers {
-		if utils.InStrings(name, lst...) == -1 || len(lst) == 0 {
+		if utils.IndexOf(name, lst...) == -1 || len(lst) == 0 {
 			lst = append(lst, name)
 		}
 	}
