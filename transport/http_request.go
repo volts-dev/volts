@@ -1,7 +1,7 @@
 package transport
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 
@@ -49,7 +49,7 @@ func (self *THttpRequest) Codec() codec.ICodec {
 
 func (self *THttpRequest) Body() *body.TBody {
 	if self.body.Data.Len() == 0 {
-		data, err := ioutil.ReadAll(self.Request.Body)
+		data, err := io.ReadAll(self.Request.Body)
 		if err != nil {
 			logger.Errf("Read request body faild with an error : %s!", err.Error())
 		}

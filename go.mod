@@ -1,13 +1,13 @@
 module github.com/volts-dev/volts
 
-go 1.20
+go 1.22.4
 
 //replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
 
 require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gogo/protobuf v1.3.2
-	github.com/google/uuid v1.3.1
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.25.1
 	github.com/hzmsrv/sonic v0.0.0-20230927155719-8ab26b70f3c7
 	github.com/miekg/dns v1.1.56
@@ -16,9 +16,9 @@ require (
 	github.com/refraction-networking/utls v1.5.3
 	github.com/spf13/viper v1.17.0
 	github.com/vmihailenco/msgpack/v5 v5.4.0
-	github.com/volts-dev/dataset v0.0.0-20230815171127-94bd9ac8dc74
-	github.com/volts-dev/template v0.0.0-20221214170606-ef35448bdc6c
-	github.com/volts-dev/utils v0.0.0-20240701185618-78901418ef24
+	github.com/volts-dev/dataset v0.0.0-20240701194416-b4566669a894
+	github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479
+	github.com/volts-dev/utils v0.0.0-20240714195851-d65f149f07c7
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
 	go.etcd.io/etcd/api/v3 v3.5.9
 	go.etcd.io/etcd/client/v3 v3.5.9

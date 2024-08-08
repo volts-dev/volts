@@ -127,7 +127,8 @@ func WithNameMapper(fn func(string) string) config.Option {
 
 func WithPprof() Option {
 	return func(cfg *Config) {
-		cfg.Router.RegisterGroup(pprofGroup())
+		cfg.UsePprof = true
+		//cfg.Router.RegisterGroup(pprofGroup())
 	}
 }
 

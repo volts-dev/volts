@@ -3,7 +3,7 @@ package transport
 import (
 	"bytes"
 	"compress/gzip"
-	"io/ioutil"
+	"io"
 )
 
 // Unzip unzips data.
@@ -13,7 +13,7 @@ func Unzip(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer gr.Close()
-	data, err = ioutil.ReadAll(gr)
+	data, err = io.ReadAll(gr)
 	if err != nil {
 		return nil, err
 	}

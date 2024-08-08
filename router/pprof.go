@@ -9,7 +9,7 @@ const (
 	DefaultPrefix = "/debug/pprof"
 )
 
-func pprofGroup() *TGroup {
+func PprofGroup() *TGroup {
 	group := NewGroup(
 		WithGroupPathPrefix(DefaultPrefix),
 	)

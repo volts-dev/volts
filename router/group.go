@@ -417,6 +417,10 @@ func (self *TGroup) NewSubGroup(relativePath string) *TGroup {
 	return group
 }
 
+func (self *TGroup) IsService() bool {
+	return self.config.IsService
+}
+
 /*
 pos: true 为插入Before 反之After
 */
@@ -536,8 +540,4 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	// register route
 	self.tree.AddRoute(route)
 	return route
-}
-
-func (self *TGroup) IsService() bool {
-	return self.config.IsService
 }

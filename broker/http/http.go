@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -446,7 +445,7 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 		}
 
 		// discard response body
-		io.Copy(ioutil.Discard, r.Body)
+		io.Copy(io.Discard, r.Body)
 		r.Body.Close()
 		return nil
 	}

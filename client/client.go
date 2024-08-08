@@ -39,6 +39,7 @@ type (
 		//Codec() codec.Writer
 		// indicates whether the request will be a streaming one rather than unary
 		Stream() bool
+		Options() RequestOptions
 	}
 
 	// Response is the response received from a service

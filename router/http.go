@@ -151,12 +151,9 @@ func (self *THttpContext) ValueModel() reflect.Value {
 func (self *THttpContext) TypeModel() reflect.Type {
 	return self.typ
 }
+
 func (self *THttpContext) Next() {
 	self.handler.Invoke(self)
-}
-
-func (self *THttpContext) setHandler(h *handler) {
-	self.handler = h
 }
 
 // TODO 添加验证Request 防止多次解析
@@ -222,54 +219,6 @@ func (self *THttpContext) PathParams() *TParamsSet {
 
 func (self *THttpContext) String() string {
 	return HttpContext
-}
-
-// 值由Router 赋予
-// func (self *THttpContext) setPathParams(name, val string) {
-func (self *THttpContext) setPathParams(p Params) {
-	// init dy url parm to handler
-	if len(p) > 0 {
-		self.pathParams = NewParamsSet(self)
-	}
-
-	for _, param := range p {
-		self.pathParams.SetByField(param.Name, param.Value)
-	}
-}
-
-/*
-func (self *THttpContext) UpdateSession() {
-	self.Router.Sessions.UpdateSession(self.COOKIE[self.Router.Sessions.CookieName], self.SESSION)
-}
-*/
-
-/*
-刷新
-#刷新Handler的新请求数据
-*/
-// Inite and Connect a new ResponseWriter when a new request is coming
-func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THttpRequest) {
-	self.TemplateVar = *newTemplateVar() // 清空
-	self.data = nil                      // 清空
-	self.pathParams = nil
-	self.methodParams = nil
-	self.request = req
-	self.response = rw
-	self.ResponseWriter = rw
-	self.TemplateSrc = ""
-	self.ContentType = req.Header().Get("Content-Type")
-	self.Result = nil
-	self.handlerIndex = 0 // -- 提示目前控制器Index
-	self.isDone = false   // -- 已经提交过
-}
-
-// TODO 修改API名称  设置response数据
-func (self *THttpContext) setData(v interface{}) {
-	// self.Result = v.([]byte)
-}
-
-func (self *THttpContext) setControllerIndex(num int) {
-	self.handlerIndex = num
 }
 
 func (self *THttpContext) HandlerIndex() int {
@@ -613,6 +562,58 @@ func (self *THttpContext) NotFound(message ...string) {
 		return
 	}
 	self.response.Write([]byte(http.StatusText(http.StatusNotFound)))
+}
+
+func (self *THttpContext) setHandler(h *handler) {
+	self.handler = h
+}
+
+// 值由Router 赋予
+// func (self *THttpContext) setPathParams(name, val string) {
+func (self *THttpContext) setPathParams(p Params) {
+	// init dy url parm to handler
+	if len(p) > 0 {
+		self.pathParams = NewParamsSet(self)
+	}
+
+	for _, param := range p {
+		self.pathParams.SetByField(param.Name, param.Value)
+	}
+}
+
+/*
+func (self *THttpContext) UpdateSession() {
+	self.Router.Sessions.UpdateSession(self.COOKIE[self.Router.Sessions.CookieName], self.SESSION)
+}
+*/
+
+/*
+刷新
+#刷新Handler的新请求数据
+*/
+// Inite and Connect a new ResponseWriter when a new request is coming
+func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THttpRequest) {
+	self.TemplateVar = *newTemplateVar() // 清空
+	self.data = nil                      // 清空
+	self.pathParams = nil
+	self.methodParams = nil
+	self.request = req
+	self.response = rw
+	self.ResponseWriter = rw
+	self.TemplateSrc = ""
+	self.ContentType = req.Header().Get("Content-Type")
+	self.Result = nil
+	self.handlerIndex = 0 // -- 提示目前控制器Index
+	self.isDone = false   // -- 已经提交过
+}
+
+// TODO 修改API名称  设置response数据
+func (self *THttpContext) setData(v interface{}) {
+	// self.Result = v.([]byte)
+}
+
+func (self *THttpContext) setControllerIndex(num int) {
+	self.handlerIndex = num
 }
 
 func singleJoiningSlash(a, b string) string {

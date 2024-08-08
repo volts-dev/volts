@@ -135,3 +135,7 @@ func (self *httpRequest) Header() header.Header {
 	}
 	return self.header
 }
+
+func (self *httpRequest) Options() RequestOptions {
+	return self.opts
+}

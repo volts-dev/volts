@@ -147,9 +147,9 @@ func (self *Config) Save(immed ...bool) error {
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
-		cfg.ReadTimeout = 60 * time.Second
-		cfg.WriteTimeout = 60 * time.Second
-		cfg.DialTimeout = 60 * time.Second
+		cfg.ReadTimeout = 999 * time.Second
+		cfg.WriteTimeout = 999 * time.Second
+		cfg.DialTimeout = 999 * time.Second
 	}
 }
 

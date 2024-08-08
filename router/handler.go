@@ -516,7 +516,7 @@ func (self *handler) init(router *TRouter) *handler {
 
 		// 初始化控制器配置
 		// 断言必须非Elem()
-		if c, ok := h.ctrlValue.Interface().(controllerReady); ok {
+		if c, ok := h.ctrlModel.(controllerReady); ok {
 			c.Ready(h.Config)
 		}
 	}

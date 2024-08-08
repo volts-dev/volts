@@ -5,7 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/hex"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 
 	"github.com/volts-dev/volts/registry"
 )
@@ -35,7 +35,7 @@ func decode(d string) []byte {
 		return nil
 	}
 
-	rbuf, err := ioutil.ReadAll(zr)
+	rbuf, err := io.ReadAll(zr)
 	if err != nil {
 		return nil
 	}

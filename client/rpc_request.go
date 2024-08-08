@@ -94,3 +94,7 @@ func (self *rpcRequest) Header() header.Header {
 	}
 	return self.header
 }
+
+func (self *rpcRequest) Options() RequestOptions {
+	return self.opts
+}

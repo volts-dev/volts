@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/internal/errors"
@@ -215,9 +216,11 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
 	// check if we already have a deadline
 	d, ok := ctx.Deadline()
 	if !ok {
+		callOpts.RequestTimeout = utils.Max(request.Options().RequestTimeout, callOpts.RequestTimeout)
 		// no deadline so we create a new one
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, callOpts.RequestTimeout)

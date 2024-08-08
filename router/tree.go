@@ -166,6 +166,311 @@ func (self *TTree) Init(opts ...ConfigOption) {
 	}
 }
 
+func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
+	services = make(map[*TGroup][]*registry.Endpoint, 0)
+	validator := make(map[string]*route)
+	var match func(method string, i int, node *treeNode)
+	match = func(method string, i int, node *treeNode) {
+		for _, c := range node.Children {
+			if c.Route != nil && c.Route.group != nil {
+				grp := c.Route.group
+				// TODO 检测
+				if _, ok := validator[c.Route.Path]; !ok {
+					//
+				}
+
+				if eps, has := services[grp]; has {
+					services[grp] = append(eps, RouteToEndpiont(c.Route))
+				} else {
+					services[grp] = []*registry.Endpoint{RouteToEndpiont(c.Route)}
+				}
+			}
+			match(method, i+1, c)
+		}
+	}
+
+	for method, node := range self.root {
+		if len(node.Children) > 0 {
+			match(method, 1, node)
+		}
+	}
+
+	return services
+}
+
+// 添加路由到Tree
+func (self *TTree) AddRoute(route *route) error {
+	if route == nil {
+		return nil
+	}
+
+	for _, method := range route.Methods {
+		method = strings.ToUpper(method)
+
+		delimitChar := route.PathDelimitChar
+
+		// to parse path as a List node
+		nodes, _ := self.parsePath(route.Path, delimitChar)
+
+		// 绑定Route到最后一个Node
+		node := nodes[len(nodes)-1]
+		route.Action = node.Text // 赋值Action
+		node.Route = route
+		node.Path = route.Path // 存储路由绑定的URL
+
+		// 验证合法性
+		if !validNodes(nodes) {
+			log.Panicf("express %s is not supported", route.Path)
+		}
+
+		// insert the node to tree
+		self.addNodes(method, nodes, false)
+	}
+
+	return nil
+}
+
+// delete the route
+func (self *TTree) DelRoute(path string, route *route) error {
+	if route == nil {
+		return nil
+	}
+
+	for _, method := range route.Methods {
+		n := self.root[method]
+		if n == nil {
+			return nil
+		}
+
+		var delimitChar byte = '/'
+		if method == "CONNECT" {
+			delimitChar = '.'
+		}
+
+		// to parse path as a List node
+		nodes, _ := self.parsePath(path, delimitChar)
+
+		var p *treeNode = n // 复制方法对应的Root
+
+		// 层级插入Nodes的Node到Root
+		for idx := range nodes {
+			p = n.delNode(self, p, nodes, idx)
+		}
+	}
+
+	return nil
+}
+
+// conbine 2 tree together
+func (self *TTree) Conbine(from *TTree) *TTree {
+	// NOTE 避免合并不同分隔符的路由树 不应该发生
+	if len(self.root) > 0 && len(from.root) > 0 { // 非空的Tree
+		if self.__DelimitChar != from.__DelimitChar { // 分隔符对比
+			log.Panicf("could not conbine 2 different kinds (RPC/HTTP) of routes tree!")
+			return self
+		}
+	}
+
+	self.Lock()
+	defer self.Unlock()
+	for method, new_node := range from.root {
+		if main_nodes, has := self.root[method]; !has {
+			self.root[method] = new_node
+		} else {
+			for _, node := range new_node.Children {
+				self.conbine(main_nodes, node)
+			}
+		}
+	}
+
+	return self
+}
+
+func (self *TTree) PrintTrees() {
+	buf := bytes.NewBufferString("")
+	buf.WriteString("Print routes tree:\n")
+	for method, node := range self.root {
+		if len(node.Children) > 0 {
+			buf.WriteString(method + "\n")
+			printNode(buf, 1, node, "")
+			buf.WriteString("\n")
+		}
+	}
+	log.Info(buf.String())
+}
+
+func (r *TTree) Match(method string, path string) (*route, Params) {
+	var delimitChar byte = '/'
+	if method == "CONNECT" {
+		delimitChar = '.'
+	}
+
+	if root := r.root[method]; root != nil {
+		prefix_char := string(r.PrefixChar)
+		// trim the Url to including "/" on begin of path
+		if !strings.HasPrefix(path, prefix_char) && path != prefix_char {
+			path = prefix_char + path
+		}
+
+		var params = make(Params, 0, strings.Count(path, string(delimitChar)))
+		for _, n := range root.Children {
+			e := r.matchNode(n, path, delimitChar, &params)
+			if e != nil {
+				return e.Route, params
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params *Params) *treeNode {
+	var retnil bool
+	if node.Type == StaticNode { // 静态节点
+		// match static node
+		if strings.HasPrefix(path, node.Text) {
+			if len(path) == len(node.Text) {
+				return node
+			}
+
+			for _, c := range node.Children {
+				e := r.matchNode(c, path[len(node.Text):], delimitChar, params)
+				if e != nil {
+					return e
+				}
+			}
+		}
+
+	} else if node.Type == AnyNode { // 全匹配节点
+		//if len(node.Children) == 0 {
+		//	*params = append(*params, param{node.Text[1:], path})
+		//	return node
+		//}
+		for _, c := range node.Children {
+			idx := strings.LastIndex(path, c.Text)
+			if idx > -1 {
+				h := r.matchNode(c, path[idx:], delimitChar, params)
+				if h != nil {
+					*params = append(*params, param{node.Text[1:], path[:idx]})
+					return h
+				}
+
+			}
+		}
+
+		*params = append(*params, param{node.Text[1:], path})
+		return node
+	} else if node.Type == VariantNode { // 变量节点
+		// # 消除path like /abc 的'/'
+		// 根据首字符判断接下来的处理条件
+		first_Char := path[0]
+		if first_Char == delimitChar {
+			for _, c := range node.Children {
+				h := r.matchNode(c, path[0:], delimitChar, params)
+				if h != nil {
+					/*
+						if !validType(path[:idx], node.ContentType) {
+							fmt.Println("错误类型", path[:idx], node.ContentType)
+							return nil
+						}
+					*/
+					*params = append(*params, param{node.Text[1:], path[:0]})
+					return h
+				}
+			}
+			return nil
+		}
+
+		isLast := strings.IndexByte(path, delimitChar) == -1
+		if (isLast || len(node.Children) == 0) && node.Route != nil { // !NOTE! 匹配到最后一个条件
+			*params = append(*params, param{node.Text[1:], path})
+			return node
+		} else { // !NOTE! 匹配回溯 当匹配进入错误子节点返回nil到父节点重新匹配父节点
+			for _, c := range node.Children {
+				idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
+				if idx > -1 {
+					if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], delimitChar) > -1 {
+						retnil = true
+						continue
+					}
+
+					if !validType(path[:idx], node.ContentType) {
+						continue
+					}
+
+					h := r.matchNode(c, path[idx:], delimitChar, params)
+					if h != nil {
+						*params = append(*params, param{node.Text[1:], path[:idx]})
+						return h
+					}
+					retnil = true
+				}
+			}
+
+			if retnil || len(node.Children) > 0 {
+				return nil
+			}
+		}
+	} else if node.Type == RegexpNode { // 正则节点
+		//if len(node.Children) == 0 && node.regexp.MatchString(path) {
+		//	*params = append(*params, param{node.Text[1:], path})
+		//	return node
+		//}
+		idx := strings.IndexByte(path, delimitChar)
+		if idx > -1 {
+			if node.regexp.MatchString(path[:idx]) {
+				for _, c := range node.Children {
+					h := r.matchNode(c, path[idx:], delimitChar, params)
+					if h != nil {
+						*params = append(*params, param{node.Text[1:], path[:idx]})
+						return h
+					}
+				}
+			}
+			return nil
+		}
+		for _, c := range node.Children {
+			idx := strings.Index(path, c.Text)
+			if idx > -1 && node.regexp.MatchString(path[:idx]) {
+				h := r.matchNode(c, path[idx:], delimitChar, params)
+				if h != nil {
+					*params = append(*params, param{node.Text[1:], path[:idx]})
+					return h
+				}
+
+			}
+		}
+
+		if node.regexp.MatchString(path) {
+			*params = append(*params, param{node.Text[1:], path})
+			return node
+		}
+
+	}
+
+	return nil
+}
+
+// add nodes to trees
+func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
+	// 获得对应方法[POST,GET...]
+	cn := self.root[method]
+	if cn == nil {
+		// 初始化Root node
+		cn = &treeNode{
+			Children: subNodes{},
+		}
+		self.root[method] = cn
+	}
+
+	var p *treeNode = cn // 复制方法对应的Root
+
+	// 层级插入Nodes的Node到Root
+	for idx := range nodes {
+		p = cn.addNode(self, p, nodes, idx, isHook)
+	}
+}
+
 // 解析Path为Node
 /*   /:name1/:name2 /:name1-:name2 /(:name1)sss(:name2)
      /(*name) /(:name[0-9]+) /(type:name[a-z]+)
@@ -342,272 +647,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) (nodes []*treeNode, isD
 	return //nodes, isDyn
 }
 
-func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, aParams *Params) *treeNode {
-	var retnil bool
-	if node.Type == StaticNode { // 静态节点
-		// match static node
-		if strings.HasPrefix(path, node.Text) {
-			if len(path) == len(node.Text) {
-				return node
-			}
-
-			for _, c := range node.Children {
-				e := r.matchNode(c, path[len(node.Text):], delimitChar, aParams)
-				if e != nil {
-					return e
-				}
-			}
-		}
-
-	} else if node.Type == AnyNode { // 全匹配节点
-		//if len(node.Children) == 0 {
-		//	*aParams = append(*aParams, param{node.Text[1:], path})
-		//	return node
-		//}
-		for _, c := range node.Children {
-			idx := strings.LastIndex(path, c.Text)
-			if idx > -1 {
-				h := r.matchNode(c, path[idx:], delimitChar, aParams)
-				if h != nil {
-					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
-					return h
-				}
-
-			}
-		}
-
-		*aParams = append(*aParams, param{node.Text[1:], path})
-		return node
-	} else if node.Type == VariantNode { // 变量节点
-		// # 消除path like /abc 的'/'
-		// 根据首字符判断接下来的处理条件
-		first_Char := path[0]
-		if first_Char == delimitChar {
-			for _, c := range node.Children {
-				h := r.matchNode(c, path[0:], delimitChar, aParams)
-				if h != nil {
-					/*
-						if !validType(path[:idx], node.ContentType) {
-							fmt.Println("错误类型", path[:idx], node.ContentType)
-							return nil
-						}
-					*/
-					*aParams = append(*aParams, param{node.Text[1:], path[:0]})
-					return h
-				}
-			}
-			return nil
-		}
-
-		isLast := strings.IndexByte(path, delimitChar) == -1
-		if (isLast || len(node.Children) == 0) && node.Route != nil { // !NOTE! 匹配到最后一个条件
-			*aParams = append(*aParams, param{node.Text[1:], path})
-			return node
-		} else { // !NOTE! 匹配回溯 当匹配进入错误子节点返回nil到父节点重新匹配父节点
-			for _, c := range node.Children {
-				idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
-				if idx > -1 {
-					if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], delimitChar) > -1 {
-						retnil = true
-						continue
-					}
-
-					if !validType(path[:idx], node.ContentType) {
-						continue
-					}
-
-					h := r.matchNode(c, path[idx:], delimitChar, aParams)
-					if h != nil {
-						*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
-						return h
-					}
-					retnil = true
-				}
-			}
-
-			if retnil || len(node.Children) > 0 {
-				return nil
-			}
-		}
-	} else if node.Type == RegexpNode { // 正则节点
-		//if len(node.Children) == 0 && node.regexp.MatchString(path) {
-		//	*aParams = append(*aParams, param{node.Text[1:], path})
-		//	return node
-		//}
-		idx := strings.IndexByte(path, delimitChar)
-		if idx > -1 {
-			if node.regexp.MatchString(path[:idx]) {
-				for _, c := range node.Children {
-					h := r.matchNode(c, path[idx:], delimitChar, aParams)
-					if h != nil {
-						*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
-						return h
-					}
-				}
-			}
-			return nil
-		}
-		for _, c := range node.Children {
-			idx := strings.Index(path, c.Text)
-			if idx > -1 && node.regexp.MatchString(path[:idx]) {
-				h := r.matchNode(c, path[idx:], delimitChar, aParams)
-				if h != nil {
-					*aParams = append(*aParams, param{node.Text[1:], path[:idx]})
-					return h
-				}
-
-			}
-		}
-
-		if node.regexp.MatchString(path) {
-			*aParams = append(*aParams, param{node.Text[1:], path})
-			return node
-		}
-
-	}
-
-	return nil
-}
-
-func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
-	services = make(map[*TGroup][]*registry.Endpoint, 0)
-	validator := make(map[string]*route)
-	var match func(method string, i int, node *treeNode)
-	match = func(method string, i int, node *treeNode) {
-		for _, c := range node.Children {
-			if c.Route != nil && c.Route.group != nil {
-				grp := c.Route.group
-				// TODO 检测
-				if _, ok := validator[c.Route.Path]; !ok {
-					//
-				}
-
-				if eps, has := services[grp]; has {
-					services[grp] = append(eps, RouteToEndpiont(c.Route))
-				} else {
-					services[grp] = []*registry.Endpoint{RouteToEndpiont(c.Route)}
-				}
-			}
-			match(method, i+1, c)
-		}
-	}
-
-	for method, node := range self.root {
-		if len(node.Children) > 0 {
-			match(method, 1, node)
-		}
-	}
-
-	return services
-}
-
-func (r *TTree) Match(method string, path string) (*route, Params) {
-	var delimitChar byte = '/'
-	if method == "CONNECT" {
-		delimitChar = '.'
-	}
-
-	root := r.root[method]
-	if root != nil {
-		prefix_char := string(r.PrefixChar)
-		// trim the Url to including "/" on begin of path
-		if !strings.HasPrefix(path, prefix_char) && path != prefix_char {
-			path = prefix_char + path
-		}
-
-		var params = make(Params, 0, strings.Count(path, string(delimitChar)))
-		for _, n := range root.Children {
-			e := r.matchNode(n, path, delimitChar, &params)
-			if e != nil {
-				return e.Route, params
-			}
-		}
-	}
-
-	return nil, nil
-}
-
-// add nodes to trees
-func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
-	// 获得对应方法[POST,GET...]
-	cn := self.root[method]
-	if cn == nil {
-		// 初始化Root node
-		cn = &treeNode{
-			Children: subNodes{},
-		}
-		self.root[method] = cn
-	}
-
-	var p *treeNode = cn // 复制方法对应的Root
-
-	// 层级插入Nodes的Node到Root
-	for idx := range nodes {
-		p = cn.addNode(self, p, nodes, idx, isHook)
-	}
-}
-
-// 添加路由到Tree
-func (self *TTree) AddRoute(route *route) error {
-	if route == nil {
-		return nil
-	}
-
-	for _, method := range route.Methods {
-		method = strings.ToUpper(method)
-
-		delimitChar := route.PathDelimitChar
-
-		// to parse path as a List node
-		nodes, _ := self.parsePath(route.Path, delimitChar)
-
-		// 绑定Route到最后一个Node
-		node := nodes[len(nodes)-1]
-		route.Action = node.Text // 赋值Action
-		node.Route = route
-		node.Path = route.Path // 存储路由绑定的URL
-
-		// 验证合法性
-		if !validNodes(nodes) {
-			log.Panicf("express %s is not supported", route.Path)
-		}
-
-		// insert the node to tree
-		self.addNodes(method, nodes, false)
-	}
-
-	return nil
-}
-
-// delete the route
-func (self *TTree) DelRoute(path string, route *route) error {
-	if route == nil {
-		return nil
-	}
-	for _, method := range route.Methods {
-		n := self.root[method]
-		if n == nil {
-			return nil
-		}
-
-		var delimitChar byte = '/'
-		if method == "CONNECT" {
-			delimitChar = '.'
-		}
-
-		// to parse path as a List node
-		nodes, _ := self.parsePath(path, delimitChar)
-
-		var p *treeNode = n // 复制方法对应的Root
-
-		// 层级插入Nodes的Node到Root
-		for idx := range nodes {
-			p = n.delNode(self, p, nodes, idx)
-		}
-	}
-	return nil
-}
-
 // conbine 2 node together
 func (self *TTree) conbine(target, from *treeNode) {
 	var exist_node *treeNode
@@ -644,42 +683,11 @@ func (self *TTree) conbine(target, from *treeNode) {
 	}
 }
 
-// conbine 2 tree together
-func (self *TTree) Conbine(from *TTree) *TTree {
-	// NOTE 避免合并不同分隔符的路由树 不应该发生
-	if len(self.root) > 0 && len(from.root) > 0 { // 非空的Tree
-		if self.__DelimitChar != from.__DelimitChar { // 分隔符对比
-			log.Panicf("could not conbine 2 different kinds (RPC/HTTP) of routes tree!")
-			return self
-		}
+func (self *treeNode) Equal(node *treeNode) bool {
+	if self.Type != node.Type || self.Text != node.Text || self.ContentType != node.ContentType {
+		return false
 	}
-
-	self.Lock()
-	defer self.Unlock()
-	for method, new_node := range from.root {
-		if main_nodes, has := self.root[method]; !has {
-			self.root[method] = new_node
-		} else {
-			for _, node := range new_node.Children {
-				self.conbine(main_nodes, node)
-			}
-		}
-	}
-
-	return self
-}
-
-func (self *TTree) PrintTrees() {
-	buf := bytes.NewBufferString("")
-	buf.WriteString("Print routes tree:\n")
-	for method, node := range self.root {
-		if len(node.Children) > 0 {
-			buf.WriteString(method + "\n")
-			printNode(buf, 1, node, "")
-			buf.WriteString("\n")
-		}
-	}
-	log.Info(buf.String())
+	return true
 }
 
 // add node nodes[i] to parent node p
@@ -727,13 +735,6 @@ func (self *treeNode) delNode(tree *TTree, parent *treeNode, nodes []*treeNode, 
 
 	sort.Sort(parent.Children)
 	return nodes[i]
-}
-
-func (self *treeNode) Equal(node *treeNode) bool {
-	if self.Type != node.Type || self.Text != node.Text || self.ContentType != node.ContentType {
-		return false
-	}
-	return true
 }
 
 func validType(content string, typ ContentType) bool {

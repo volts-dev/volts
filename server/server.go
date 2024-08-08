@@ -380,6 +380,9 @@ func (self *TServer) Start() error {
 		return err
 	}
 
+	if cfg.Router.Config().UsePprof {
+		cfg.Router.RegisterGroup(router.PprofGroup())
+	}
 	// 打印
 	cfg.Router.PrintRoutes()
 

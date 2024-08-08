@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"sync"
@@ -79,7 +78,7 @@ func (h *HttpConn) Recv(m *Message) error {
 		}
 
 		// read body
-		b, err := ioutil.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			return err
 		}
@@ -154,7 +153,7 @@ func (h *HttpConn) Send(m *Message) error {
 
 		rsp := &http.Response{
 			Header:        hdr,
-			Body:          ioutil.NopCloser(bytes.NewReader(m.Body)),
+			Body:          io.NopCloser(bytes.NewReader(m.Body)),
 			Status:        "200 OK",
 			StatusCode:    200,
 			Proto:         "HTTP/1.1",
@@ -205,7 +204,7 @@ func (h *HttpConn) error(m *Message) error {
 	if h.r.ProtoMajor == 1 {
 		rsp := &http.Response{
 			Header:        make(http.Header),
-			Body:          ioutil.NopCloser(bytes.NewReader(m.Body)),
+			Body:          io.NopCloser(bytes.NewReader(m.Body)),
 			Status:        "500 Internal Server Error",
 			StatusCode:    500,
 			Proto:         "HTTP/1.1",
