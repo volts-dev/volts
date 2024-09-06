@@ -18,21 +18,20 @@ func (self RoutePosition) String() string {
 }
 
 type (
-
-	// route 路,表示一个Link 连接地址"../webgo/"
-	// 提供基础数据参数供Handler处理
+	// route 结构体定义了路由的相关属性和方法
+	// 用于匹配和处理特定的HTTP请求
 	route struct {
-		group           *TGroup
-		Id              int           // 用于定位
-		Path            string        // !NOTE! Path存储路由绑定的URL 网络路径
-		PathDelimitChar byte          // URL分割符 "/"或者"."
-		FilePath        string        // 短存储路径
-		Position        RoutePosition //
-		handlers        []*handler    // 最终处理器 合并主处理器+次处理器 代理处理器
-		Methods         []string      // 方法
-		Host            []string      //
-		Url             *TUrl         // 提供Restful 等Controller.Action
-		Action          string        // 动作名称[包含模块名，动作名] "Model.Action", "/index.html","/filename.png"
+		group           *TGroup       // 所属的路由组
+		Id              int           // 路由的唯一标识符，用于定位和调试
+		Path            string        // 路径，存储路由绑定的URL路径
+		PathDelimitChar byte          // 路径分隔符，用于区分路径中的不同部分，通常是'/'或'.'
+		FilePath        string        // 文件路径，存储路由对应的文件路径
+		Position        RoutePosition // 路由位置信息，可能包括命名组、子路由等
+		handlers        []*handler    // 处理器列表，包含主处理器和次处理器，用于处理匹配到的请求
+		Methods         []string      // 支持的HTTP方法列表，如GET、POST等
+		Host            []string      // 允许的主机名列表，用于限制路由仅对特定主机生效
+		Url             *TUrl         // URL对象，提供更复杂的URL匹配和参数提取功能
+		Action          string        // 动作名称，包含模块名和动作名，用于标识要执行的具体操作
 	}
 )
 
@@ -54,7 +53,7 @@ func RouteToEndpiont(r *route) *registry.Endpoint {
 }
 
 func EndpiontToRoute(ep *registry.Endpoint) *route {
-	r := newRoute(
+	return newRoute(
 		nil,
 		ep.Method,
 		nil,
@@ -63,8 +62,6 @@ func EndpiontToRoute(ep *registry.Endpoint) *route {
 		"",
 		"",
 	)
-
-	return r
 }
 
 func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, action string) *route {
@@ -105,17 +102,30 @@ func (self *route) CombineHandler(from *route) {
 	}
 }
 
-// 剥离目标路由
-// TODO 优化
+// StripHandler 从当前路由中移除与目标路由匹配的服务。
+// 这个方法主要用于在路由中排除某些服务，通常是在负载均衡或服务发现场景中使用。
+// 参数:
+//   - target: 目标路由，用于与当前路由的手动处理器中的服务进行匹配。
 func (self *route) StripHandler(target *route) {
+	// 初始化一个空的服务切片，用于存储不与目标路由匹配的服务。
 	srvs := make([]*registry.Service, 0)
+	// 用于标记服务是否匹配的变量。
 	var match bool
+
+	// 遍历当前路由的手动处理器。
 	for _, ctr := range self.handlers {
+		// 如果处理器类型不是本地处理器，则进一步处理。
 		if ctr.Type != LocalHandler {
+			// 遍历处理器中的服务。
 			for _, srv := range ctr.Services {
+				// 默认情况下，假设没有匹配的服务。
 				match = false
+
+				// 遍历目标路由的手动处理器。
 				for _, hd := range target.handlers {
+					// 遍历目标处理器中的服务。
 					for _, s := range hd.Services {
+						// 如果当前服务与目标服务不相等，则标记为匹配，并跳出循环。
 						if !srv.Equal(s) {
 							match = true
 							break
@@ -123,11 +133,13 @@ func (self *route) StripHandler(target *route) {
 					}
 				}
 
+				// 如果当前服务没有与目标服务匹配，则将其添加到srvs切片中。
 				if !match {
 					srvs = append(srvs, srv)
 				}
 			}
 
+			// 更新处理器的服务列表为那些不与目标路由匹配的服务。
 			ctr.Services = srvs
 		}
 	}

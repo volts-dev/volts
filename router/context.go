@@ -29,7 +29,7 @@ type (
 		WriteStream(interface{}) error
 		Route() route
 		Router() IRouter
-		Context() context.Context
+		Context(context ...context.Context) context.Context
 		RespondByJson(data interface{})
 		HandlerIndex() int
 		Handler(index ...int) *handler

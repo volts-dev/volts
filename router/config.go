@@ -1,6 +1,7 @@
 package router
 
 import (
+	"path"
 	"strings"
 
 	"github.com/volts-dev/volts/config"
@@ -26,6 +27,7 @@ var (
 
 type (
 	Option func(*Config)
+
 	Config struct {
 		config.Config  `field:"-"`
 		Name           string             `field:"-"` // config name/path in config file
@@ -34,14 +36,14 @@ type (
 		Router         *TRouter           `field:"-"`
 		Registry       registry.IRegistry `field:"-"`
 		RegistryCacher cacher.ICacher     `field:"-"` // registry cache
+		RecoverHandler func(IContext)     `field:"-"`
 
 		// mapping to config file
-		RecoverHandler    func(IContext) `field:"-"`
-		Recover           bool           `field:"recover"`
-		RouterTreePrinter bool           `field:"router_tree_printer"`
-		RequestPrinter    bool           `field:"request_printer"`
-		StaticDir         []string       `field:"static_dir"` // the static dir allow to visit
-		StaticExt         []string       `field:"static_ext"` // the static file format allow to visit
+		Recover           bool     `field:"recover"`
+		RouterTreePrinter bool     `field:"router_tree_printer"`
+		RequestPrinter    bool     `field:"request_printer"`
+		StaticDir         []string `field:"static_dir"` // the static dir allow to visit
+		StaticExt         []string `field:"static_ext"` // the static file format allow to visit
 		UsePprof          bool
 		UploadBuf         int `field:"upload_buf"` // 上传文件大小MB
 		UseRootStatics    bool
@@ -49,6 +51,7 @@ type (
 
 	GroupOption func(*GroupConfig)
 	GroupConfig struct {
+		Group         *TGroup
 		Name          string // 当前源代码文件夹名称
 		_PrefixPath   string
 		Path          string // URL 路径
@@ -86,6 +89,14 @@ func (self *Config) String() string {
 }
 
 func (self *Config) Init(opts ...Option) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(self)
+		}
+	}
+}
+
+func (self *GroupConfig) Init(opts ...GroupOption) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt(self)
@@ -167,6 +178,18 @@ func WithRegistry(r registry.IRegistry) Option {
 	}
 }
 
+func WithStatic(path ...string) GroupOption {
+	return func(cfg *GroupConfig) {
+		if len(path) > 0 {
+			cfg.Group.SetStatic(path[0])
+			return
+		}
+
+		// init router tree
+		cfg.Group.SetStatic("/static")
+	}
+}
+
 func WithStaticHandler(handler func(IContext)) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.StaticHandler = handler
@@ -179,15 +202,21 @@ func WithModuleFilePath(path string) GroupOption {
 	}
 }
 
-func WithCurrentModulePath() GroupOption {
+// offset 标记希望返回调用该函数文件偏移,当前文件无需填写！其他代码文件调用到当前文件+1
+func WithCurrentModulePath(offset ...int) GroupOption {
 	return func(cfg *GroupConfig) {
-		cfg.FilePath, cfg.Name = curFilePath(4)
+		var line = 4
+		if len(offset) > 0 {
+			line += offset[0]
+		}
+		cfg.FilePath, cfg.Name = curFilePath(line)
 	}
 }
 
 func WithGroupName(name string) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.Name = name
+		cfg.Path = path.Join("/", cfg.Name)
 	}
 }
 
@@ -204,6 +233,7 @@ func WithGroupPathPrefix(prefixPath string) GroupOption {
 func WithAloneService(asService bool, servicsName string, prefix ...string) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.Name = servicsName
+		cfg.Path = path.Join("/", cfg.Name)
 		cfg.IsService = asService
 		if len(prefix) > 0 {
 			cfg.PathPrefix = prefix[0]

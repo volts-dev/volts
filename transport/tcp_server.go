@@ -64,7 +64,7 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 	for {
 		conn, err := self.listener.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
 				} else {

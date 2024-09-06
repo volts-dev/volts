@@ -41,7 +41,7 @@ func (self *pool) Active(open bool) {
 	self.active = open
 }
 
-//@@@ 改进改为接口
+// @@@ 改进改为接口
 // Resul:nil 当取不到时直接返回Nil 方便外部判断
 // TODO:优化速度
 func (self *pool) Get(object reflect.Type) reflect.Value {
@@ -56,13 +56,11 @@ func (self *pool) Get(object reflect.Type) reflect.Value {
 	if pool, ok := self.pools[object]; ok {
 		itf := pool.Get()
 		if itf == nil {
-			//return reflect.New(object).Elem()
 			return self.New(object)
 		}
 
 		return itf.(reflect.Value)
 	} else {
-		//return reflect.New(object).Elem()
 		return self.New(object)
 	}
 }
@@ -76,7 +74,6 @@ func (self *pool) Put(typ reflect.Type, val reflect.Value) {
 		pool.Put(val)
 	} else {
 		pool := new(sync.Pool)
-
 		pool.Put(val)
 		self.pools[typ] = pool
 	}

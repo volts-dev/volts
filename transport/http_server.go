@@ -10,8 +10,7 @@ import (
 
 type (
 	customHandler interface {
-		//ServeHTTP(ResponseWriter, *Request)
-		ServeHTTP(w http.ResponseWriter, r *THttpRequest)
+		ServeHTTP(http.ResponseWriter, *THttpRequest)
 	}
 	customxx struct {
 		hd customHandler

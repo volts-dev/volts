@@ -92,7 +92,9 @@ func Validate(e *registry.Endpoint) error {
 func New(opts ...Option) *TRouter {
 	cfg := newConfig(opts...)
 	router := &TRouter{
-		TGroup:      *NewGroup(),
+		TGroup: *NewGroup(
+			WithStatic(), /* 支持静态文件 */
+		),
 		config:      cfg,
 		middleware:  newMiddlewareManager(),
 		httpCtxPool: make(map[int]*sync.Pool),
@@ -401,12 +403,9 @@ func (self *TRouter) route(route *route, ctx IContext) {
 }
 
 func (self *TRouter) isClosed() bool {
-	select {
-	case <-self.exit:
-		return true
-	default:
-		return false
-	}
+	// 直接检查通道是否已关闭
+	_, isOpen := <-self.exit
+	return !isOpen
 }
 
 // 过滤自己

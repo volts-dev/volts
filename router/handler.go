@@ -378,16 +378,6 @@ func (self *handler) Controller() any {
 // 任务:创建/缓存/初始化
 // 调用Recycle回收
 func (self *handler) init(router *TRouter) *handler {
-	/*p, has := self.Manager.handlerPool[self.Id]
-	if !has {
-		p = &sync.Pool{}
-		self.Manager.handlerPool[self.Id] = p // FIXME map 有风险崩溃
-	}
-
-	itf := p.Get()
-	if itf != nil {
-		return itf.((*handler))
-	}*/
 	h := self.Manager.Get(self.Id)
 	if h != nil {
 		return h
@@ -417,6 +407,11 @@ func (self *handler) init(router *TRouter) *handler {
 		// 修改成员
 		for i := 0; i < ctrl.NumField(); i++ {
 			midVal = ctrl.Field(i) // get the middleware value
+			if !midVal.CanSet() {
+				log.Warnf("Field %s in controller %s is not exported and cannot be set.", ctrl.Type().Field(i).Name, h.ctrlName)
+				continue
+			}
+
 			midTyp = midVal.Type() // get the middleware type
 
 			if midTyp.Kind() == reflect.Ptr {

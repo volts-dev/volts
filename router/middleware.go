@@ -23,7 +23,7 @@ type (
 	}
 
 	TMiddlewareManager struct {
-		middlewares map[string]func(IRouter) IMiddleware
+		middlewares sync.Map
 		names       []string     //
 		lock        sync.RWMutex // 同步性不重要暂时不加锁
 	}
@@ -31,7 +31,7 @@ type (
 
 func newMiddlewareManager() *TMiddlewareManager {
 	return &TMiddlewareManager{
-		middlewares: make(map[string]func(IRouter) IMiddleware),
+		//middlewares: make(map[string]func(IRouter) IMiddleware),
 	}
 
 }
@@ -42,46 +42,34 @@ func (self *TMiddlewareManager) Names() []string {
 }
 
 func (self *TMiddlewareManager) Contain(key string) bool {
-	self.lock.RLock()
-	_, ok := self.middlewares[key]
-	self.lock.RUnlock()
-	return ok
+	_, exsit := self.middlewares.Load(key)
+	return exsit
 }
 
-func (self *TMiddlewareManager) Add(key string, value func(IRouter) IMiddleware) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	if _, exsit := self.middlewares[key]; !exsit {
-		self.middlewares[key] = value
-		self.names = append(self.names, key) // # 保存添加顺序
-	} else {
-		log.Warn("middleware key:" + key + " already exists")
+func (self *TMiddlewareManager) Add(key string, creator func(IRouter) IMiddleware) {
+	if _, exsit := self.middlewares.Load(key); exsit {
+		return
 	}
+
+	self.middlewares.Store(key, creator)
+	self.names = append(self.names, key) // # 保存添加顺序
 }
 
-func (self *TMiddlewareManager) Set(key string, value func(IRouter) IMiddleware) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	if _, ok := self.middlewares[key]; ok {
-		self.middlewares[key] = value
-	} else {
-		log.Warn("middleware key:" + key + " does not exists")
-	}
+func (self *TMiddlewareManager) Set(key string, creator func(IRouter) IMiddleware) {
+	self.middlewares.Store(key, creator)
 }
 
 func (self *TMiddlewareManager) Get(key string) func(IRouter) IMiddleware {
-	self.lock.RLock()
-	defer self.lock.RUnlock()
-	return self.middlewares[key]
+	creator, exsit := self.middlewares.Load(key)
+	if exsit {
+		return creator.(func(IRouter) IMiddleware)
+	}
+
+	return nil
 }
 
 func (self *TMiddlewareManager) Del(key string) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	delete(self.middlewares, key)
+	self.middlewares.Delete(key)
 	for i, n := range self.names {
 		if n == key {
 			self.names = append(self.names[:i], self.names[i+1:]...)

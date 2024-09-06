@@ -169,7 +169,7 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 
 // get current source codes file path without file name
 func curFilePath(skip int) (string, string) {
-	/* just for dbg
+	//  just for dbg
 	s := 0
 	for {
 		if pc, file, _, ok := runtime.Caller(s); ok {
@@ -181,7 +181,7 @@ func curFilePath(skip int) (string, string) {
 			break
 		}
 		s += 1
-	}*/
+	}
 	_, file, _, _ := runtime.Caller(skip)
 	filePath, _ := _path.Split(file)
 	pkgName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
@@ -201,9 +201,17 @@ func curFilePath(skip int) (string, string) {
 func NewGroup(opts ...GroupOption) *TGroup {
 	cfg := &GroupConfig{}
 
-	for _, opt := range opts {
-		opt(cfg)
+	grp := &TGroup{
+		config:      cfg,
+		TemplateVar: newTemplateVar(),
+		tree:        NewRouteTree(WithIgnoreCase()),
+		//path:        _path.Join("/", cfg.Name),
+		Metadata: map[string]string{
+			//"name": cfg.Name,
+		},
 	}
+
+	cfg.Group = grp
 
 	// 获取路径文件夹名称
 	filePath, name := curFilePath(2)
@@ -215,18 +223,7 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	}
 	cfg.Path = _path.Join("/", cfg.Name)
 
-	grp := &TGroup{
-		config:      cfg,
-		TemplateVar: newTemplateVar(),
-		tree:        NewRouteTree(WithIgnoreCase()),
-		//path:        _path.Join("/", cfg.Name),
-		Metadata: map[string]string{
-			//"name": cfg.Name,
-		},
-	}
-
-	// init router tree
-	grp.SetStatic("/static")
+	cfg.Init(opts...)
 	return grp
 }
 

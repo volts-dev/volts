@@ -93,7 +93,18 @@ func (self *TRpcContext) Handler(index ...int) *handler {
 	return self.route.handlers[idx]
 }
 
-func (self *TRpcContext) Context() context.Context {
+func (self *TRpcContext) Context(ctx ...context.Context) context.Context {
+	if len(ctx) > 0 {
+		if c := ctx[0]; c != nil {
+			self.context = c
+			return self.context
+		}
+	}
+
+	if self.context == nil {
+		self.context = context.Background()
+	}
+
 	return self.context
 }
 

@@ -27,12 +27,27 @@ var (
 type (
 	Option func(*Config)
 
+	// core结构体定义了处理格式化数据的核心功能。
+	// 它包含了格式化器的名称、格式化选项、模型缓存、文件名和操作模式。
+	// 这些字段共同作用，以支持不同格式的数据处理和缓存机制。
 	core struct {
-		name     string
-		fmt      *format
-		models   sync.Map
+		// name是格式化器的唯一标识符。
+		name string
+
+		// fmt是指向format类型的指针，用于根据特定格式处理数据。
+		fmt *format
+
+		// models是一个同步Map，用于存储和快速访问已经加载的模型。
+		// 这对于性能优化和避免重复加载相同模型尤为重要。
+		models sync.Map
+
+		// FileName指定了当前处理的文件名。
+		// 这对于跟踪和记录处理过程中的文件信息非常有用。
 		FileName string
-		Mode     ModeType
+
+		// Mode定义了操作模式，决定了如何处理和格式化数据。
+		// 操作模式通过ModeType类型定义，可能包括不同的处理策略和选项。
+		Mode ModeType
 	}
 
 	Config struct {
@@ -57,14 +72,6 @@ type (
 		checkSelf(c *Config, cfg IConfig) // 检测自己是否被赋值
 	}
 )
-
-/*
-	func init() {
-		AppFilePath = utils.AppFilePath()
-		AppPath = utils.AppPath()
-		AppDir = utils.AppDir()
-	}
-*/
 
 func Default() *Config {
 	return defaultConfig

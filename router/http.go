@@ -158,39 +158,39 @@ func (self *THttpContext) Next() {
 
 // TODO 添加验证Request 防止多次解析
 func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
+	if self.methodParams != nil {
+		return self.methodParams
+	}
+
+	self.methodParams = NewParamsSet(self)
 	var useBlank bool
 	if len(blank) > 0 {
 		useBlank = blank[0]
 	}
+	if !useBlank && self.methodParams.Length() == 0 {
+		// # parse the data from GET method #
+		q := self.request.URL.Query()
+		for key := range q {
+			self.methodParams.SetByField(key, q.Get(key))
+		}
 
-	if self.methodParams == nil {
-		self.methodParams = NewParamsSet(self)
-
-		if !useBlank && self.methodParams.Length() == 0 {
-			// # parse the data from GET method #
-			q := self.request.URL.Query()
-			for key := range q {
-				self.methodParams.SetByField(key, q.Get(key))
+		// # parse the data from POST method #
+		var err error
+		ct := self.request.Header().Get("Content-Type")
+		ct, _, err = mime.ParseMediaType(ct)
+		if err != nil {
+			logger.Err(err)
+			return self.methodParams
+		} else {
+			if ct == "multipart/form-data" {
+				self.request.ParseMultipartForm(int64(self.router.Config().UploadBuf) << 20) // 32m
+			} else {
+				self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
 			}
 
-			// # parse the data from POST method #
-			var err error
-			ct := self.request.Header().Get("Content-Type")
-			ct, _, err = mime.ParseMediaType(ct)
-			if err != nil {
-				logger.Err(err)
-				return self.methodParams
-			} else {
-				if ct == "multipart/form-data" {
-					self.request.ParseMultipartForm(int64(self.router.Config().UploadBuf) << 20) // 32m
-				} else {
-					self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
-				}
-
-				for key := range self.request.Form {
-					//Debug("key2:", key)
-					self.methodParams.SetByField(key, self.request.FormValue(key))
-				}
+			for key := range self.request.Form {
+				//Debug("key2:", key)
+				self.methodParams.SetByField(key, self.request.FormValue(key))
 			}
 		}
 	}
@@ -225,7 +225,18 @@ func (self *THttpContext) HandlerIndex() int {
 	return self.handlerIndex
 }
 
-func (self *THttpContext) Context() context.Context {
+func (self *THttpContext) Context(ctx ...context.Context) context.Context {
+	if len(ctx) > 0 {
+		if c := ctx[0]; c != nil {
+			self.context = c
+			return self.context
+		}
+	}
+
+	if self.context == nil {
+		self.context = context.Background()
+	}
+
 	return self.context
 }
 
