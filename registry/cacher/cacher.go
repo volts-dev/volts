@@ -388,6 +388,10 @@ func (c *cache) run() {
 			continue
 		}
 
+		if w == nil {
+			break
+		}
+
 		// reset a
 		a = 0
 

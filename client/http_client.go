@@ -409,7 +409,7 @@ func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpRes
 		// no deadline so we create a new one
 		callOpts.RequestTimeout = utils.Max(request.Options().RequestTimeout, callOpts.RequestTimeout)
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, request.opts.RequestTimeout)
+		ctx, cancel = context.WithTimeout(ctx, callOpts.RequestTimeout)
 		defer cancel()
 	} else {
 		// got a deadline so no need to setup context

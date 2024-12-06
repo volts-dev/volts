@@ -8,6 +8,10 @@ const (
 
 	MODE_NORMAL ModeType = iota
 	MODE_DEBUG
+
+	MODULE_DIR   = "module" // # 模块文件夹名称
+	STATIC_DIR   = "static"
+	TEMPLATE_DIR = "template"
 )
 
 func (c ModeType) String() string {

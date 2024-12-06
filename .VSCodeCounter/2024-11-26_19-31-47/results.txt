@@ -1,0 +1,293 @@
+Date : 2024-11-26 19:31:47
+Directory : /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts
+Total : 192 files,  19880 codes, 3403 comments, 4056 blanks, all 27339 lines
+
+Languages
++------------------+------------+------------+------------+------------+------------+
+| language         | files      | code       | comment    | blank      | total      |
++------------------+------------+------------+------------+------------+------------+
+| Go               |        177 |     18,867 |      3,402 |      4,025 |     26,294 |
+| Go Checksum File |          1 |        804 |          0 |          1 |        805 |
+| Go Module File   |          2 |         88 |          1 |          8 |         97 |
+| Markdown         |          5 |         70 |          0 |         13 |         83 |
+| Ini              |          4 |         29 |          0 |          9 |         38 |
+| HTML             |          1 |         12 |          0 |          0 |         12 |
+| JSON             |          1 |          7 |          0 |          0 |          7 |
+| CSS              |          1 |          3 |          0 |          0 |          3 |
++------------------+------------+------------+------------+------------+------------+
+
+Directories
++-----------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                                            | files      | code       | comment    | blank      | total      |
++-----------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                                               |        192 |     19,880 |      3,403 |      4,056 |     27,339 |
+| . (Files)                                                                                                       |          6 |      1,143 |         74 |         69 |      1,286 |
+| broker                                                                                                          |         11 |      1,281 |        178 |        327 |      1,786 |
+| broker (Files)                                                                                                  |          4 |        248 |         40 |         57 |        345 |
+| broker/http                                                                                                     |          5 |        795 |        135 |        213 |      1,143 |
+| broker/memory                                                                                                   |          2 |        238 |          3 |         57 |        298 |
+| client                                                                                                          |         13 |      1,541 |        372 |        334 |      2,247 |
+| cmd                                                                                                             |          1 |          1 |          0 |          1 |          2 |
+| codec                                                                                                           |          9 |        254 |         35 |         76 |        365 |
+| config                                                                                                          |          6 |        530 |         55 |        117 |        702 |
+| demo                                                                                                            |         17 |        374 |         24 |        101 |        499 |
+| demo (Files)                                                                                                    |          1 |         97 |         10 |         25 |        132 |
+| demo/rpc                                                                                                        |          3 |         78 |          2 |         22 |        102 |
+| demo/rpc/hello_world                                                                                            |          3 |         78 |          2 |         22 |        102 |
+| demo/rpc/hello_world (Files)                                                                                    |          2 |         63 |          1 |         18 |         82 |
+| demo/rpc/hello_world/client                                                                                     |          1 |         15 |          1 |          4 |         20 |
+| demo/web                                                                                                        |         13 |        199 |         12 |         54 |        265 |
+| demo/web/hello_world                                                                                            |          2 |         53 |          2 |         13 |         68 |
+| demo/web/volts_middleware                                                                                       |          2 |         50 |          6 |         13 |         69 |
+| demo/web/volts_module                                                                                           |          7 |         64 |          1 |         18 |         83 |
+| demo/web/volts_module (Files)                                                                                   |          2 |         22 |          1 |          6 |         29 |
+| demo/web/volts_module/group                                                                                     |          5 |         42 |          0 |         12 |         54 |
+| demo/web/volts_module/group/base                                                                                |          4 |         33 |          0 |          8 |         41 |
+| demo/web/volts_module/group/base (Files)                                                                        |          2 |         18 |          0 |          8 |         26 |
+| demo/web/volts_module/group/base/static                                                                         |          1 |          3 |          0 |          0 |          3 |
+| demo/web/volts_module/group/base/template                                                                       |          1 |         12 |          0 |          0 |         12 |
+| demo/web/volts_module/group/web                                                                                 |          1 |          9 |          0 |          4 |         13 |
+| demo/web/volts_restful                                                                                          |          2 |         32 |          3 |         10 |         45 |
+| handler                                                                                                         |          1 |          1 |          1 |          2 |          4 |
+| handler/http                                                                                                    |          1 |          1 |          1 |          2 |          4 |
+| internal                                                                                                        |         45 |      3,625 |        798 |        693 |      5,116 |
+| internal/acme                                                                                                   |          5 |        145 |         43 |         32 |        220 |
+| internal/acme (Files)                                                                                           |          2 |         68 |         31 |         17 |        116 |
+| internal/acme/autocert                                                                                          |          3 |         77 |         12 |         15 |        104 |
+| internal/addr                                                                                                   |          2 |        198 |         19 |         40 |        257 |
+| internal/avatar                                                                                                 |          2 |         69 |         11 |         14 |         94 |
+| internal/backoff                                                                                                |          1 |         11 |          3 |          3 |         17 |
+| internal/body                                                                                                   |          2 |        180 |         15 |         44 |        239 |
+| internal/buf                                                                                                    |          1 |         17 |          0 |          5 |         22 |
+| internal/errors                                                                                                 |          1 |         71 |          7 |         11 |         89 |
+| internal/header                                                                                                 |          1 |          5 |          4 |          3 |         12 |
+| internal/mdns                                                                                                   |          7 |      1,383 |        238 |        209 |      1,830 |
+| internal/metadata                                                                                               |          2 |        187 |         19 |         37 |        243 |
+| internal/net                                                                                                    |          1 |         79 |         19 |         23 |        121 |
+| internal/pool                                                                                                   |          4 |        145 |         89 |         38 |        272 |
+| internal/registry                                                                                               |          1 |        111 |         16 |         22 |        149 |
+| internal/test                                                                                                   |         13 |        910 |        313 |        191 |      1,414 |
+| internal/test (Files)                                                                                           |          5 |        116 |          9 |         35 |        160 |
+| internal/test/base                                                                                              |          1 |         65 |         12 |         16 |         93 |
+| internal/test/client                                                                                            |          1 |         51 |          1 |         13 |         65 |
+| internal/test/router                                                                                            |          5 |        589 |        288 |        108 |        985 |
+| internal/test/server                                                                                            |          1 |         89 |          3 |         19 |        111 |
+| internal/time                                                                                                   |          1 |         54 |          0 |          8 |         62 |
+| internal/tls                                                                                                    |          1 |         60 |          2 |         13 |         75 |
+| logger                                                                                                          |          6 |        592 |        119 |        124 |        835 |
+| registry                                                                                                        |         24 |      3,559 |        359 |        758 |      4,676 |
+| registry (Files)                                                                                                |          5 |        309 |         54 |         71 |        434 |
+| registry/cacher                                                                                                 |          1 |        380 |         78 |         96 |        554 |
+| registry/consul                                                                                                 |          7 |      1,082 |        127 |        227 |      1,436 |
+| registry/etcd                                                                                                   |          3 |        429 |         30 |         97 |        556 |
+| registry/mdns                                                                                                   |          3 |        757 |         59 |        158 |        974 |
+| registry/memory                                                                                                 |          5 |        602 |         11 |        109 |        722 |
+| router                                                                                                          |         20 |      3,369 |        786 |        661 |      4,816 |
+| router (Files)                                                                                                  |         17 |      3,262 |        775 |        636 |      4,673 |
+| router/middleware                                                                                               |          3 |        107 |         11 |         25 |        143 |
+| router/middleware (Files)                                                                                       |          1 |         21 |          8 |          6 |         35 |
+| router/middleware/accept_language                                                                               |          1 |         47 |          3 |         10 |         60 |
+| router/middleware/event                                                                                         |          1 |         39 |          0 |          9 |         48 |
+| selector                                                                                                        |          5 |        333 |         40 |         82 |        455 |
+| server                                                                                                          |          5 |        747 |        157 |        175 |      1,079 |
+| transport                                                                                                       |         23 |      2,530 |        405 |        536 |      3,471 |
++-----------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-----------------------------------------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
+| filename                                                                                                        | language         | code       | comment    | blank      | total      |
++-----------------------------------------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/README.md                                            | Markdown         |         66 |          0 |         12 |         78 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/README.md                                     | Markdown         |          1 |          0 |          0 |          1 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/broker.go                                     | Go               |         70 |          8 |         15 |         93 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/config.go                                     | Go               |        172 |         31 |         40 |        243 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/http/event.go                                 | Go               |         23 |          0 |          7 |         30 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/http/handler.go                               | Go               |         38 |          3 |         12 |         53 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/http/http.go                                  | Go               |        402 |        131 |        112 |        645 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/http/http_test.go                             | Go               |        308 |          1 |         76 |        385 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/http/subscriber.go                            | Go               |         24 |          0 |          6 |         30 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/memory/memory.go                              | Go               |        199 |          3 |         45 |        247 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/memory/memory_test.go                         | Go               |         39 |          0 |         12 |         51 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/broker/message.go                                    | Go               |          5 |          1 |          2 |          8 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/README.md                                     | Markdown         |          0 |          0 |          1 |          1 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/client.go                                     | Go               |         35 |         37 |          9 |         81 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/config.go                                     | Go               |        290 |         83 |         61 |        434 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/http_client.go                                | Go               |        374 |         76 |         74 |        524 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/http_client_test.go                           | Go               |        100 |          4 |         15 |        119 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/http_request.go                               | Go               |        105 |         16 |         23 |        144 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/http_response.go                              | Go               |         41 |          2 |         14 |         57 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/http_roundtripper.go                          | Go               |         98 |         29 |         20 |        147 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/retry.go                                      | Go               |         24 |          4 |          8 |         36 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/rpc_client.go                                 | Go               |        254 |         65 |         49 |        368 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/rpc_request.go                                | Go               |         82 |          2 |         17 |        101 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/rpc_response.go                               | Go               |         24 |          0 |          6 |         30 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/client/rpc_stream.go                                 | Go               |        114 |         54 |         37 |        205 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/cmd/cmd.go                                           | Go               |          1 |          0 |          1 |          2 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/bytes.go                                       | Go               |         34 |          6 |         11 |         51 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/codec.go                                       | Go               |         46 |          6 |         11 |         63 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/codec_test.go                                  | Go               |         20 |          0 |          5 |         25 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/gob.go                                         | Go               |         34 |          2 |         10 |         46 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/json.go                                        | Go               |         22 |          8 |          9 |         39 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/json_test.go                                   | Go               |         28 |          2 |          5 |         35 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/msgpack.go                                     | Go               |         15 |          5 |          8 |         28 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/msgpack_test.go                                | Go               |         27 |          3 |          5 |         35 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/codec/protobuf.go                                    | Go               |         28 |          3 |         12 |         43 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config.go                                            | Go               |         97 |         17 |         21 |        135 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config/config.go                                     | Go               |        263 |         44 |         68 |        375 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config/config_test.go                                | Go               |         72 |          2 |         16 |         90 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config/config_test.json                              | JSON             |          7 |          0 |          0 |          7 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config/const.go                                      | Go               |         18 |          0 |          5 |         23 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config/format.go                                     | Go               |        127 |          4 |         20 |        151 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/config/option.go                                     | Go               |         43 |          5 |          8 |         56 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/handler_call_test.go                            | Go               |         97 |         10 |         25 |        132 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/rpc/hello_world/client/main.go                  | Go               |         15 |          1 |          4 |         20 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/rpc/hello_world/config.ini                      | Ini              |         16 |          0 |          5 |         21 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/rpc/hello_world/main.go                         | Go               |         47 |          1 |         13 |         61 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/hello_world/go.mod                          | Go Module File   |          5 |          0 |          2 |          7 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/hello_world/main.go                         | Go               |         48 |          2 |         11 |         61 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_middleware/config.ini                 | Ini              |         13 |          0 |          2 |         15 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_middleware/main.go                    | Go               |         37 |          6 |         11 |         54 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/config.ini                     | Ini              |          0 |          0 |          1 |          1 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/group/base/base.go             | Go               |          9 |          0 |          4 |         13 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/group/base/controller.go       | Go               |          9 |          0 |          4 |         13 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/group/base/static/index.css    | CSS              |          3 |          0 |          0 |          3 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/group/base/template/index.html | HTML             |         12 |          0 |          0 |         12 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/group/web/web.go               | Go               |          9 |          0 |          4 |         13 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_module/main.go                        | Go               |         22 |          1 |          5 |         28 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_restful/config.ini                    | Ini              |          0 |          0 |          1 |          1 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/demo/web/volts_restful/main.go                       | Go               |         32 |          3 |          9 |         44 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/doc.go                                               | Go               |          1 |         21 |          2 |         24 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/go.mod                                               | Go Module File   |         83 |          1 |          6 |         90 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/go.sum                                               | Go Checksum File |        804 |          0 |          1 |        805 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/handler/http/gateway.go                              | Go               |          1 |          1 |          2 |          4 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/acme/acme.go                                | Go               |         17 |          7 |          5 |         29 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/acme/autocert/autocert.go                   | Go               |         34 |          7 |          8 |         49 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/acme/autocert/autocert_test.go              | Go               |         10 |          4 |          3 |         17 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/acme/autocert/cache.go                      | Go               |         33 |          1 |          4 |         38 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/acme/options.go                             | Go               |         51 |         24 |         12 |         87 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/addr/addr.go                                | Go               |        130 |         19 |         28 |        177 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/addr/addr_test.go                           | Go               |         68 |          0 |         12 |         80 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/avatar/avatar.go                            | Go               |         41 |         11 |          8 |         60 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/avatar/avatar_test.go                       | Go               |         28 |          0 |          6 |         34 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/backoff/backoff.go                          | Go               |         11 |          3 |          3 |         17 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/body/body.go                                | Go               |        124 |         12 |         31 |        167 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/body/body_test.go                           | Go               |         56 |          3 |         13 |         72 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/buf/buf.go                                  | Go               |         17 |          0 |          5 |         22 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/errors/errors.go                            | Go               |         71 |          7 |         11 |         89 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/header/header.go                            | Go               |          5 |          4 |          3 |         12 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/client.go                              | Go               |        389 |         52 |         65 |        506 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/dns_sd.go                              | Go               |         25 |         54 |          6 |         85 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/dns_sd_test.go                         | Go               |         62 |          0 |          7 |         69 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/server.go                              | Go               |        352 |         93 |         73 |        518 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/server_test.go                         | Go               |         59 |          0 |          7 |         66 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/zone.go                                | Go               |        241 |         39 |         30 |        310 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/mdns/zone_test.go                           | Go               |        255 |          0 |         21 |        276 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/metadata/metadata.go                        | Go               |         89 |         19 |         19 |        127 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/metadata/metadata_test.go                   | Go               |         98 |          0 |         18 |        116 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/net/net.go                                  | Go               |         79 |         19 |         23 |        121 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/pool/config.go                              | Go               |         26 |          0 |          8 |         34 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/pool/default.go                             | Go               |         86 |          8 |         20 |        114 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/pool/default_test.go                        | Go               |         11 |         73 |          4 |         88 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/pool/pool.go                                | Go               |         22 |          8 |          6 |         36 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/registry/registry.go                        | Go               |        111 |         16 |         22 |        149 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/api.go                                 | Go               |         32 |          3 |          8 |         43 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/base/unsafe_OutputAnyParameter_test.go | Go               |         65 |         12 |         16 |         93 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/client/rpc_client_test.go              | Go               |         51 |          1 |         13 |         65 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/controller.go                          | Go               |         47 |          3 |         12 |         62 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/data.go                                | Go               |         14 |          3 |          4 |         21 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/middleware.go                          | Go               |         17 |          0 |          7 |         24 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/router/force_export.go                 | Go               |         85 |         32 |         16 |        133 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/router/handler_call_benchmark_test.go  | Go               |         51 |          0 |         10 |         61 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/router/handler_test.go                 | Go               |         98 |         46 |         28 |        172 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/router/reflect.go                      | Go               |        314 |        210 |         47 |        571 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/router/struct.go                       | Go               |         41 |          0 |          7 |         48 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/server/http_server_test.go             | Go               |         89 |          3 |         19 |        111 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/test/test.go                                | Go               |          6 |          0 |          4 |         10 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/time/time.go                                | Go               |         54 |          0 |          8 |         62 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/internal/tls/tls.go                                  | Go               |         60 |          2 |         13 |         75 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/logger/config.go                                     | Go               |         68 |          5 |         14 |         87 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/logger/console.go                                    | Go               |         24 |         20 |          9 |         53 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/logger/level.go                                      | Go               |         77 |          1 |          8 |         86 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/logger/logger.go                                     | Go               |        301 |         82 |         68 |        451 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/logger/logger_test.go                                | Go               |         33 |          0 |          8 |         41 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/logger/writer.go                                     | Go               |         89 |         11 |         17 |        117 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/README.md                                   | Markdown         |          1 |          0 |          0 |          1 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/cacher/cacher.go                            | Go               |        380 |         78 |         96 |        554 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/config.go                                   | Go               |        121 |         14 |         28 |        163 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/config.go                            | Go               |         53 |         21 |          8 |         82 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/consul.go                            | Go               |        324 |         46 |         79 |        449 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/encoding.go                          | Go               |        125 |         13 |         34 |        172 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/encoding_test.go                     | Go               |        118 |          9 |         21 |        148 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/registry_test.go                     | Go               |        177 |          4 |         28 |        209 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/watcher.go                           | Go               |        213 |         34 |         42 |        289 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/consul/watcher_test.go                      | Go               |         72 |          0 |         15 |         87 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/etcd/config.go                              | Go               |         28 |          2 |          8 |         38 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/etcd/etcd.go                                | Go               |        322 |         27 |         73 |        422 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/etcd/watcher.go                             | Go               |         79 |          1 |         16 |         96 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/mdns/config.go                              | Go               |          2 |          1 |          2 |          5 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/mdns/mdns.go                                | Go               |        478 |         49 |         98 |        625 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/mdns/mdns_test.go                           | Go               |        277 |          9 |         58 |        344 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/memory/config.go                            | Go               |         13 |          1 |          4 |         18 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/memory/memory.go                            | Go               |        241 |          4 |         51 |        296 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/memory/memory_test.go                       | Go               |        213 |          5 |         29 |        247 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/memory/util.go                              | Go               |        103 |          1 |         19 |        123 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/memory/watcher.go                           | Go               |         32 |          0 |          6 |         38 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/nop.go                                      | Go               |         39 |          7 |         12 |         58 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/registry.go                                 | Go               |        112 |         18 |         23 |        153 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/registry/watcher.go                                  | Go               |         36 |         15 |          8 |         59 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/config.go                                     | Go               |        201 |         14 |         37 |        252 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/context.go                                    | Go               |         40 |          3 |          8 |         51 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/group.go                                      | Go               |        327 |        146 |         69 |        542 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/handler.go                                    | Go               |        397 |        149 |         66 |        612 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/http.go                                       | Go               |        488 |        124 |         90 |        702 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/middleware.go                                 | Go               |         57 |          7 |         16 |         80 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/middleware/accept_language/accept_language.go | Go               |         47 |          3 |         10 |         60 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/middleware/cors.go                            | Go               |         21 |          8 |          6 |         35 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/middleware/event/event.go                     | Go               |         39 |          0 |          9 |         48 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/pool.go                                       | Go               |         59 |          8 |         14 |         81 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/pprof.go                                      | Go               |         25 |          1 |          6 |         32 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/recover.go                                    | Go               |         18 |          1 |          3 |         22 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/reverse_proxy.go                              | Go               |         97 |         10 |         27 |        134 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/route.go                                      | Go               |        102 |         25 |         20 |        147 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/router.go                                     | Go               |        389 |        169 |         78 |        636 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/rpc.go                                        | Go               |        182 |          6 |         41 |        229 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/static.go                                     | Go               |         32 |          4 |         11 |         47 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/subscriber.go                                 | Go               |        220 |         21 |         37 |        278 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/tree.go                                       | Go               |        602 |         87 |        107 |        796 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/tree_test.go                                  | Go               |         26 |          0 |          6 |         32 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/selector/config.go                                   | Go               |         88 |         10 |         17 |        115 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/selector/filter.go                                   | Go               |         67 |          9 |         16 |         92 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/selector/registry.go                                 | Go               |         81 |          7 |         21 |        109 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/selector/selector.go                                 | Go               |         42 |         12 |         11 |         65 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/selector/strategy.go                                 | Go               |         55 |          2 |         17 |         74 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/server/config.go                                     | Go               |        249 |         35 |         47 |        331 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/server/publisher.go                                  | Go               |        103 |         15 |         23 |        141 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/server/publisher_test.go                             | Go               |          4 |          0 |          4 |          8 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/server/server.go                                     | Go               |        368 |        103 |         95 |        566 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/server/util.go                                       | Go               |         23 |          4 |          6 |         33 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/README.md                                  | Markdown         |          2 |          0 |          0 |          2 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/compress.go                                | Go               |         35 |          2 |          5 |         42 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/config.go                                  | Go               |        228 |         42 |         47 |        317 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http.go                                    | Go               |        220 |         39 |         41 |        300 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http_client.go                             | Go               |        120 |          4 |         29 |        153 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http_proxy.go                              | Go               |        320 |         20 |         51 |        391 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http_request.go                            | Go               |         65 |          9 |         17 |         91 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http_resopnse.go                           | Go               |        100 |          9 |         22 |        131 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http_server.go                             | Go               |         62 |          5 |         13 |         80 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/http_sock.go                               | Go               |        172 |         35 |         48 |        255 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/listener.go                                | Go               |         96 |         12 |         25 |        133 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/message.go                                 | Go               |        280 |         97 |         68 |        445 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/message_test.go                            | Go               |         10 |          0 |          4 |         14 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/pool.go                                    | Go               |         69 |          8 |         14 |         91 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/sock.go                                    | Go               |         82 |         19 |         16 |        117 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tcp.go                                     | Go               |        104 |          5 |         25 |        134 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tcp_client.go                              | Go               |         13 |          0 |          4 |         17 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tcp_request.go                             | Go               |         80 |          9 |         22 |        111 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tcp_response.go                            | Go               |         56 |          3 |         12 |         71 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tcp_server.go                              | Go               |         81 |         13 |         21 |        115 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tcp_sock.go                                | Go               |         48 |         12 |         16 |         76 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/tls.go                                     | Go               |        224 |         53 |         21 |        298 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/transport/transport.go                               | Go               |         63 |          9 |         15 |         87 |
+| /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/volts.go                                             | Go               |         92 |         35 |         27 |        154 |
+| Total                                                                                                           |                  |     19,880 |      3,403 |      4,056 |     27,339 |
++-----------------------------------------------------------------------------------------------------------------+------------------+------------+------------+------------+------------+

@@ -212,15 +212,16 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
 
 	// 初始化 registry
-	if reg := registry.Use(cfg.RegistryType,
-		registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost)); reg != nil {
+	reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost))
+	if reg != nil {
 		cfg.Registry = reg
-		cfg.Selector = selector.New(
+		cfg.Selector = selector.Default(
 			selector.WithConfigPrefixName(cfg.String()), // 配置路径
 			selector.Registry(cfg.Registry),
 			selector.WithStrategy(cfg.SelectorStrategy),
 		)
 	}
+
 	return cfg
 }
 

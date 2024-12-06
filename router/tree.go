@@ -639,6 +639,7 @@ func (self *TTree) conbine(target, from *treeNode) {
 	// 或者:遍历添加所有没有的新Node
 	if exist_node == nil {
 		target.Children = append(target.Children, from)
+		sort.Sort(target.Children)
 		return
 	} else {
 		if exist_node.Type == RegexpNode {

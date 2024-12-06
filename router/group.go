@@ -84,7 +84,7 @@ func GetModulePath(module string, downloaded bool, display_warning bool) (res st
 	// for adp in ad_paths:
 	//      if os.path.exists(opj(adp, module)) or os.path.exists(opj(adp, '%s.zip' % module)):
 	//         return opj(adp, module)
-	res = filepath.Join(config.AppPath, MODULE_DIR)
+	res = filepath.Join(config.AppPath, config.MODULE_DIR)
 	//if _, err := os.Stat(res); err == nil {
 	//	return res
 	//}
@@ -169,19 +169,20 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 
 // get current source codes file path without file name
 func curFilePath(skip int) (string, string) {
-	//  just for dbg
-	s := 0
-	for {
-		if pc, file, _, ok := runtime.Caller(s); ok {
-			// Note that the test line may be different on
-			// distinct calls for the same test.  Showing
-			// the "internal" line is helpful when debugging.
-			log.Dbg(config.AppPath, pc, " ", file, s)
-		} else {
-			break
+	/*	//  just for dbg
+		s := 0
+		for {
+			if pc, file, _, ok := runtime.Caller(s); ok {
+				// Note that the test line may be different on
+				// distinct calls for the same test.  Showing
+				// the "internal" line is helpful when debugging.
+				log.Dbg(config.AppPath, pc, " ", file, s)
+			} else {
+				break
+			}
+			s += 1
 		}
-		s += 1
-	}
+	*/
 	_, file, _, _ := runtime.Caller(skip)
 	filePath, _ := _path.Split(file)
 	pkgName := filepath.Base(filePath) // TODO 过滤验证文件夹名称
@@ -190,7 +191,7 @@ func curFilePath(skip int) (string, string) {
 		return config.AppPath, ""
 	}
 
-	filePath = config.AppPath + "/" + MODULE_DIR + "/" + pkgName
+	filePath = config.AppPath + "/" + config.MODULE_DIR + "/" + pkgName
 	return filePath, pkgName
 }
 

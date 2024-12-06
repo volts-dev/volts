@@ -18,6 +18,9 @@ type httpResponse struct {
 	StatusCode int    // e.g. 200
 }
 
+// TODO 修改到结构里
+type HttpResponse = httpResponse
+
 func (self *httpResponse) Body() *body.TBody {
 	if self.body.Data.Len() == 0 {
 		b, err := io.ReadAll(self.response.Body)

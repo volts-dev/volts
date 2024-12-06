@@ -43,19 +43,6 @@ func (p *pool) Close() error {
 	return nil
 }
 
-// NoOp the Close since we manage it
-func (p *poolConn) Close() error {
-	return nil
-}
-
-func (p *poolConn) Id() string {
-	return p.id
-}
-
-func (p *poolConn) Created() time.Time {
-	return p.created
-}
-
 func (p *pool) Get(addr string, opts ...transport.DialOption) (Conn, error) {
 	p.Lock()
 	conns := p.conns[addr]
@@ -110,4 +97,17 @@ func (p *pool) Release(conn Conn, err error) error {
 	p.Unlock()
 
 	return nil
+}
+
+// NoOp the Close since we manage it
+func (p *poolConn) Close() error {
+	return nil
+}
+
+func (p *poolConn) Id() string {
+	return p.id
+}
+
+func (p *poolConn) Created() time.Time {
+	return p.created
 }

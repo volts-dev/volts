@@ -10,12 +10,6 @@ import (
 	"github.com/volts-dev/volts/registry/cacher"
 )
 
-const (
-	MODULE_DIR   = "module" // # 模块文件夹名称
-	STATIC_DIR   = "static"
-	TEMPLATE_DIR = "template"
-)
-
 var (
 	ControllerMethodNameMapper = func(name string) string {
 		name = strings.ToLower(name)

@@ -21,6 +21,8 @@ type httpRequest struct {
 	body          *body.TBody
 	opts          RequestOptions
 }
+
+// TODO 修改到结构里
 type HttpRequest = httpRequest
 
 /*

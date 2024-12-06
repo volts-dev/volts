@@ -18,6 +18,7 @@ import (
 
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/transport"
@@ -544,9 +545,9 @@ func (self *THttpContext) RenderTemplate(tmpl string, args interface{}) {
 	}
 
 	if self.route.FilePath == "" {
-		self.TemplateSrc = filepath.Join(TEMPLATE_DIR, tmpl)
+		self.TemplateSrc = filepath.Join(config.TEMPLATE_DIR, tmpl)
 	} else {
-		self.TemplateSrc = filepath.Join(self.route.FilePath, TEMPLATE_DIR, tmpl)
+		self.TemplateSrc = filepath.Join(self.route.FilePath, config.TEMPLATE_DIR, tmpl)
 	}
 }
 

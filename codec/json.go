@@ -2,10 +2,11 @@ package codec
 
 import (
 	"bytes"
-	"encoding/json"
 
-	"github.com/hzmsrv/sonic"
-	"github.com/hzmsrv/sonic/decoder"
+	"github.com/bytedance/sonic"
+	"github.com/bytedance/sonic/decoder"
+	//"github.com/hzmsrv/sonic"
+	//"github.com/hzmsrv/sonic/decoder"
 )
 
 // jsonCodec uses json marshaler and unmarshaler.
@@ -20,7 +21,9 @@ func (c jsonCodec) String() string {
 
 // Encode encodes an object into slice of bytes.
 func (c jsonCodec) Encode(i interface{}) ([]byte, error) {
-	return sonic.Marshal(i)
+	r, _ := sonic.MarshalString(i)
+
+	return []byte(r), nil
 	//return json.Marshal(i)
 	//return bson.Marshal(i)
 }
@@ -30,11 +33,6 @@ func (c jsonCodec) Decode(data []byte, i interface{}) error {
 	// FIXME TODO 时间转换错误
 	dc := decoder.NewStreamDecoder(bytes.NewReader(data))
 	dc.UseNumber()
-	return dc.Decode(&i)
-}
-
-func (c jsonCodec) __Decode(data []byte, i interface{}) error {
-	dc := json.NewDecoder(bytes.NewBuffer(data))
-	dc.UseNumber()
+	dc.UseInt64()
 	return dc.Decode(&i)
 }

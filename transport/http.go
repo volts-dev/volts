@@ -108,7 +108,6 @@ func (self *HttpTransport) Init(opts ...Option) error {
 	for _, o := range opts {
 		o(self.config)
 	}
-
 	return nil
 }
 
@@ -281,15 +280,6 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 	return self.config.Listener, nil
 }
 
-/*
-	func (h *httpTransport) Request(msg Message, sock *Socket, cde codec.ICodec) IRequest {
-		return nil
-	}
-
-	func (h *httpTransport) Response(sock *Socket, cde codec.ICodec) IResponse {
-		return nil
-	}
-*/
 func (self *HttpTransport) Config() *Config {
 	return self.config
 }

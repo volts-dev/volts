@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/volts-dev/utils"
@@ -23,6 +24,7 @@ type (
 		pool     pool.Pool // connect pool
 		closing  bool      // user has called Close
 		shutdown bool      // server has told us to stop
+		seq      uint64
 	}
 )
 
@@ -66,7 +68,7 @@ func (self *RpcClient) NewRequest(service, method string, request interface{}, o
 	return newRpcRequest(service, method, request, optinos...)
 }
 
-func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (IResponse, error) {
+func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (*rpcResponse, error) {
 	// 验证解码器
 	msgCodece := codec.IdentifyCodec(self.config.Serialize)
 	if msgCodece == nil { // no codec specified
@@ -89,7 +91,12 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	if err != nil {
 		return nil, errors.InternalServerError("volts.client", "connection error: %v", err)
 	}
-	defer self.pool.Release(conn, nil)
+	//defer self.pool.Release(conn, nil)
+	releaseFunc := func(err error) {
+		if err = self.pool.Release(conn, err); err != nil {
+			log.Errf("failed to release pool %v", err)
+		}
+	}
 
 	// 获取消息载体
 	msg := transport.GetMessageFromPool()
@@ -126,13 +133,32 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	}
 
 	msg.Payload = data
-	//seq := atomic.AddUint64(&self.seq, 1) - 1
+	seq := atomic.AddUint64(&self.seq, 1) - 1
 	//codec := newRpcCodec(msg, c, cf, "")
 
 	// 开始发送消息
 	// wait for error response
 	ch := make(chan error, 1)
 	resp := &rpcResponse{}
+	stream := &rpcStream{
+		id:       fmt.Sprintf("%v", seq),
+		context:  ctx,
+		request:  req,
+		response: resp,
+		//codec:    codec,
+		conn:   conn,
+		closed: make(chan bool),
+		//close:   opts.ConnClose,
+		release: releaseFunc,
+		sendEOS: false,
+	}
+
+	// close the stream on exiting this function
+	defer func() {
+		if err := stream.Close(); err != nil {
+			log.Errf("failed to close stream %v", err)
+		}
+	}()
 	go func(resp *rpcResponse) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -142,7 +168,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 
 		// send request
 		// 返回编译过的数据
-		err := conn.Send(msg)
+		err := stream.Send(msg)
 		if err != nil {
 			ch <- err
 			return
@@ -150,24 +176,24 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 
 		// recv request
 		msg = transport.GetMessageFromPool()
-		err = conn.Recv(msg)
+		err = stream.Recv(msg)
 		if err != nil {
 			ch <- err
 			return
 		}
-
-		// 状态码处理
-		switch msg.MessageStatusType() {
-		case transport.StatusOK:
-			break
-		case transport.StatusError:
-			ch <- errors.New("StatusError", int32(transport.StatusError), string(msg.Payload))
-			return
-		default:
-			ch <- errors.New("", int32(msg.MessageStatusType()), string(msg.Payload))
-			return
-		}
-
+		/*
+			// 状态码处理
+			switch msg.MessageStatusType() {
+			case transport.StatusOK:
+				break
+			case transport.StatusError:
+				ch <- errors.New("StatusError", int32(transport.StatusError), string(msg.Payload))
+				return
+			default:
+				ch <- errors.New("", int32(msg.MessageStatusType()), string(msg.Payload))
+				return
+			}
+		*/
 		bd := body.New(codec.IdentifyCodec(msg.SerializeType()))
 		bd.Data.Write(msg.Payload)
 		// 解码消息内容
@@ -183,7 +209,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	case err := <-ch:
 		return resp, err
 	case <-ctx.Done():
-		err = errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
+		err = errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
 		break
 	}
 
@@ -199,7 +225,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 }
 
 // 阻塞请求
-func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
+func (self *RpcClient) Call(request IRequest, opts ...CallOption) (*rpcResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	callOpts.SelectOptions = append(callOpts.SelectOptions, selector.WithFilter(selector.FilterTrasport(self.config.Transport)))
@@ -236,12 +262,12 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 	// should we noop right here?
 	select {
 	case <-ctx.Done():
-		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v", ctx.Err()))
+		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
 	default:
 	}
 
 	// return errors.New("volts.client", "request timeout", 408)
-	call := func(i int, response *IResponse) error {
+	call := func(i int, response *rpcResponse) error {
 		// select next node
 		// selector 可能因为过滤后得不到合适服务器
 		node, err := next()
@@ -250,23 +276,29 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 		}
 
 		// make the call
-		*response, err = self.call(ctx, node, request, callOpts)
+		resp, err := self.call(ctx, node, request, callOpts)
+		if err != nil {
+			return err
+		}
+
 		//r.opts.Selector.Mark(service, node, err)
+		*response = *resp
 		return err
 	}
-	var response IResponse
+	//var response IResponse
+	response := &rpcResponse{}
 	// get the retries
 	retries := callOpts.Retries
 	ch := make(chan error, retries+1)
 	var gerr error
 	for i := 0; i <= retries; i++ {
-		go func(i int, response *IResponse) {
+		go func(i int, response *rpcResponse) {
 			ch <- call(i, response)
-		}(i, &response)
+		}(i, response)
 
 		select {
 		case <-ctx.Done():
-			return nil, errors.Timeout("volts.client", fmt.Sprintf("call timeout: %v", ctx.Err()))
+			return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
 		case err := <-ch:
 			// if the call succeeded lets bail early
 			if err == nil {

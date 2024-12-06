@@ -5,11 +5,11 @@ go 1.22.4
 //replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
 
 require (
+	github.com/bytedance/sonic v1.10.0-rc
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.25.1
-	github.com/hzmsrv/sonic v0.0.0-20230927155719-8ab26b70f3c7
 	github.com/miekg/dns v1.1.56
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/mitchellh/mapstructure v1.5.0
@@ -29,8 +29,6 @@ require (
 )
 
 require (
-	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
-	github.com/bytedance/sonic v1.10.0-rc // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d // indirect
 	github.com/chenzhuoyu/iasm v0.9.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect

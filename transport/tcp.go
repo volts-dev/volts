@@ -19,6 +19,13 @@ func NewTCPTransport(opts ...Option) ITransport {
 	}
 }
 
+func (t *tcpTransport) Init(opts ...Option) error {
+	for _, o := range opts {
+		o(t.config)
+	}
+	return nil
+}
+
 func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error) {
 	dialCfg := DialConfig{
 		DialTimeout:  self.config.DialTimeout,
@@ -111,13 +118,6 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 	}
 
 	return self.config.Listener, nil
-}
-
-func (t *tcpTransport) Init(opts ...Option) error {
-	for _, o := range opts {
-		o(t.config)
-	}
-	return nil
 }
 
 func (t *tcpTransport) Config() *Config {

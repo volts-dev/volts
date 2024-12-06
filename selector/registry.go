@@ -31,7 +31,6 @@ func (self *registrySelector) Init(opts ...Option) error {
 
 	self.rc.Stop()
 	self.rc = self.newCache()
-
 	return nil
 }
 
@@ -95,12 +94,12 @@ func (self *registrySelector) Mark(service string, node *registry.Node, err erro
 }
 
 func (self *registrySelector) Reset(service string) {
+
 }
 
 // Close stops the watcher and destroys the cache
 func (self *registrySelector) Close() error {
 	self.rc.Stop()
-
 	return nil
 }
 
