@@ -83,7 +83,10 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 				// check if its a valid host:port
 				if host, _, err := net.SplitHostPort(addr); err == nil {
 					if len(host) == 0 {
-						hosts = vaddr.IPs()
+						hosts = make([]string, 0)
+						for _, ip := range vaddr.IPs() {
+							hosts = append(hosts, ip.String())
+						}
 					} else {
 						hosts = []string{host}
 					}

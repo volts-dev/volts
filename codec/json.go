@@ -33,6 +33,6 @@ func (c jsonCodec) Decode(data []byte, i interface{}) error {
 	// FIXME TODO 时间转换错误
 	dc := decoder.NewStreamDecoder(bytes.NewReader(data))
 	dc.UseNumber()
-	dc.UseInt64()
+	//dc.UseInt64()
 	return dc.Decode(&i)
 }

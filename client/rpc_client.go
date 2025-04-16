@@ -8,8 +8,8 @@ import (
 
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/body"
-	"github.com/volts-dev/volts/internal/errors"
 	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/internal/pool"
@@ -89,7 +89,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 
 	conn, err := self.pool.Get(node.Address, dOpts...)
 	if err != nil {
-		return nil, errors.InternalServerError("volts.client", "connection error: %v", err)
+		return nil, errors.InternalServerError("volts.client", err)
 	}
 	//defer self.pool.Release(conn, nil)
 	releaseFunc := func(err error) {
@@ -330,9 +330,9 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 	if len(address) > 0 {
 		nodes := make([]*registry.Node, len(address))
 
-		for i, addr := range address {
+		for i, add := range address {
 			nodes[i] = &registry.Node{
-				Address: addr,
+				Address: add,
 				// Set the protocol
 				Metadata: map[string]string{
 					"protocol": "mucp",
@@ -354,9 +354,9 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 	next, err := r.config.Selector.Select(service, selectOptions...)
 	if err != nil {
 		if err == selector.ErrNotFound {
-			return nil, errors.InternalServerError("volts.client", "service %s: %s", service, err.Error())
+			return nil, errors.InternalServerError("volts.client", fmt.Sprintf("service %s: %s", service, err.Error()))
 		}
-		return nil, errors.InternalServerError("volts.client", "error selecting %s node: %s", service, err.Error())
+		return nil, errors.InternalServerError("volts.client", fmt.Sprintf("error selecting %s node: %s", service, err.Error()))
 	}
 
 	return next, nil

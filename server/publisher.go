@@ -9,7 +9,7 @@ import (
 	"github.com/volts-dev/volts/broker"
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/internal/errors"
+	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/metadata"
 )
 

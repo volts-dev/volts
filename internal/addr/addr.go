@@ -36,6 +36,42 @@ func isPrivateIP(ipAddr string) bool {
 	return false
 }
 
+func LocalFormater(addrs ...string) []string {
+	for idx, addr := range addrs {
+		// extract the host
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
+
+		// check if its localhost
+		if host == "localhost" {
+			addrs[idx] = net.JoinHostPort("127.0.0.1", port)
+			continue
+		}
+
+		//host, err = Extract(host)
+		//if err != nil {
+		//	continue
+		//}
+
+		for _, ip := range IPs() {
+			addr := ip.String()
+			if host == addr || host == "0.0.0.0" || host == "[::]" || host == "::" {
+				if ip.To4() != nil {
+					addrs[idx] = net.JoinHostPort("127.0.0.1", port)
+					break
+				} else if ip.To16() != nil {
+					addrs[idx] = net.JoinHostPort("::1", port)
+					break
+				}
+			}
+		}
+	}
+
+	return addrs
+}
+
 // IsLocal tells us whether an ip is local
 func IsLocal(addr string) bool {
 	// extract the host
@@ -51,7 +87,7 @@ func IsLocal(addr string) bool {
 
 	// check against all local ips
 	for _, ip := range IPs() {
-		if addr == ip {
+		if addr == ip.String() {
 			return true
 		}
 	}
@@ -133,13 +169,13 @@ func Extract(addr string) (string, error) {
 }
 
 // IPs returns all known ips
-func IPs() []string {
+func IPs() []net.IP {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
 
-	var ipAddrs []string
+	var ipAddrs []net.IP
 
 	for _, i := range ifaces {
 		addrs, err := i.Addrs()
@@ -168,7 +204,7 @@ func IPs() []string {
 				}
 			*/
 
-			ipAddrs = append(ipAddrs, ip.String())
+			ipAddrs = append(ipAddrs, ip)
 		}
 	}
 

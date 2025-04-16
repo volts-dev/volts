@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	_errors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,8 +14,8 @@ import (
 
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/body"
-	"github.com/volts-dev/volts/internal/errors"
 	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/internal/pool"
 	"github.com/volts-dev/volts/registry"
@@ -287,10 +286,6 @@ func (self *HttpClient) printRequest(buf *bytes.Buffer, req *http.Request, rsp *
 }
 
 func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpRequest, opts CallOptions) (*httpResponse, error) {
-	if ctx == nil {
-		return nil, _errors.New("net/http: nil Context")
-	}
-
 	// set the address
 	//address := node.Address
 	header := req.Header() // make(http.Header)

@@ -212,8 +212,7 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 	// Find and read the config file
 	// Handle errors reading the config file
 	if fileExists {
-		err := core.fmt.v.ReadInConfig()
-		if err != nil {
+		if err := core.fmt.v.ReadInConfig(); err != nil {
 			return err
 		}
 	}

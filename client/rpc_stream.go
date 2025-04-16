@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	verrors "github.com/volts-dev/volts/internal/errors"
+	verrors "github.com/volts-dev/volts/errors"
 
 	"github.com/volts-dev/volts/transport"
 )
@@ -118,9 +118,9 @@ func (r *rpcStream) Recv(msg *transport.Message) error {
 	case transport.StatusOK:
 		break
 	case transport.StatusError:
-		r.err = verrors.New("StatusError", int32(transport.StatusError), string(msg.Payload))
+		r.err = verrors.New("StatusError", int(transport.StatusError), string(msg.Payload))
 	default:
-		r.err = verrors.New("", int32(msg.MessageStatusType()), string(msg.Payload))
+		r.err = verrors.New("", int(msg.MessageStatusType()), string(msg.Payload))
 	}
 	/*
 		switch {

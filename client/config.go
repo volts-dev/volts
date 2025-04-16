@@ -10,6 +10,7 @@ import (
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/config"
+	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
@@ -417,9 +418,9 @@ func WithPrintRequest(all ...bool) Option {
 }
 
 // 固定服务器列表
-func WithHost(adr ...string) Option {
+func WithHost(address ...string) Option {
 	return func(cfg *Config) {
-		cfg.CallOptions.Address = append(cfg.CallOptions.Address, adr...)
+		cfg.CallOptions.Address = append(cfg.CallOptions.Address, addr.LocalFormater(address...)...)
 	}
 }
 
