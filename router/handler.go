@@ -2,6 +2,7 @@ package router
 
 // TODO 修改主控制器对应Handler名称让其可以转为统一接口完全规避反射缓慢缺陷
 import (
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"net/http"
@@ -14,9 +15,10 @@ import (
 	"github.com/volts-dev/cacher/memory"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/registry"
+	"go.uber.org/atomic"
 )
 
-var deflautHandlerManager = newHandlerManager()
+var defaultHandlerManager = newHandlerManager()
 
 type HandlerType byte
 type TransportType byte
@@ -78,7 +80,7 @@ type (
 		FuncName      string        // handler方法名称
 		Type          HandlerType   // Route 类型 决定合并的形式
 		TransportType TransportType //
-		pos           int           // current handle position
+		pos           atomic.Int32  // current handle position
 
 		// 多处理器包括中间件
 		funcs []*handle
@@ -118,23 +120,47 @@ func WrapHd(h http.Handler) func(*THttpContext) {
 }
 
 func GetFuncName(i interface{}, seps ...rune) string {
+	// 处理 nil 输入
+	if i == nil {
+		return ""
+	}
+
 	// 获取函数名称
-	var fn string
+	//var fn string
+	var runtimeFunc *runtime.Func
 	if v, ok := i.(reflect.Value); ok {
-		fn = v.Type().String()
-		fn = runtime.FuncForPC(v.Pointer()).Name()
+		//fn = v.Type().String()
+		//fn = runtime.FuncForPC(v.Pointer()).Name()
+		runtimeFunc = runtime.FuncForPC(v.Pointer())
 	} else {
-		fn = runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+		//fn = runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+		runtimeFunc = runtime.FuncForPC(reflect.ValueOf(i).Pointer())
+	}
+
+	// 获取运行时函数信息
+	if runtimeFunc == nil {
+		return ""
+	}
+
+	// 获取函数全名
+	fn := runtimeFunc.Name()
+	// 如果没有分隔符，直接返回函数名的最后一部分
+	if len(seps) == 0 {
+		if lastIndex := strings.LastIndexByte(fn, '.'); lastIndex != -1 {
+			return fn[lastIndex+1:]
+		}
+		return fn
+	}
+
+	// 创建分隔符查找 map 提升性能
+	sepMap := make(map[rune]bool, len(seps))
+	for _, sep := range seps {
+		sepMap[sep] = true
 	}
 
 	// 用 seps 进行分割
 	fields := strings.FieldsFunc(fn, func(sep rune) bool {
-		for _, s := range seps {
-			if sep == s {
-				return true
-			}
-		}
-		return false
+		return sepMap[sep]
 	})
 
 	if size := len(fields); size > 0 {
@@ -154,7 +180,7 @@ func newHandlerManager() *handlerManager {
 */
 // 生成handler原型
 // NOTE:不可用于实时环境
-func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, services []*registry.Service) *handler {
+func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, services []*registry.Service) *handler {
 	httpFn := func(h *handler, middlewares []any) {
 		for _, mid := range middlewares {
 			switch v := mid.(type) {
@@ -185,16 +211,17 @@ func generateHandler(hanadlerType HandlerType, tt TransportType, handlers []any,
 			}
 		}
 	}
+
 	h := &handler{
-		Manager:  deflautHandlerManager,
+		Manager:  defaultHandlerManager,
 		Config:   &ControllerConfig{},
-		Type:     hanadlerType,
+		Type:     handlerType,
 		Services: services,
-		pos:      -1,
 	}
 	// 生成唯一标识用于缓存
 	h.Id = int(crc32.ChecksumIEEE([]byte(url.Path)))
 	h.Name = fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), h.Id)
+	h.pos.Store(-1) // 初始化位置为-1
 
 	switch val := handlers[0].(type) {
 	case func(*THttpContext):
@@ -325,9 +352,10 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 	if self.midFilter == nil {
 		self.midFilter = make(map[string][]string)
 	}
+
 	lst := self.midFilter[middleware]
 	for _, name := range handlers {
-		if utils.IndexOf(name, lst...) == -1 || len(lst) == 0 {
+		if utils.IndexOf(name, lst...) == -1 {
 			lst = append(lst, name)
 		}
 	}
@@ -447,23 +475,36 @@ func (self *handler) init(router *TRouter) *handler {
 			}
 
 			midNewVal := reflect.ValueOf(ml(router))
-			/***	!过滤指针中间件!
+			/***	类型一致性检查!过滤指针中间件!
 				type Controller struct {
 					Session *TSession
 				}
 			***/
 			if midVal.Kind() == reflect.Ptr {
+				if !midNewVal.Type().AssignableTo(midVal.Type()) {
+					log.Errf("Middleware %s type mismatch for field %s", midName, ctrl.Type().Field(i).Name)
+					continue
+				}
 				midVal.Set(midNewVal) // WARM: Field must exportable
 			} else if midVal.Kind() == reflect.Struct {
+				if !midNewVal.Elem().Type().AssignableTo(midVal.Type()) {
+					log.Errf("Middleware %s type mismatch for field %s", midName, ctrl.Type().Field(i).Name)
+					continue
+				}
 				midVal.Set(midNewVal.Elem())
 			}
 
 			// 检测中间件黑名单
 			if lst, ok := h.Config.midFilter[midName]; ok {
+				skip := false
 				for _, name := range lst {
-					if strings.ToLower(name) == strings.ToLower(h.FuncName) {
-						goto next
+					if strings.EqualFold(name, h.FuncName) {
+						skip = true
+						break
 					}
+				}
+				if skip {
+					continue
 				}
 			}
 
@@ -482,12 +523,16 @@ func (self *handler) init(router *TRouter) *handler {
 					h.funcs = append(h.funcs, &handle{IsFunc: false, Middleware: mw})
 				}
 			}
-		next:
 		}
 
 		// 写入handler
 		// MethodByName特性取到的值receiver默认为v
 		hd := ctrl.MethodByName(h.FuncName)
+		if !hd.IsValid() {
+			log.Errf("Method %s not found in controller %s", h.FuncName, h.ctrlName)
+			//goto initMiddlewares
+		}
+
 		switch hd.Type().In(0) {
 		case ContextType:
 			if fn, ok := hd.Interface().(func(IContext)); ok {
@@ -527,62 +572,65 @@ func (self *handler) init(router *TRouter) *handler {
 	}
 
 	h.reset()
-
 	return h
+}
+
+// 统一处理 HTTP 和 RPC 的 handler 调用逻辑
+func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error {
+	for int(self.pos.Load()) < len(self.funcs) {
+		if ctx.IsDone() {
+			break
+		}
+
+		hd := self.funcs[self.pos.Load()]
+		if hd.IsFunc {
+			switch self.TransportType {
+			case HttpHandler:
+				c, ok := ctx.(*THttpContext)
+				if !ok {
+					return errors.New("invalid context type for HttpHandler")
+				}
+				hd.HttpFunc(c)
+			case RpcHandler:
+				c, ok := ctx.(*TRpcContext)
+				if !ok {
+					return errors.New("invalid context type for RpcHandler")
+				}
+				hd.RpcFunc(c)
+			case ReflectHandler:
+				return errors.New("ReflectHandler not implemented") // 修复格式化参数缺失
+				/*
+					for self.pos < len(self.funcs) {
+						if ctx.IsDone() {
+							break
+						}
+						v := self.funcs[self.pos]
+						rcv := self.FuncsReceiver[self.pos]
+						if rcv.IsValid() {
+							v.Call([]reflect.Value{rcv, ctx.ValueModel()})
+						} else {
+							v.Call([]reflect.Value{ctx.ValueModel()})
+						}
+
+						self.pos++
+					}
+				*/
+			}
+		} else {
+			hd.Middleware.Handler(ctx)
+		}
+
+		self.pos.Add(1)
+	}
+	return nil
 }
 
 func (self *handler) Invoke(ctx IContext) *handler {
 	ctx.setHandler(self)
 
-	self.pos++
-	switch self.TransportType {
-	case HttpHandler:
-		c := ctx.(*THttpContext)
-		for self.pos < len(self.funcs) {
-			if c.IsDone() {
-				break
-			}
-			hd := self.funcs[self.pos]
-			if hd.IsFunc {
-				hd.HttpFunc(c)
-			} else {
-				hd.Middleware.Handler(c)
-			}
-			self.pos++
-		}
-	case RpcHandler:
-		c := ctx.(*TRpcContext)
-		for self.pos < len(self.funcs) {
-			if c.IsDone() {
-				break
-			}
-			hd := self.funcs[self.pos]
-			if hd.IsFunc {
-				hd.RpcFunc(c)
-			} else {
-				hd.Middleware.Handler(c)
-			}
-			self.pos++
-		}
-	case ReflectHandler:
-		log.Panicf("ReflectHandler %v")
-		/*
-			for self.pos < len(self.funcs) {
-				if ctx.IsDone() {
-					break
-				}
-				v := self.funcs[self.pos]
-				rcv := self.FuncsReceiver[self.pos]
-				if rcv.IsValid() {
-					v.Call([]reflect.Value{rcv, ctx.ValueModel()})
-				} else {
-					v.Call([]reflect.Value{ctx.ValueModel()})
-				}
-
-				self.pos++
-			}
-		*/
-
+	self.pos.Add(1)
+	if err := self.invokeHandlers(ctx, self.TransportType); err != nil {
+		log.Panic(err)
 	}
 
 	return self
@@ -600,12 +648,11 @@ func (self *handler) reset() *handler {
 		}
 	}
 
-	self.pos = -1
+	self.pos.Store(-1) // 重置位置
 	return self
 }
 
-func (self *handler) recycle() *handler {
+func (self *handler) recycle() {
 	self.reset()
 	self.Manager.Put(self.Id, self)
-	return self
 }

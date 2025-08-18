@@ -54,19 +54,16 @@ func (self *pool) Get(object reflect.Type) reflect.Value {
 	}
 
 	if pool, ok := self.pools[object]; ok {
-		itf := pool.Get()
-		if itf == nil {
-			return self.New(object)
+		if v := pool.Get(); v != nil {
+			return v.(reflect.Value)
 		}
-
-		return itf.(reflect.Value)
-	} else {
-		return self.New(object)
 	}
+
+	return self.New(object)
 }
 
 func (self *pool) Put(typ reflect.Type, val reflect.Value) {
-	if !self.active {
+	if !self.active || typ == nil {
 		return
 	}
 

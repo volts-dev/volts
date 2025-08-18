@@ -167,7 +167,7 @@ func (self *TTree) Init(opts ...ConfigOption) {
 }
 
 func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
-	services = make(map[*TGroup][]*registry.Endpoint, 0)
+	services = make(map[*TGroup][]*registry.Endpoint)
 	validator := make(map[string]*route)
 	var match func(method string, i int, node *treeNode)
 	match = func(method string, i int, node *treeNode) {
@@ -204,24 +204,26 @@ func (self *TTree) AddRoute(route *route) error {
 		return nil
 	}
 
+	if len(route.Methods) == 0 {
+		return fmt.Errorf("route methods cannot be empty")
+	}
+
 	for _, method := range route.Methods {
 		method = strings.ToUpper(method)
-
 		delimitChar := route.PathDelimitChar
 
 		// to parse path as a List node
 		nodes, _ := self.parsePath(route.Path, delimitChar)
+		// 验证合法性
+		if !validNodes(nodes) {
+			log.Panicf("express %s is not supported", route.Path)
+		}
 
 		// 绑定Route到最后一个Node
 		node := nodes[len(nodes)-1]
 		route.Action = node.Text // 赋值Action
 		node.Route = route
 		node.Path = route.Path // 存储路由绑定的URL
-
-		// 验证合法性
-		if !validNodes(nodes) {
-			log.Panicf("express %s is not supported", route.Path)
-		}
 
 		// insert the node to tree
 		self.addNodes(method, nodes, false)
@@ -267,12 +269,12 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 	if len(self.root) > 0 && len(from.root) > 0 { // 非空的Tree
 		if self.__DelimitChar != from.__DelimitChar { // 分隔符对比
 			log.Panicf("could not conbine 2 different kinds (RPC/HTTP) of routes tree!")
-			return self
 		}
 	}
 
 	self.Lock()
 	defer self.Unlock()
+
 	for method, new_node := range from.root {
 		if main_nodes, has := self.root[method]; !has {
 			self.root[method] = new_node
@@ -287,37 +289,44 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 }
 
 func (self *TTree) PrintTrees() {
-	buf := bytes.NewBufferString("")
+	buf := &bytes.Buffer{}
 	buf.WriteString("Print routes tree:\n")
 	for method, node := range self.root {
 		if len(node.Children) > 0 {
-			buf.WriteString(method + "\n")
+			buf.WriteString(method)
+			buf.WriteByte('\n')
 			printNode(buf, 1, node, "")
-			buf.WriteString("\n")
+			buf.WriteByte('\n')
 		}
 	}
 	log.Info(buf.String())
 }
 
 func (r *TTree) Match(method string, path string) (*route, Params) {
+	r.RLock()
+	root := r.root[method]
+	r.RUnlock()
+
+	if root == nil {
+		return nil, nil
+	}
+
 	var delimitChar byte = '/'
 	if method == "CONNECT" {
 		delimitChar = '.'
-	}
-
-	if root := r.root[method]; root != nil {
+	} else {
 		prefix_char := string(r.PrefixChar)
 		// trim the Url to including "/" on begin of path
-		if !strings.HasPrefix(path, prefix_char) && path != prefix_char {
+		if path != prefix_char && !strings.HasPrefix(path, prefix_char) {
 			path = prefix_char + path
 		}
+	}
 
-		var params = make(Params, 0, strings.Count(path, string(delimitChar)))
-		for _, n := range root.Children {
-			e := r.matchNode(n, path, delimitChar, &params)
-			if e != nil {
-				return e.Route, params
-			}
+	params := make(Params, 0, strings.Count(path, string(delimitChar)))
+	for _, n := range root.Children {
+		e := r.matchNode(n, path, delimitChar, &params)
+		if e != nil {
+			return e.Route, params
 		}
 	}
 
@@ -325,7 +334,8 @@ func (r *TTree) Match(method string, path string) (*route, Params) {
 }
 
 func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params *Params) *treeNode {
-	if node.Type == StaticNode { // 静态节点
+	switch node.Type {
+	case StaticNode:
 		// match static node
 		if strings.HasPrefix(path, node.Text) {
 			if len(path) == len(node.Text) {
@@ -339,8 +349,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 				}
 			}
 		}
-
-	} else if node.Type == AnyNode { // 全匹配节点
+	case AnyNode:
 		for _, c := range node.Children {
 			idx := strings.LastIndex(path, c.Text)
 			if idx > -1 {
@@ -356,7 +365,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 		*params = append(*params, param{node.Text[1:], path})
 		return node
 
-	} else if node.Type == VariantNode { // 变量节点
+	case VariantNode:
 		// # 消除path like /abc 的'/'
 		// 根据首字符判断接下来的处理条件
 		first_Char := path[0]
@@ -402,7 +411,9 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 				return nil
 			}
 		}
-	} else if node.Type == RegexpNode { // 正则节点
+
+	case RegexpNode:
+
 		idx := strings.IndexByte(path, delimitChar)
 		if idx > -1 {
 			if node.regexp.MatchString(path[:idx]) {
@@ -431,6 +442,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 				return node
 			}
 		}
+
 	}
 
 	return nil

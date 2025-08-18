@@ -1,8 +1,8 @@
 package router
 
 import (
+	"context"
 	"io"
-	"net"
 	"net/http"
 	"reflect"
 	"sort"
@@ -267,16 +267,15 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 
 		ctx := p.Get().(*THttpContext)
+		ctx.route = *route // TODO 优化重复使用
 		if !ctx.inited {
 			ctx.router = self
-			ctx.route = *route // fixme 复制
 			ctx.inited = true
 			ctx.Template = template.Default()
 		}
 
 		ctx.reset(rsp, r)
 		ctx.setPathParams(params)
-		ctx.route = *route // TODO 优化重复使用
 
 		self.route(route, ctx)
 
@@ -412,72 +411,56 @@ func (self *TRouter) isClosed() bool {
 func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
 	localServices := self.config.Registry.LocalServices()
 
-	nodes := make([]*registry.Node, 0)
-	for _, n := range service.Nodes {
-		//  TODO 解决监控拉取registry服务器服务列表比LocalServices获取注册的本地早
-		if len(localServices) == 0 && self.tree.Count.Load() > 0 {
-			break
+	// 将本地服务节点信息存储到 map 中，方便快速查找
+	localServiceMap := make(map[string]bool)
+	for _, curSrv := range localServices {
+		if curSrv != nil && len(curSrv.Nodes) > 0 {
+			localServiceMap[curSrv.Nodes[0].Id] = true
 		}
-
-		for _, curSrv := range localServices {
-			node := curSrv.Nodes[0]
-			host, port, err := net.SplitHostPort(node.Address)
-			if err != nil {
-				log.Err(err)
-			}
-
-			if n.Id == node.Id {
-				goto out
-			}
-
-			h, p, err := net.SplitHostPort(n.Address)
-			if err != nil {
-				log.Err(err)
-			}
-
-			// 同个服务器
-			if host == h && port == p {
-				goto out
-			}
-
-		}
-		nodes = append(nodes, n)
-	out:
 	}
 
-	service.Nodes = nodes
+	nodes := make([]*registry.Node, 0)
+	for _, n := range service.Nodes {
+		// 如果节点在本地服务 map 中存在，则跳过
+		if _, ok := localServiceMap[n.Id]; ok {
+			continue
+		}
+		nodes = append(nodes, n)
+	}
 	/*
-		for _, curSrv := range localServices {
-			if curSrv != nil && service.Name == curSrv.Name {
+		for _, n := range service.Nodes {
+			//  TODO 解决监控拉取registry服务器服务列表比LocalServices获取注册的本地早
+			if len(localServices) == 0 && self.tree.Count.Load() > 0 {
+				break
+			}
+
+			for _, curSrv := range localServices {
 				node := curSrv.Nodes[0]
 				host, port, err := net.SplitHostPort(node.Address)
 				if err != nil {
 					log.Err(err)
 				}
 
-				nodes := make([]*registry.Node, 0)
-				var node *registry.Node
-				for _, n := range service.Nodes {
-					if n.Id == node.Id {
-						continue
-					}
-
-					h, p, err := net.SplitHostPort(n.Address)
-					if err != nil {
-						log.Err(err)
-					}
-
-					// 同个服务器
-					if host == h && port == p {
-						continue
-					}
-
-					nodes = append(nodes, n)
+				if n.Id == node.Id {
+					goto out
 				}
-				service.Nodes = nodes
+
+				h, p, err := net.SplitHostPort(n.Address)
+				if err != nil {
+					log.Err(err)
+				}
+
+				// 同个服务器
+				if host == h && port == p {
+					goto out
+				}
+
 			}
-		}
-	*/
+			nodes = append(nodes, n)
+		out:
+		}*/
+
+	service.Nodes = nodes
 	return service
 }
 
@@ -535,11 +518,13 @@ func (self *TRouter) watch() {
 			continue
 		}
 
-		ch := make(chan bool)
+		//ch := make(chan bool)
+		// 创建带取消功能的 context
+		ctx, cancel := context.WithCancel(context.Background())
 
 		go func() {
 			select {
-			case <-ch:
+			case <-ctx.Done():
 				w.Stop()
 			case <-self.exit:
 				w.Stop()
@@ -554,25 +539,29 @@ func (self *TRouter) watch() {
 			res, err := w.Next()
 			if err != nil {
 				log.Errf("error getting next endoint: %v", err)
-				close(ch)
+				cancel()
 				break
 			}
 
 			// skip these things
 			if res == nil || res.Service == nil {
-				break
+				continue
 			}
 
 			// get entry from cache
 			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
 			if err != nil {
 				log.Errf("unable to get service: %v", err)
-				break
+				continue
 			}
 
 			// update our local endpoints
 			self.store(services)
 		}
+
+		// 确保 watcher goroutine 已经退出
+		cancel()
+		<-ctx.Done() // 等待 goroutine 完全退出
 	}
 }
 
@@ -586,13 +575,20 @@ func (self *TRouter) refresh() {
 		services []*registry.Service
 		list     []*registry.Service
 		attempts int
+		maxRetry = 10 // 最大重试次数
+
 	)
+	localServices := self.config.Registry.LocalServices()
 
 	for {
 		list, err = self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
 			log.Warnf("registry unable to list services: %v", err)
+			if attempts > maxRetry {
+				log.Errf("max retry exceeded for listing services, giving up")
+				attempts = 0 // reset to prevent overflow
+			}
 			time.Sleep(time.Duration(attempts) * time.Second)
 			continue
 		}
@@ -606,12 +602,8 @@ func (self *TRouter) refresh() {
 
 		// for each service, get service and store endpoints
 		for _, s := range list {
-			for _, local := range self.config.Registry.LocalServices() {
-				if local.Equal(s) {
-					// 不添加自己
-					goto out
-				}
-
+			if self.isLocalService(s, localServices) {
+				continue
 			}
 
 			services, err = self.config.RegistryCacher.GetService(s.Name)
@@ -620,8 +612,6 @@ func (self *TRouter) refresh() {
 				continue
 			}
 			self.store(services)
-
-		out:
 		}
 
 		// refresh list in 10 minutes... cruft
@@ -632,4 +622,14 @@ func (self *TRouter) refresh() {
 			return
 		}
 	}
+}
+
+// isLocalService 判断服务是否是本地服务
+func (self *TRouter) isLocalService(service *registry.Service, locals []*registry.Service) bool {
+	for _, local := range locals {
+		if local.Equal(service) {
+			return true
+		}
+	}
+	return false
 }

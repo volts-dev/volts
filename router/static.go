@@ -16,6 +16,13 @@ func staticHandler(urlPattern string, filePath string) func(c *THttpContext) {
 		defer ctx.Apply() //已经服务当前文件并结束
 
 		file := filepath.Join(ctx.pathParams.FieldByName("filepath").AsString())
+		// 添加路径清理和安全检查
+		cleanPath := filepath.Clean(file)
+		if strings.Contains(cleanPath, "..") {
+			ctx.response.WriteHeader(http.StatusForbidden)
+			return
+		}
+
 		// Check if file exists and/or if we have permission to access it
 		if _, err := fs.Open(file); err != nil {
 			// 对最后一个控制器返回404
@@ -36,11 +43,17 @@ func rootStaticHandler(ctx *THttpContext) {
 	defer ctx.Apply() //已经服务当前文件并结束
 
 	p := ctx.PathParams()
-	//fileName := strings.ToLower(p.FieldByName("fileName").AsString())
 	fileExt := strings.ToLower(p.FieldByName("ext").AsString())
+
 	if utils.IndexOf(fileExt, "", "html", "txt", "xml") == -1 {
 		ctx.NotFound()
 	}
 
-	ctx.ServeFile(ctx.request.URL.Path[1:])
+	filePath := filepath.Clean(ctx.request.URL.Path[1:])
+	if strings.Contains(filePath, "..") {
+		ctx.response.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	ctx.ServeFile(filePath)
 }

@@ -153,15 +153,15 @@ func parseSubscriber(topic string, sub any, opts ...SubscriberOption) (handlers 
 	case func(*TSubscriberContext):
 		hd = &handler{
 			Id:      int(crc32.ChecksumIEEE([]byte(topic))),
-			Manager: deflautHandlerManager,
+			Manager: defaultHandlerManager,
 			Config:  &ControllerConfig{},
 			Type:    SubscriberHandler,
-			pos:     -1,
+			//pos:     -1,
 
 			ctrlType:  reflect.TypeOf(v),
 			ctrlValue: reflect.ValueOf(v),
 		}
-
+		hd.pos.Store(-1)
 		hd.TransportType = SubscribeHandler
 		hd.funcs = append(hd.funcs, &handle{IsFunc: true, SubFunc: v})
 
@@ -230,16 +230,16 @@ func parseSubscriber(topic string, sub any, opts ...SubscriberOption) (handlers 
 
 			hd = &handler{
 				Id:      int(crc32.ChecksumIEEE([]byte(topic))),
-				Manager: deflautHandlerManager,
+				Manager: defaultHandlerManager,
 				Config:  &ControllerConfig{},
 				Type:    SubscriberHandler,
-				pos:     -1,
+				//pos:     -1,
 
 				ctrlType:  ctrlValue.Type(),
 				ctrlValue: ctrlValue,
 			}
 			hd.Name = fmt.Sprintf("%s-%d", topic, hd.Id)
-
+			hd.pos.Store(-1)
 			handlers = append(handlers, hd)
 			endpoints = append(endpoints, &registry.Endpoint{
 				Name:    hd.Name,
