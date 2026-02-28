@@ -48,6 +48,7 @@ func (self *Config) Init(opts ...Option) {
 		}
 	}
 }
+
 func (self *Config) Load() error {
 	return self.LoadToModel(self)
 }

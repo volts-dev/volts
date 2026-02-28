@@ -29,7 +29,9 @@ type (
 		PrefixName string `field:"-"` // config prefix name
 		Listener   IListener
 		// Addrs is the list of intermediary addresses to connect to
-		Addrs []string
+		//Addrs []string
+		Addrs string
+
 		// Codec is the codec interface to use where headers are not supported
 		// by the transport and the entire payload must be encoded
 		//Codec codec.Marshaler
@@ -158,7 +160,7 @@ func Logger() logger.ILogger {
 }
 
 // Addrs to use for transport
-func Addrs(addrs ...string) Option {
+func Addrs(addrs string) Option {
 	return func(cfg *Config) {
 		cfg.Addrs = addrs
 	}

@@ -142,10 +142,6 @@ func (self *Config) Register(cfg IConfig) {
 	core := self.Core()
 
 	if !core.fmt.v.InConfig(cfgStr) {
-		if cfgStr == "registry." {
-			log.Println(cfgStr)
-		}
-
 		// 保存配置到core
 		err := cfg.Save()
 		if err != nil {

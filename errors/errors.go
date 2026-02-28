@@ -22,7 +22,7 @@ type (
 	}
 )
 
-func (self *Error) Error() string {
+func (self Error) Error() string {
 	return self.Detail
 }
 

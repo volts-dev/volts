@@ -57,19 +57,16 @@ func New(Prefix string, opts ...Option) *TLogger {
 	opts = append(opts, WithConfigPrefixName(Prefix)) //
 	config := newConfig(opts...)
 
-	//log := newLogger(opts...)
 	log := &TLogger{
 		Config: config,
+		manager: &TWriterManager{
+			writer:              make(map[string]IWriter),
+			level_writer:        make(map[Level]IWriter),
+			config:              config,
+			msg:                 make(chan *TWriterMsg, 10000), //10000 means the number of messages in chan.
+			loggerFuncCallDepth: 2,
+		},
 	}
-	log.manager = &TWriterManager{
-		writer:              make(map[string]IWriter),
-		level_writer:        make(map[Level]IWriter),
-		config:              config,
-		msg:                 make(chan *TWriterMsg, 10000), //10000 means the number of messages in chan.
-		loggerFuncCallDepth: 2,
-	}
-
-	//go log.manager.listen()
 
 	log.manager.writer["Console"] = NewConsoleWriter()
 	log.manager.writerName = "Console"

@@ -300,7 +300,7 @@ func (self *TServer) Deregister() error {
 	if len(config.Advertise) > 0 {
 		advt = config.Advertise
 	} else {
-		advt = config.Address
+		advt = config.Transport.Config().Addrs
 	}
 
 	if cnt := strings.Count(advt, ":"); cnt >= 1 {
@@ -389,13 +389,13 @@ func (self *TServer) Start() error {
 	self.subscribers = self.config.Router.Config().Router.GetSubscribers()
 
 	// start listening on the transport
-	ts, err := cfg.Transport.Listen(cfg.Address)
+	ts, err := cfg.Transport.Listen(cfg.Address) // TODO Transport 无需地址
 	if err != nil {
 		return err
 	}
 
 	// swap address
-	addr := cfg.Address
+	//addr := cfg.Transport.Config().Addrs
 	cfg.Address = ts.Addr().String()
 	bname := cfg.Broker.String()
 
@@ -446,7 +446,7 @@ func (self *TServer) Start() error {
 	// mark the server as started
 	self.started.Store(true)
 
-	log.Infof("Listening on %s - %s", ts.Addr(), cfg.Transport.String())
+	log.Infof("Listening on %s - %s", ts.Addr().String(), cfg.Transport.String())
 
 	// 监听退出
 	go func() {
@@ -525,7 +525,7 @@ func (self *TServer) Start() error {
 
 		// swap back address
 		//self.Lock()
-		cfg.Address = addr
+		//cfg.Address = addr
 		//self.Unlock()
 	}()
 
