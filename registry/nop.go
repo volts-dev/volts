@@ -7,12 +7,14 @@ type (
 	}
 )
 
-func newNopRegistry() *nopRegistry {
+func NewNopRegistry() *nopRegistry {
 	reg := &nopRegistry{
 		//	config: NewConfig(
 		//		WithName(""),
 		//	),
-		config: &Config{},
+		config: &Config{
+			Name: "",
+		},
 	}
 	return reg
 }

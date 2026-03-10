@@ -32,3 +32,24 @@ func TestJosnInt64Value(t *testing.T) {
 	}
 	log.Print(test)
 }
+
+func TestJosnStringValue(t *testing.T) {
+	type Test1 struct {
+		Id   int64
+		Name string
+		Time any
+	}
+
+	coder := new(jsonCodec)
+	buf, err := coder.Encode(Test1{Id: 1234541341234123412, Name: "adc", Time: "2014-04-26"}) //"2016-01-02"
+	if err != nil {
+
+	}
+
+	var test Test1
+	err = coder.Decode(buf, &test)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.Print(test)
+}

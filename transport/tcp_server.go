@@ -83,32 +83,33 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 		sock := NewTcpTransportSocket(conn, self.transport.config.ReadTimeout, self.transport.config.WriteTimeout)
 
 		go func() {
-			//@ 获取空白通讯包
-			msg := GetMessageFromPool() // request message
-
-			// TODO: think of a better error response strategy
 			defer func() {
 				if r := recover(); r != nil {
-					sock.Close()
+					log.Errf("rpc: panic serving %s: %v", conn.RemoteAddr(), r)
 				}
-
-				PutMessageToPool(msg)
+				sock.Close()
 			}()
 
-			// TODO 自定义通讯包结构
-			// 获得请求参数
-			err = msg.Decode(conn) // 等待读取客户端信号
-			if err != nil {
-				//return err
-				// TODO
+			for {
+				msg := GetMessageFromPool()
+
+				// 清除读取超时，避免空闲连接被超时断开
+				conn.SetReadDeadline(time.Time{})
+
+				// 等待读取客户端信号
+				err := msg.Decode(conn)
+				if err != nil {
+					PutMessageToPool(msg)
+					return // 连接断开(EOF)或读取错误，退出循环
+				}
+
+				ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
+				req := NewRpcRequest(ctx, msg, sock)
+				rsp := NewRpcResponse(ctx, req, sock)
+
+				hd.ServeRPC(rsp, req)
+				PutMessageToPool(msg)
 			}
-
-			ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-
-			req := NewRpcRequest(ctx, msg, sock)
-			rsp := NewRpcResponse(ctx, req, sock)
-
-			hd.ServeRPC(rsp, req)
 		}()
 	}
 }

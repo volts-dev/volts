@@ -1,0 +1,10 @@
+{
+  "logger": {
+    "dataset": {
+      "level": 9
+    },
+    "volts": {
+      "level": 9
+    }
+  }
+}

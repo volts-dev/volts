@@ -3,12 +3,12 @@ package client
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/errors"
+	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/internal/net"
@@ -61,167 +61,11 @@ func (self *RpcClient) Config() *Config {
 }
 
 // 新建请求
-func (self *RpcClient) NewRequest(service, method string, request interface{}, optinos ...RequestOption) (*rpcRequest, error) {
-	optinos = append(optinos,
+func (self *RpcClient) NewRequest(service, method string, request interface{}, options ...RequestOption) (*rpcRequest, error) {
+	options = append(options,
 		WithCodec(self.config.Serialize),
 	)
-	return newRpcRequest(service, method, request, optinos...)
-}
-
-func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (*rpcResponse, error) {
-	// 验证解码器
-	msgCodece := codec.IdentifyCodec(self.config.Serialize)
-	if msgCodece == nil { // no codec specified
-		//call.Error = rpc.ErrUnsupportedCodec
-		//client.mutex.Unlock()
-		//call.done()
-		return nil, errors.UnsupportedCodec("volts.client", self.config.SerializeType)
-	}
-
-	// 获取空闲链接
-	dOpts := []transport.DialOption{
-		transport.WithStream(),
-	}
-
-	if opts.DialTimeout >= 0 {
-		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout, opts.RequestTimeout, 0))
-	}
-
-	conn, err := self.pool.Get(node.Address, dOpts...)
-	if err != nil {
-		return nil, errors.InternalServerError("volts.client", err)
-	}
-	//defer self.pool.Release(conn, nil)
-	releaseFunc := func(err error) {
-		if err = self.pool.Release(conn, err); err != nil {
-			log.Errf("failed to release pool %v", err)
-		}
-	}
-
-	// 获取消息载体
-	msg := transport.GetMessageFromPool()
-	msg.SetMessageType(transport.MT_REQUEST)
-	msg.SetSerializeType(self.config.Serialize)
-
-	// init header
-	for k, v := range req.Header() {
-		msg.Header[k] = v[0]
-	}
-	md, ok := metadata.FromContext(ctx)
-	if ok {
-		for k, v := range md {
-			msg.Header[k] = v
-		}
-	}
-
-	// set timeout in nanoseconds
-	msg.Header["Timeout"] = fmt.Sprintf("%d", opts.RequestTimeout)
-	// set the content type for the request
-	msg.Header["Content-Type"] = req.ContentType()
-	// set the accept header
-	msg.Header["Accept"] = req.ContentType()
-
-	msg.Path = req.Method() // TODO msg 添加server action
-	data := req.Body().Data.Bytes()
-	if len(data) > 1024 && self.config.CompressType == transport.Gzip {
-		data, err = transport.Zip(data)
-		if err != nil {
-			return nil, err
-		}
-
-		msg.SetCompressType(self.config.CompressType)
-	}
-
-	msg.Payload = data
-	seq := atomic.AddUint64(&self.seq, 1) - 1
-	//codec := newRpcCodec(msg, c, cf, "")
-
-	// 开始发送消息
-	// wait for error response
-	ch := make(chan error, 1)
-	resp := &rpcResponse{}
-	stream := &rpcStream{
-		id:       fmt.Sprintf("%v", seq),
-		context:  ctx,
-		request:  req,
-		response: resp,
-		//codec:    codec,
-		conn:   conn,
-		closed: make(chan bool),
-		//close:   opts.ConnClose,
-		release: releaseFunc,
-		sendEOS: false,
-	}
-
-	// close the stream on exiting this function
-	defer func() {
-		if err := stream.Close(); err != nil {
-			log.Errf("failed to close stream %v", err)
-		}
-	}()
-	go func(resp *rpcResponse) {
-		defer func() {
-			if r := recover(); r != nil {
-				ch <- errors.InternalServerError("volts.client", "panic recovered: %v", r)
-			}
-		}()
-
-		// send request
-		// 返回编译过的数据
-		err := stream.Send(msg)
-		if err != nil {
-			ch <- err
-			return
-		}
-
-		// recv request
-		msg = transport.GetMessageFromPool()
-		err = stream.Recv(msg)
-		if err != nil {
-			ch <- err
-			return
-		}
-		/*
-			// 状态码处理
-			switch msg.MessageStatusType() {
-			case transport.StatusOK:
-				break
-			case transport.StatusError:
-				ch <- errors.New("StatusError", int32(transport.StatusError), string(msg.Payload))
-				return
-			default:
-				ch <- errors.New("", int32(msg.MessageStatusType()), string(msg.Payload))
-				return
-			}
-		*/
-		bd := body.New(codec.IdentifyCodec(msg.SerializeType()))
-		bd.Data.Write(msg.Payload)
-		// 解码消息内容
-		resp.contentType = msg.SerializeType()
-		resp.body = bd // msg.Payload
-
-		// success
-		ch <- nil
-	}(resp)
-
-	err = nil
-	select {
-	case err := <-ch:
-		return resp, err
-	case <-ctx.Done():
-		err = errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
-		break
-	}
-
-	// set the stream error
-	if err != nil {
-		//stream.Lock()
-		//stream.err = grr
-		//stream.Unlock()
-		return nil, err
-	}
-
-	return resp, nil
+	return newRpcRequest(service, method, request, options...)
 }
 
 // 阻塞请求
@@ -266,59 +110,161 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (*rpcResponse,
 	default:
 	}
 
-	// return errors.New("volts.client", "request timeout", 408)
-	call := func(i int, response *rpcResponse) error {
+	var gerr error
+	var response *rpcResponse
+	// get the retries
+	retries := callOpts.Retries
+
+	for i := 0; i <= retries; i++ {
+		// 检查 context 是否已超时
+		select {
+		case <-ctx.Done():
+			return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
+		default:
+		}
+
 		// select next node
 		// selector 可能因为过滤后得不到合适服务器
 		node, err := next()
 		if err != nil {
-			return err
-		}
-
-		// make the call
-		resp, err := self.call(ctx, node, request, callOpts)
-		if err != nil {
-			return err
-		}
-
-		//r.opts.Selector.Mark(service, node, err)
-		*response = *resp
-		return err
-	}
-	//var response IResponse
-	response := &rpcResponse{}
-	// get the retries
-	retries := callOpts.Retries
-	ch := make(chan error, retries+1)
-	var gerr error
-	for i := 0; i <= retries; i++ {
-		go func(i int, response *rpcResponse) {
-			ch <- call(i, response)
-		}(i, response)
-
-		select {
-		case <-ctx.Done():
-			return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
-		case err := <-ch:
+			gerr = err
+		} else {
+			// 本机 IP 自动转为 loopback 以获得最低延迟
+			node.Address = addr.LocalFormat(node.Address)
+			response, err = self.call(ctx, node, request, callOpts)
 			// if the call succeeded lets bail early
 			if err == nil {
 				return response, nil
 			}
-
-			retry, rerr := callOpts.Retry(ctx, request, i, err)
-			if rerr != nil {
-				return nil, rerr
-			}
-
-			if !retry {
-				return nil, err
-			}
-
 			gerr = err
+		}
+
+		retry, rerr := callOpts.Retry(ctx, request, i, gerr)
+		if rerr != nil {
+			return nil, rerr
+		}
+
+		if !retry {
+			return nil, gerr
 		}
 	}
 
 	return response, gerr
+}
+
+func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IRequest, opts CallOptions) (*rpcResponse, error) {
+	// 验证解码器
+	msgCodec := codec.IdentifyCodec(self.config.Serialize)
+	if msgCodec == nil { // no codec specified
+		return nil, errors.UnsupportedCodec("volts.client", self.config.SerializeType)
+	}
+
+	// 获取空闲链接
+	dOpts := []transport.DialOption{
+		transport.WithStream(),
+	}
+
+	if opts.DialTimeout >= 0 {
+		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout, opts.RequestTimeout, opts.RequestTimeout))
+	}
+
+	conn, err := self.pool.Get(node.Address, dOpts...)
+	if err != nil {
+		return nil, errors.InternalServerError("volts.client", err)
+	}
+
+	// 获取请求消息载体
+	reqMsg := transport.GetMessageFromPool()
+	defer transport.PutMessageToPool(reqMsg)
+
+	reqMsg.SetMessageType(transport.MT_REQUEST)
+	reqMsg.SetSerializeType(self.config.Serialize)
+
+	// init header
+	for k, v := range req.Header() {
+		reqMsg.Header[k] = v[0]
+	}
+	md, ok := metadata.FromContext(ctx)
+	if ok {
+		for k, v := range md {
+			reqMsg.Header[k] = v
+		}
+	}
+
+	// set timeout in nanoseconds
+	reqMsg.Header["Timeout"] = fmt.Sprintf("%d", opts.RequestTimeout)
+	// set the content type for the request
+	reqMsg.Header["Content-Type"] = req.ContentType()
+	// set the accept header
+	reqMsg.Header["Accept"] = req.ContentType()
+
+	reqMsg.Path = req.Method()
+	data := req.Body().Data.Bytes()
+	if len(data) > 1024 && self.config.CompressType == transport.Gzip {
+		data, err = transport.Zip(data)
+		if err != nil {
+			self.pool.Release(conn, nil)
+			return nil, err
+		}
+		reqMsg.SetCompressType(self.config.CompressType)
+	}
+	reqMsg.Payload = data
+
+	// 使用带超时的 channel 做 send/recv
+	type callResult struct {
+		resp *rpcResponse
+		err  error
+	}
+	ch := make(chan callResult, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- callResult{nil, errors.InternalServerError("volts.client", "panic recovered: %v", r)}
+			}
+		}()
+
+		// 发送请求
+		if err := conn.Send(reqMsg); err != nil {
+			ch <- callResult{nil, err}
+			return
+		}
+
+		// 接收响应
+		respMsg := transport.GetMessageFromPool()
+		if err := conn.Recv(respMsg); err != nil {
+			transport.PutMessageToPool(respMsg)
+			ch <- callResult{nil, err}
+			return
+		}
+
+		// 解码响应
+		bd := body.New(codec.IdentifyCodec(respMsg.SerializeType()))
+		bd.Data.Write(respMsg.Payload)
+		resp := &rpcResponse{
+			contentType: respMsg.SerializeType(),
+			body:        bd,
+		}
+		transport.PutMessageToPool(respMsg)
+
+		ch <- callResult{resp, nil}
+	}()
+
+	select {
+	case result := <-ch:
+		if result.err != nil {
+			// 有错误，关闭连接不复用
+			self.pool.Release(conn, result.err)
+			return nil, result.err
+		}
+		// 成功，归还连接到池中复用
+		self.pool.Release(conn, nil)
+		return result.resp, nil
+	case <-ctx.Done():
+		// 超时，关闭连接
+		self.pool.Release(conn, ctx.Err())
+		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
+	}
 }
 
 // next returns an iterator for the next nodes to call
@@ -342,7 +288,7 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 
 		// crude return method
 		return func() (*registry.Node, error) {
-			return nodes[time.Now().Unix()%int64(len(nodes))], nil
+			return nodes[time.Now().UnixNano()%int64(len(nodes))], nil
 		}, nil
 	}
 	// only get the things that are of http protocol

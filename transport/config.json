@@ -1,0 +1,16 @@
+{
+  "logger": {
+    "acme": {
+      "level": 9
+    },
+    "dataset": {
+      "level": 9
+    },
+    "transport": {
+      "level": 9
+    },
+    "volts": {
+      "level": 9
+    }
+  }
+}

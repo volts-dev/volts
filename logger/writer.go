@@ -88,29 +88,25 @@ func (self *TWriterManager) write(level Level, msg string) error {
 // start logger chan reading.
 // when chan is not empty, write logs.
 func (self *TWriterManager) listen() {
-	for {
+	for wm := range self.msg {
 		// 如果不是异步则退出监听
 		if !self.asynchronous {
 			return
 		}
 
-		select {
-		case wm := <-self.msg:
-			// using level writer first
-			if wt, has := self.level_writer[wm.level]; has {
+		// using level writer first
+		if wt, has := self.level_writer[wm.level]; has {
+			err := wt.Write(wm.level, wm.msg)
+			if err != nil {
+				fmt.Println("ERROR, unable to WriteMsg:", err)
+			}
+		} else {
+			for _, wt := range self.writer {
 				err := wt.Write(wm.level, wm.msg)
 				if err != nil {
 					fmt.Println("ERROR, unable to WriteMsg:", err)
 				}
-			} else {
-				for _, wt := range self.writer {
-					err := wt.Write(wm.level, wm.msg)
-					if err != nil {
-						fmt.Println("ERROR, unable to WriteMsg:", err)
-					}
-				}
 			}
-
 		}
 	}
 }

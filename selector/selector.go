@@ -39,7 +39,7 @@ type (
 )
 
 var (
-	defaultSelector  = New()
+	defaultSelector  ISelector
 	log              = logger.New("selector")
 	ErrNotFound      = errors.New("not found")
 	ErrNoneAvailable = errors.New("service none available")

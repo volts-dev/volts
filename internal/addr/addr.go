@@ -3,10 +3,18 @@ package addr
 import (
 	"fmt"
 	"net"
+	"sync"
+	"time"
 )
 
 var (
 	privateBlocks []*net.IPNet
+
+	// 缓存本机 IP 列表，避免每次 RPC 调用都执行 net.Interfaces() 系统调用
+	localIPMu       sync.RWMutex
+	localIPStrings  map[string]bool // IP string -> true
+	localIPCacheAt  time.Time
+	localIPCacheTTL = 30 * time.Second
 )
 
 func init() {
@@ -36,37 +44,74 @@ func isPrivateIP(ipAddr string) bool {
 	return false
 }
 
-func LocalFormater(addrs ...string) []string {
-	for idx, addr := range addrs {
-		// extract the host
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			continue
-		}
+// cachedLocalIPs 返回缓存的本机 IP 字符串集合
+// 使用 30s TTL 缓存，避免频繁系统调用
+func cachedLocalIPs() map[string]bool {
+	localIPMu.RLock()
+	if localIPStrings != nil && time.Since(localIPCacheAt) < localIPCacheTTL {
+		ips := localIPStrings
+		localIPMu.RUnlock()
+		return ips
+	}
+	localIPMu.RUnlock()
 
-		// check if its localhost
-		if host == "localhost" {
-			addrs[idx] = net.JoinHostPort("127.0.0.1", port)
-			continue
-		}
+	localIPMu.Lock()
+	defer localIPMu.Unlock()
 
-		//host, err = Extract(host)
-		//if err != nil {
-		//	continue
-		//}
+	// double check
+	if localIPStrings != nil && time.Since(localIPCacheAt) < localIPCacheTTL {
+		return localIPStrings
+	}
 
-		for _, ip := range IPs() {
-			addr := ip.String()
-			if host == addr || host == "0.0.0.0" || host == "[::]" || host == "::" {
-				if ip.To4() != nil {
-					addrs[idx] = net.JoinHostPort("127.0.0.1", port)
-					break
-				} else if ip.To16() != nil {
-					addrs[idx] = net.JoinHostPort("::1", port)
-					break
-				}
+	ips := IPs()
+	m := make(map[string]bool, len(ips))
+	for _, ip := range ips {
+		m[ip.String()] = true
+	}
+	localIPStrings = m
+	localIPCacheAt = time.Now()
+	return m
+}
+
+// LocalFormat 将单个地址中的本机 IP 转换为 loopback 地址以获得最低延迟
+// 高性能版本：使用缓存的 IP 查找，无 slice 分配
+func LocalFormat(address string) string {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return address
+	}
+
+	// 快速路径：已经是 loopback
+	if host == "127.0.0.1" || host == "::1" {
+		return address
+	}
+
+	if host == "localhost" {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// 通配符地址
+	if host == "0.0.0.0" || host == "[::]" || host == "::" {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// 检查是否是本机 IP（使用缓存）
+	if cachedLocalIPs()[host] {
+		if ip := net.ParseIP(host); ip != nil {
+			if ip.To4() != nil {
+				return net.JoinHostPort("127.0.0.1", port)
 			}
+			return net.JoinHostPort("::1", port)
 		}
+	}
+
+	return address
+}
+
+// LocalFormater 批量版本，将地址列表中的本机 IP 转换为 loopback
+func LocalFormater(addrs ...string) []string {
+	for idx := range addrs {
+		addrs[idx] = LocalFormat(addrs[idx])
 	}
 
 	return addrs

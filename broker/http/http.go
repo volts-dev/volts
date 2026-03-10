@@ -104,7 +104,7 @@ func New(opts ...broker.Option) broker.IBroker {
 	defaultOpts = append(defaultOpts,
 		broker.WithName("http"),
 		broker.WithCodec(codec.JSON),
-		broker.WithRegistry(registry.Default()),
+		broker.WithRegistry(registry.NewNopRegistry()),
 		broker.WithContext(context.TODO()),
 	)
 

@@ -103,15 +103,12 @@ func (r *rpcStream) Recv(msg *transport.Message) error {
 		if errors.Is(err, io.EOF) && !r.isClosed() {
 			r.err = io.ErrUnexpectedEOF
 			r.Unlock()
-
-			return io.ErrUnexpectedEOF
+			return r.err
 		}
 
 		r.err = err
-
 		r.Unlock()
-
-		return err
+		return r.err
 	}
 
 	switch msg.MessageStatusType() {
@@ -149,7 +146,6 @@ func (r *rpcStream) Recv(msg *transport.Message) error {
 		}
 	*/
 	defer r.Unlock()
-
 	return r.err
 }
 

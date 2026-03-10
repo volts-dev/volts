@@ -129,7 +129,7 @@ func (self *Config) Init(opts ...Option) {
 }
 
 func (self *Config) Load() error {
-	if err := self.LoadToModel(self); err != nil {
+	if err := self.Config.Load(); err != nil {
 		return err
 	}
 
@@ -140,10 +140,6 @@ func (self *Config) Load() error {
 	}
 
 	return nil
-}
-
-func (self *Config) Save(immed ...bool) error {
-	return self.SaveFromModel(self, immed...)
 }
 
 func Debug() Option {

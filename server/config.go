@@ -52,7 +52,7 @@ type (
 
 		// Registry
 		RegistryType     string
-		RegistryHost     string
+		RegistryHost     []string
 		RegisterTTL      time.Duration `field:"register_ttl"` // The register expiry time
 		RegisterInterval time.Duration // The interval on which to register
 	}
@@ -97,7 +97,7 @@ func newConfig(opts ...Option) *Config {
 	// 同过截取配置初始化对象
 	// 初始化 registry
 	if cfg.Registry == nil {
-		if reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost)); reg != nil {
+		if reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost...)); reg != nil {
 			cfg.Init(WithRegistry(reg))
 		}
 	}
@@ -138,19 +138,10 @@ func (self *Config) Init(opts ...Option) {
 	if self.Debug {
 		self.Transport.Init(transport.Debug())
 		self.Router.Config().Init(vrouter.Debug())
-		if self.Registry == nil {
+		if self.Registry != nil {
 			self.Registry.Config().Init(registry.Debug())
 		}
 	}
-}
-
-func (self *Config) Load() error {
-	return self.LoadToModel(self)
-
-}
-
-func (self *Config) Save(immed ...bool) error {
-	return self.SaveFromModel(self, immed...)
 }
 
 // under debug mode the port will keep at 35999
@@ -159,14 +150,11 @@ func Debug() Option {
 		cfg.Debug = true
 		cfg.Router.Config().RequestPrinter = true
 		cfg.Router.Config().RouterTreePrinter = true
-		if cfg.Transport.String() == "Http Transport" {
+		if _, ok := cfg.Transport.(*transport.HttpTransport); ok {
 			cfg.Address = ":35999"
-			//cfg.Transport.Init(transport.Addrs(":35999"))
 		} else {
 			cfg.Address = ":45999"
-			//cfg.Transport.Init(transport.Addrs(":45999"))
 		}
-		//...
 	}
 }
 
@@ -233,7 +221,7 @@ func WithRegistry(r registry.IRegistry) Option {
 		r.Init(registry.WithConfigPrefixName(cfg.String()))
 		cfg.Registry = r
 		cfg.RegistryType = r.Config().Name
-		///cfg.RegistryHost     = r.Config(). // FIXME
+		cfg.RegistryHost = r.Config().Addrs
 
 		// Update Broker
 		if cfg.Broker != nil {

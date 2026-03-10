@@ -68,7 +68,7 @@ func newConfig(opts ...Option) *Config {
 	config.Register(cfg)
 
 	if cfg.Registry == nil {
-		cfg.Registry = registry.Default()
+		cfg.Registry = registry.NewNopRegistry()
 		cfg.RegistryCacher = cacher.New(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
 	}
 
@@ -99,7 +99,7 @@ func (self *GroupConfig) Init(opts ...GroupOption) {
 }
 
 func (self *Config) Load() error {
-	if err := self.LoadToModel(self); err != nil {
+	if err := self.Config.Load(); err != nil {
 		return err
 	}
 
@@ -108,10 +108,6 @@ func (self *Config) Load() error {
 	}
 
 	return nil
-}
-
-func (self *Config) Save(immed ...bool) error {
-	return self.SaveFromModel(self, immed...)
 }
 
 func Debug() Option {

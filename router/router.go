@@ -40,7 +40,7 @@ type (
 	TRouter struct {
 		sync.RWMutex
 		// router is a group set
-		TGroup
+		*TGroup
 		//
 		config *Config
 		// 中间件
@@ -92,7 +92,7 @@ func Validate(e *registry.Endpoint) error {
 func New(opts ...Option) *TRouter {
 	cfg := newConfig(opts...)
 	router := &TRouter{
-		TGroup: *NewGroup(
+		TGroup: NewGroup(
 			WithStatic(), /* 支持静态文件 */
 		),
 		config:      cfg,
@@ -314,7 +314,6 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	coder := codec.IdentifyCodec(st)
 	if coder == nil {
 		w.WriteHeader(transport.StatusForbidden)
-		//w.Write([]byte("can not find codec for " + st.String()))
 		w.Write([]byte{})
 		return
 	}
@@ -323,7 +322,6 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	if route == nil {
 		w.WriteHeader(transport.StatusNotFound)
 		w.Write([]byte{})
-		//w.Write([]byte("rpc: can't match route " + serviceName))
 		return
 	} else {
 		// 初始化Context
@@ -377,8 +375,6 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		}
 		log.Dbg("aa", string(res.Payload))*/
 	}
-
-	return
 }
 
 func (self *TRouter) route(route *route, ctx IContext) {

@@ -454,7 +454,6 @@ func (self *TServer) Start() error {
 
 		// only process if it exists
 		if cfg.RegisterInterval > time.Duration(0) {
-			// new ticker
 			t = time.NewTicker(cfg.RegisterInterval)
 		}
 

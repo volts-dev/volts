@@ -10,7 +10,6 @@ import (
 
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/config"
-	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
@@ -147,7 +146,7 @@ type (
 
 		// Registry
 		RegistryType string
-		RegistryHost string
+		RegistryHost []string
 
 		// Selector
 		SelectorStrategy string
@@ -159,8 +158,7 @@ type (
 
 func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
-		Name: "client",
-		//Config:    config.Default(),
+		Name:      "client",
 		Logger:    log,
 		Transport: tr,
 		Retries:   3,
@@ -184,9 +182,6 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		SelectorStrategy: "random",
 	}
 
-	//if cfg.Name == "" {
-	//	cfg.Name = "client"
-	//}
 	cfg.Init(opts...)
 
 	config.Register(cfg)
@@ -213,10 +208,10 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
 
 	// 初始化 registry
-	reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost))
+	reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost...))
 	if reg != nil {
 		cfg.Registry = reg
-		cfg.Selector = selector.Default(
+		cfg.Selector = selector.New(
 			selector.WithConfigPrefixName(cfg.String()), // 配置路径
 			selector.Registry(cfg.Registry),
 			selector.WithStrategy(cfg.SelectorStrategy),
@@ -240,14 +235,8 @@ func (self *Config) Init(opts ...Option) {
 			opt(self)
 		}
 	}
-}
 
-func (self *Config) Load() error {
-	return self.LoadToModel(self)
-}
-
-func (self *Config) Save(immed ...bool) error {
-	return self.SaveFromModel(self, immed...)
+	self.Save()
 }
 
 // 增加超时到60s
@@ -353,6 +342,8 @@ func WithSerializeType(st codec.SerializeType) Option {
 func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
+		cfg.RegistryType = r.Config().Name
+		cfg.RegistryHost = r.Config().Addrs
 		// set in the selector
 		if cfg.Selector != nil {
 			cfg.Selector.Init(selector.Registry(r))
@@ -360,10 +351,11 @@ func WithRegistry(r registry.IRegistry) Option {
 	}
 }
 
-func WithRegistries(typ string, Host string) Option {
+func WithRegistries(typ string, Hosts ...string) Option {
 	return func(cfg *Config) {
+		cfg.Init(WithRegistry(registry.Use(typ, registry.Addrs(Hosts...))))
 		cfg.RegistryType = typ
-		cfg.RegistryHost = Host
+		cfg.RegistryHost = Hosts
 	}
 }
 
@@ -420,7 +412,7 @@ func WithPrintRequest(all ...bool) Option {
 // 固定服务器列表
 func WithHost(address ...string) Option {
 	return func(cfg *Config) {
-		cfg.CallOptions.Address = append(cfg.CallOptions.Address, addr.LocalFormater(address...)...)
+		cfg.CallOptions.Address = append(cfg.CallOptions.Address, address...)
 	}
 }
 

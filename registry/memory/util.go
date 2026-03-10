@@ -46,9 +46,7 @@ func serviceToRecord(s *registry.Service, ttl time.Duration) *record {
 	}
 
 	endpoints := make([]*registry.Endpoint, len(s.Endpoints))
-	for i, e := range s.Endpoints {
-		endpoints[i] = e
-	}
+	copy(endpoints, s.Endpoints)
 
 	return &record{
 		Name:      s.Name,

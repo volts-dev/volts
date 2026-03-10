@@ -114,7 +114,7 @@ func Use(name string, opts ...Option) IRegistry {
 		return reg
 	}
 
-	return newNopRegistry()
+	return NewNopRegistry()
 }
 
 // NopRegistry as default registry
@@ -122,7 +122,7 @@ func Default(new ...IRegistry) IRegistry {
 	if new != nil {
 		defaultRegistry = new[0]
 	} else if defaultRegistry == nil {
-		defaultRegistry = newNopRegistry()
+		defaultRegistry = NewNopRegistry()
 	}
 
 	return defaultRegistry

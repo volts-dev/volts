@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -51,15 +52,11 @@ type (
 	}
 
 	Config struct {
-		//name string
-		//fmt        *format
-		//models     sync.Map
 		AutoCreateFile bool `field:"-"`
-		//Mode       ModeType
-		//FileName   string
-		Debug   bool
-		core    *core // 配置文件核心 为了支持继承nil指针问题
-		changed bool
+		Debug          bool
+		core           *core // 配置文件核心 为了支持继承nil指针问题
+		changed        bool
+		model          IConfig `field:"-"`
 	}
 
 	IConfig interface {
@@ -69,7 +66,7 @@ type (
 	}
 
 	iConfig interface {
-		checkSelf(c *Config, cfg IConfig) // 检测自己是否被赋值
+		checkSelf(cfg IConfig) // 检测自己是否被赋值
 	}
 )
 
@@ -134,6 +131,10 @@ func (self *Config) Core() *core {
 
 // 注册添加其他配置
 func (self *Config) Register(cfg IConfig) {
+	if c, ok := cfg.(iConfig); ok {
+		c.checkSelf(cfg)
+	}
+
 	cfgStr := cfg.String()
 	if cfgStr == "" {
 		return
@@ -141,22 +142,22 @@ func (self *Config) Register(cfg IConfig) {
 
 	core := self.Core()
 
-	if !core.fmt.v.InConfig(cfgStr) {
-		// 保存配置到core
-		err := cfg.Save()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// 保存配置到文件
-		err = self.SaveToFile()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
 	// 直接覆盖
 	core.models.Store(cfgStr, cfg)
+
+	//if !core.fmt.v.InConfig(cfgStr) {
+	// 保存配置到core
+	err := cfg.Save()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 保存配置到文件
+	err = self.SaveToFile()
+	if err != nil {
+		log.Fatal(err)
+	}
+	//}
 
 	// 加载配置
 	if err := cfg.Load(); err != nil {
@@ -166,6 +167,12 @@ func (self *Config) Register(cfg IConfig) {
 
 func (self *Config) Unregister(cfg IConfig) {
 	self.Core().models.Delete(cfg.String())
+
+	// 保存配置到文件
+	err := self.SaveToFile()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 // config: the config struct with binding the options
@@ -254,6 +261,26 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 	return nil
 }
 
+func (self *Config) checkSelf(cfg IConfig) {
+	if self.model == nil {
+		self.model = cfg
+	}
+}
+
+func (self *Config) Load() error {
+	if self.model != nil {
+		return self.LoadToModel(self.model)
+	}
+	return nil
+}
+
+func (self *Config) Save(immed ...bool) error {
+	if self.model != nil {
+		return self.SaveFromModel(self.model, immed...)
+	}
+	return nil
+}
+
 func (self *Config) LoadToModel(model IConfig) error {
 	core := self.Core()
 
@@ -288,6 +315,8 @@ func (self *Config) SaveToFile(opts ...Option) error {
 		core.FileName = CONFIG_FILE_NAME
 	}
 
+	core.fmt.RWMutex.Lock()
+	defer core.fmt.RWMutex.Unlock()
 	core.fmt.v.SetConfigFile(filepath.Join(AppPath, core.FileName))
 	return core.fmt.v.WriteConfig()
 }
@@ -299,8 +328,18 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 
 	for k, v := range opts {
 		// 过滤自己
-		if strings.ToLower("config") == strings.ToLower(k) {
+		if strings.EqualFold("config", k) {
 			continue
+		}
+
+		// 跳过零值/空值，不写入配置文件
+		if isZeroValue(v) {
+			continue
+		}
+
+		// time.Duration 保存为毫秒值，提高可读性
+		if d, ok := v.(time.Duration); ok {
+			v = d.Milliseconds()
 		}
 
 		self.SetValue(strings.Join([]string{model.String(), k}, "."), v)
@@ -315,6 +354,33 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 	}
 
 	return nil
+}
+
+// isZeroValue 判断值是否为零值/空值
+func isZeroValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.String:
+		return rv.Len() == 0
+	case reflect.Bool:
+		return !rv.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return rv.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return rv.Float() == 0
+	case reflect.Slice, reflect.Map, reflect.Array:
+		return rv.Len() == 0
+	case reflect.Ptr, reflect.Interface:
+		return rv.IsNil()
+	}
+
+	return false
 }
 
 func (self *Config) GetBool(field string, defaultValue bool) bool {

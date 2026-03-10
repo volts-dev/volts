@@ -49,13 +49,7 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
-func (self *Config) Load() error {
-	return self.LoadToModel(self)
-}
 
-func (self *Config) Save(immed ...bool) error {
-	return self.SaveFromModel(self, immed...)
-}
 
 func Debug() Option {
 	return func(cfg *Config) {

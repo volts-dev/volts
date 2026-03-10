@@ -16,14 +16,14 @@ import (
 /*
 tree 负责路由树的解析,排序,匹配
 实现前面加类型
-'/web/content/<string:xmlid>',
-'/web/content/<string:xmlid>/<string:filename>',
-'/web/content/<int:id>',
-'/web/content/<int:id>/<string:filename>',
-'/web/content/<int:id>-<string:unique>',
-'/web/content/<int:id>-<string:unique>/<string:filename>',
-'/web/content/<string:model>/<int:id>/<string:field>',
-'/web/content/<string:model>/<int:id>/<string:field>/<string:filename>'
+'/web/content/{string:xmlid}',
+'/web/content/{string:xmlid}/{string:filename}',
+'/web/content/{int:id}',
+'/web/content/{int:id}/{string:filename}',
+'/web/content/{int:id}-{string:unique}',
+'/web/content/{int:id}-{string:unique}/{string:filename}',
+'/web/content/{string:model}/{int:id}/{string:field}',
+'/web/content/{string:model}/{int:id}/{string:field}/{string:filename}'
 */
 const (
 	StaticNode  NodeType = iota // static, should equal
@@ -35,8 +35,8 @@ const (
 	NumberType
 	CharType
 
-	LBracket = '<'
-	RBracket = '>'
+	LBracket = '{'
+	RBracket = '}'
 )
 
 var (
@@ -87,6 +87,7 @@ type (
 		Path        string
 		Level       int // #动态Node排序等级 /.../ 之间的Nodes越多等级越高
 		regexp      *regexp.Regexp
+		Values      []string // For enum values like [read|write]
 	}
 
 	// safely tree
@@ -167,32 +168,30 @@ func (self *TTree) Init(opts ...ConfigOption) {
 }
 
 func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
+	self.RLock()
+	defer self.RUnlock()
+
 	services = make(map[*TGroup][]*registry.Endpoint)
 	validator := make(map[string]*route)
-	var match func(method string, i int, node *treeNode)
-	match = func(method string, i int, node *treeNode) {
-		for _, c := range node.Children {
-			if c.Route != nil && c.Route.group != nil {
-				grp := c.Route.group
-				// TODO 检测
-				if _, ok := validator[c.Route.Path]; !ok {
-					//
-				}
-
-				if eps, has := services[grp]; has {
-					services[grp] = append(eps, RouteToEndpiont(c.Route))
-				} else {
-					services[grp] = []*registry.Endpoint{RouteToEndpiont(c.Route)}
-				}
+	var walk func(node *treeNode)
+	walk = func(node *treeNode) {
+		if node.Route != nil && node.Route.group != nil && node.Route.group.config.IsService {
+			grp := node.Route.group
+			// TODO 检测
+			if _, ok := validator[node.Route.Path]; !ok {
+				//
 			}
-			match(method, i+1, c)
+
+			services[grp] = append(services[grp], RouteToEndpiont(node.Route))
+		}
+
+		for _, c := range node.Children {
+			walk(c)
 		}
 	}
 
-	for method, node := range self.root {
-		if len(node.Children) > 0 {
-			match(method, 1, node)
-		}
+	for _, node := range self.root {
+		walk(node)
 	}
 
 	return services
@@ -382,6 +381,23 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 
 		isLast := strings.IndexByte(path, delimitChar) == -1
 		if (isLast || len(node.Children) == 0) && node.Route != nil { // !NOTE! 匹配到最后一个条件
+			if !validType(path, node.ContentType) {
+				return nil
+			}
+
+			if len(node.Values) > 0 {
+				matched := false
+				for _, v := range node.Values {
+					if path == v {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return nil
+				}
+			}
+
 			*params = append(*params, param{node.Text[1:], path})
 			return node
 		} else { // !NOTE! 匹配回溯 当匹配进入错误子节点返回nil到父节点重新匹配父节点
@@ -396,6 +412,19 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 
 					if !validType(path[:idx], node.ContentType) {
 						continue
+					}
+
+					if len(node.Values) > 0 {
+						matched := false
+						for _, v := range node.Values {
+							if path[:idx] == v {
+								matched = true
+								break
+							}
+						}
+						if !matched {
+							continue
+						}
 					}
 
 					h := r.matchNode(c, path[idx:], delimitChar, params)
@@ -484,155 +513,159 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 	}
 
 	var (
-		i, startOffset int // i 游标 J 上次标记
-		bracket        int
-		level          int       // #Node的 排序等级
-		target         *treeNode // 记录等级的Node 一般为/ 开始的第一个动态
+		i, startOffset int
+		level          int
+		target         *treeNode
 		node           *treeNode
 	)
-	// 默认
 	nodes := make([]*treeNode, 0)
 	isDyn := false
 	l := len(path)
-	//j = i - 1 // 当i==0时J必须小于它
-	for ; i < l; i++ {
+
+	for i = 0; i < l; i++ {
 		switch path[i] {
 		case delimitChar:
-			// 创建Text:'/' Node
-			if bracket == 0 && i > startOffset {
-				//if path[j] == '/' {
-				//	nodes = append(nodes, &treeNode{Type: StaticNode, Text: string(path[j])})
-				//}
-				//j++
-				nodes = append(nodes, &treeNode{Type: StaticNode, Level: 0, Text: path[startOffset:i]})
-				startOffset = i
+			if i > startOffset {
+				nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset:i]})
 			}
-
-			// # 重置计数
+			startOffset = i
 			target = nil
-			level = 0 // #开始计数
+			level = 0
 
 		case LBracket:
-			bracket = 1
+			// Save static part before bracket
+			if i > startOffset {
+				nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset:i]})
+			}
 
-		case ':':
+			// Find closing bracket
+			start := i + 1
+			bracketLevel := 1
+			for i++; i < l && bracketLevel > 0; i++ {
+				if path[i] == LBracket {
+					bracketLevel++
+				} else if path[i] == RBracket {
+					bracketLevel--
+				}
+			}
+			if bracketLevel > 0 {
+				panic(fmt.Sprintf("lack of %v", string(RBracket)))
+			}
+
+			content := path[start : i-1]
+			// i now points to character after RBracket
+
+			// Parse content: {name}, {name:type}, {name:type[pattern]}, {name:[pattern]}, {type:name}
+			var name, typStr, pattern string
+			if idx := strings.Index(content, ":"); idx != -1 {
+				p1 := content[:idx]
+				p2 := content[idx+1:]
+
+				// Format: {name:type} or {name:type[pattern]} or {name:[pattern]}
+				name = p1
+				if bIdx := strings.Index(p2, "["); bIdx != -1 {
+					typStr = p2[:bIdx]
+					pattern = p2[bIdx:]
+				} else {
+					typStr = p2
+				}
+			} else {
+				// Format: {name}
+				name = content
+			}
+
+			// Further handle pattern if it's like {name:[pattern]}
+			if name != "" && strings.ContainsAny(name, "()[]|*+?.") {
+				// Old style format check: if name contains regex chars, it's actually a pattern
+				pattern = name
+				name = "var"
+			}
+
 			var typ ContentType = AllType
-			if path[i-1] == LBracket { //#like (:var)
-				// 添加变量前的静态字符节点
-				nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
-				bracket = 1
-			} else {
-				// #为变量区分数据类型
-				str := path[startOffset : i-bracket] // #like /abc1(string|upper:var)
-				idx := strings.Index(str, string(LBracket))
-				if idx == -1 {
-					log.Fatalf("expect a %s near path %s position %d~%d", path, string(LBracket), startOffset, i)
+			switch typStr {
+			case "int":
+				typ = NumberType
+			case "string":
+				typ = CharType
+			}
+
+			if pattern != "" {
+				if strings.HasPrefix(pattern, "[") && strings.HasSuffix(pattern, "]") {
+					pattern = pattern[1 : len(pattern)-1]
 				}
-				nodes = append(nodes, &treeNode{Type: StaticNode, Text: str[:idx]})
-				str = str[idx+1:]
-				switch str {
-				case "int":
+
+				// Optimize common regex patterns to VariantNode
+				isRegex := true
+				var enumValues []string
+
+				if pattern == "0-9]+" || pattern == "\\d+" {
 					typ = NumberType
-				case "string":
+					isRegex = false
+				} else if pattern == "a-z]+" || pattern == "A-Za-z]+" || pattern == "a-zA-Z]+" {
 					typ = CharType
-				default:
-					typ = AllType
-				}
-				bracket = 1
-			}
-
-			startOffset = i
-			var (
-				regex string
-				start = -1
-			)
-
-			if bracket == 1 {
-				// 开始记录Pos
-				for ; i < l && RBracket != path[i]; i++ { // 移动Pos到")" 遇到正则字符标记起
-					if start == -1 && utils.IsSpecialByte(path[i]) { // 如果是正则
-						start = i
-					}
-				}
-				if path[i] != RBracket {
-					panic(fmt.Sprintf("lack of %v", RBracket))
+					isRegex = false
+				} else if !strings.ContainsAny(pattern, "()[]*+?.^$\\") {
+					// Treat as enum pattern like "read|write"
+					enumValues = strings.Split(pattern, "|")
+					isRegex = false
 				}
 
-				if start > -1 {
-					regex = path[start:i] //正则内容
+				if isRegex {
+					node = &treeNode{Type: RegexpNode, regexp: regexp.MustCompile("^(" + pattern + ")$"), Text: ":" + name}
+				} else {
+					node = &treeNode{Type: VariantNode, Level: level + 1, ContentType: typ, Values: enumValues, Text: ":" + name}
 				}
 			} else {
-				i = i + 1
-				for ; i < l && utils.IsAlnumByte(path[i]); i++ {
-				}
+				node = &treeNode{Type: VariantNode, Level: level + 1, ContentType: typ, Text: ":" + name}
 			}
 
-			if len(regex) > 0 { // 正则
-				node = &treeNode{Type: RegexpNode, regexp: regexp.MustCompile("(" + regex + ")"), Text: path[startOffset : i-len(regex)]}
-				nodes = append(nodes, node)
-			} else { // 变量
-				node = &treeNode{Type: VariantNode, Level: level + 1, ContentType: typ, Text: path[startOffset:i]}
-				nodes = append(nodes, node)
+			nodes = append(nodes, node)
+			isDyn = true
+
+			// Level logic
+			if level == 0 {
+				target = node
 			}
+			level++
 
-			isDyn = true    // #标记 Route 为动态
-			i = i + bracket // #剔除")"字符 bracket=len(“)”)
-			startOffset = i
-
-			// 当计数器遇到/或者Url末尾时将记录保存于Node中
-			if target != nil && ((i == l) || (i != l && path[startOffset+1] == delimitChar)) {
+			if (i == l) || (i < l && path[i] == delimitChar) {
 				level++
 				target.Level = level
-
-				// # 重置计数
 				target = nil
 				level = 0
 			}
 
-			if i == l {
-				return nodes, isDyn
-			}
-
-			// #计数滴答
-			// 放置在 i == l 后 确保表达式2比1多一个层级
-			// @/(int:id1)-(:unique2)
-			// @/(:id3)-(:unique3)/(:filename)
-			if (i != l && path[startOffset] != delimitChar) || level != 0 {
-				if level == 0 {
-					target = node
-				}
-
-				level++
-			}
+			startOffset = i
+			i-- // Adjust for loop i++
 
 		case '*':
-			nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset : i-bracket]})
+			if i > startOffset {
+				nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset:i]})
+			}
 			startOffset = i
-			//if bracket == 1 {
-			//	for ; i < l && RBracket == path[i]; i++ {
-			//	}
-			//} else {
-			i = i + 1
+			i++
 			for ; i < l && utils.IsAlnumByte(path[i]); i++ {
 			}
-			//}
 			nodes = append(nodes, &treeNode{Type: AnyNode, Level: -1, Text: path[startOffset:i]})
-			isDyn = true    // 标记 Route 为动态
-			i = i + bracket // bracket=len(“)”)
+			isDyn = true
 			startOffset = i
-			if i == l {
+			i--
+			if i == l-1 {
 				return nodes, isDyn
 			}
 
 		default:
-			bracket = 0
+			// Normal character
 		}
 	}
 
-	nodes = append(nodes, &treeNode{
-		Type: StaticNode,
-		Text: path[startOffset:i],
-	})
+	if target != nil {
+		target.Level = level
+	}
+
+	if startOffset < l {
+		nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset:l]})
+	}
 
 	return nodes, isDyn
 }

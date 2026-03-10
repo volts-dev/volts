@@ -51,7 +51,7 @@ func (t *tcpTransportSocket) Recv(m *Message) error {
 
 	// set timeout if its greater than 0
 	if t.ReadTimeout > time.Duration(0) {
-		t.conn.SetDeadline(time.Now().Add(t.ReadTimeout))
+		t.conn.SetReadDeadline(time.Now().Add(t.ReadTimeout))
 	}
 
 	return m.Decode(t.conn) //return t.dec.Decode(&m)
@@ -60,7 +60,7 @@ func (t *tcpTransportSocket) Recv(m *Message) error {
 func (t *tcpTransportSocket) Send(m *Message) error {
 	// set timeout if its greater than 0
 	if t.WriteTimeout > time.Duration(0) {
-		t.conn.SetDeadline(time.Now().Add(t.WriteTimeout))
+		t.conn.SetWriteDeadline(time.Now().Add(t.WriteTimeout))
 	}
 
 	if _, err := t.conn.Write(m.Encode()); err != nil {

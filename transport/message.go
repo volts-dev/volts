@@ -146,71 +146,71 @@ func (self Bom) CheckMagicNumber() bool {
 
 // Version returns version of rpc protocol.
 func (self Bom) Version() byte {
-	return self[1]
+	return (self[1] & 0xF0) >> 4
 }
 
 // SetVersion sets version for this Bom.
 func (self *Bom) SetVersion(v byte) {
-	self[1] = v
+	self[1] = (self[1] &^ 0xF0) | ((v << 4) & 0xF0)
+}
+
+// MessageStatusType returns the message status type.
+func (self Bom) MessageStatusType() MessageStatusType {
+	return MessageStatusType(self[1] & 0x0F)
+}
+
+// SetMessageStatusType sets message status type.
+func (self *Bom) SetMessageStatusType(mt MessageStatusType) {
+	self[1] = (self[1] &^ 0x0F) | (byte(mt) & 0x0F)
 }
 
 // MessageType returns the message type.
 func (self Bom) MessageType() MessageType {
-	return MessageType(self[2]&0x80) >> 7
+	return MessageType((self[2] & 0xC0) >> 6)
 }
 
 // SetMessageType sets message type.
 func (self *Bom) SetMessageType(mt MessageType) {
-	self[2] = self[2] | (byte(mt) << 7)
+	self[2] = (self[2] &^ 0xC0) | ((byte(mt) << 6) & 0xC0)
 }
 
 // IsHeartbeat returns whether the message is heartbeat message.
 func (self Bom) IsHeartbeat() bool {
-	return self[2]&0x40 == 0x40
+	return self[2]&0x20 == 0x20
 }
 
 // SetHeartbeat sets the heartbeat flag.
 func (self *Bom) SetHeartbeat(hb bool) {
 	if hb {
-		self[2] = self[2] | 0x40
-	} else {
-		self[2] = self[2] &^ 0x40
-	}
-}
-
-// IsOneway returns whether the message is one-way message.
-// If true, server won't send responses.
-func (self Bom) IsOneway() bool {
-	return self[2]&0x20 == 0x20
-}
-
-// SetOneway sets the oneway flag.
-func (self *Bom) SetOneway(oneway bool) {
-	if oneway {
 		self[2] = self[2] | 0x20
 	} else {
 		self[2] = self[2] &^ 0x20
 	}
 }
 
+// IsOneway returns whether the message is one-way message.
+// If true, server won't send responses.
+func (self Bom) IsOneway() bool {
+	return self[2]&0x10 == 0x10
+}
+
+// SetOneway sets the oneway flag.
+func (self *Bom) SetOneway(oneway bool) {
+	if oneway {
+		self[2] = self[2] | 0x10
+	} else {
+		self[2] = self[2] &^ 0x10
+	}
+}
+
 // CompressType returns compression type of messages.
 func (self Bom) CompressType() CompressType {
-	return CompressType((self[2] & 0x1C) >> 2)
+	return CompressType((self[2] & 0x0E) >> 1)
 }
 
 // SetCompressType sets the compression type.
 func (self *Bom) SetCompressType(ct CompressType) {
-	self[2] = (self[2] &^ 0x1C) | ((byte(ct) << 2) & 0x1C)
-}
-
-// MessageStatusType returns the message status type.
-func (self Bom) MessageStatusType() MessageStatusType {
-	return MessageStatusType(self[2] & 0x03)
-}
-
-// SetMessageStatusType sets message status type.
-func (self *Bom) SetMessageStatusType(mt MessageStatusType) {
-	self[2] = (self[2] &^ 0x03) | (byte(mt) & 0x03)
+	self[2] = (self[2] &^ 0x0E) | ((byte(ct) << 1) & 0x0E)
 }
 
 // SerializeType returns serialization type of payload.
@@ -317,7 +317,7 @@ func (m Message) Encode() []byte {
 	binary.BigEndian.PutUint32(data[bgn:end], uint32(spL))
 	copy(data[end:end+spL], utils.StringToSliceByte(m.Header["ServicePath"]))
 
-	bgn = end
+	bgn = end + spL
 	binary.BigEndian.PutUint32(data[bgn:bgn+4], uint32(smL))
 	copy(data[bgn+4:metaStart], utils.StringToSliceByte(m.Header["ServiceMethod"]))
 
@@ -332,18 +332,7 @@ func (m Message) Encode() []byte {
 
 // Decode decodes a message from reader.
 func (m *Message) Decode(r io.Reader) error {
-	var err error
-	// validate rest length for each step?
-
-	//buf := make([]byte, 1)
-	/*	_, err = r.Read(m.Bom[:1])
-		if err != nil {
-			log.Dbg("TMessage.Decode", m.Bom[:], err.Error())
-			return err
-		}*/
-
-	// parse Bom
-	_, err = io.ReadFull(r, m.Bom[:1])
+	_, err := io.ReadFull(r, m.Bom[:1])
 	if err != nil {
 		return err
 	}

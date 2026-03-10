@@ -30,18 +30,29 @@ type (
 		Endpoints []*registry.Endpoint
 	}
 
-	memRegistry struct {
-		config *registry.Config
-
+	registryState struct {
 		records  map[string]map[string]*record
 		watchers map[string]*memWatcher
 
 		sync.RWMutex
 	}
+
+	memRegistry struct {
+		config *registry.Config
+		*registryState
+	}
+)
+
+var (
+	state = &registryState{
+		records:  make(map[string]map[string]*record),
+		watchers: make(map[string]*memWatcher),
+	}
 )
 
 func init() {
 	registry.Register("memory", New)
+	go state.ttlPrune()
 }
 
 func New(opts ...registry.Option) registry.IRegistry {
@@ -54,45 +65,53 @@ func New(opts ...registry.Option) registry.IRegistry {
 	cfg := registry.NewConfig(append(defaultOpts, opts...)...)
 
 	records := getServiceRecords(cfg.Context)
-	if records == nil {
-		records = make(map[string]map[string]*record)
-	}
 
 	reg := &memRegistry{
-		config:   cfg,
-		records:  records,
-		watchers: make(map[string]*memWatcher),
+		config:        cfg,
+		registryState: state,
 	}
 
-	go reg.ttlPrune()
+	if records != nil {
+		reg.Lock()
+		for name, record := range records {
+			if _, ok := reg.records[name]; !ok {
+				reg.records[name] = record
+				continue
+			}
+			for version, r := range record {
+				if _, ok := reg.records[name][version]; !ok {
+					reg.records[name][version] = r
+					continue
+				}
+			}
+		}
+		reg.Unlock()
+	}
 
 	return reg
 }
 
-func (m *memRegistry) ttlPrune() {
+func (m *registryState) ttlPrune() {
 	prune := time.NewTicker(ttlPruneTime)
 	defer prune.Stop()
 
-	for {
-		select {
-		case <-prune.C:
-			m.Lock()
-			for name, records := range m.records {
-				for version, record := range records {
-					for id, n := range record.Nodes {
-						if n.TTL != 0 && time.Since(n.LastSeen) > n.TTL {
-							log.Dbgf("Registry TTL expired for node %s of service %s", n.Id, name)
-							delete(m.records[name][version].Nodes, id)
-						}
+	for range prune.C {
+		m.Lock()
+		for name, records := range m.records {
+			for version, record := range records {
+				for id, n := range record.Nodes {
+					if n.TTL != 0 && time.Since(n.LastSeen) > n.TTL {
+						log.Dbgf("Registry TTL expired for node %s of service %s", n.Id, name)
+						delete(m.records[name][version].Nodes, id)
 					}
 				}
 			}
-			m.Unlock()
 		}
+		m.Unlock()
 	}
 }
 
-func (m *memRegistry) sendEvent(r *registry.Result) {
+func (m *registryState) sendEvent(r *registry.Result) {
 	m.RLock()
 	watchers := make([]*memWatcher, 0, len(m.watchers))
 	for _, w := range m.watchers {
