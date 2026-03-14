@@ -642,8 +642,8 @@ func (self *handler) reset() *handler {
 	// 执行中间件初始化
 	for _, handle := range self.funcs {
 		if handle.Middleware != nil {
-			if m, ok := handle.Middleware.(IMiddlewareRest); ok {
-				m.Rest()
+			if m, ok := handle.Middleware.(IMiddlewareReset); ok {
+				m.Reset()
 			}
 		}
 	}
