@@ -22,8 +22,11 @@ import (
 	"github.com/volts-dev/volts/router"
 )
 
-var defaultServer *TServer
-var log = logger.New("Server")
+var (
+	defaultServer     *TServer
+	defaultServerOnce sync.Once
+	log               = logger.New("Server")
+)
 
 type (
 	// Server is a simple volts server abstraction
@@ -74,9 +77,11 @@ func New(opts ...Option) *TServer {
 // 默认server实例
 // NOTE 引入server时defaultServer必须是nil，防止某些场景不需要server实例
 func Default(opts ...Option) *TServer {
-	if defaultServer == nil {
+	defaultServerOnce.Do(func() {
 		defaultServer = New(opts...)
-	} else {
+	})
+
+	if len(opts) > 0 {
 		defaultServer.Config().Init(opts...)
 	}
 
@@ -89,8 +94,10 @@ func (s *TServer) HandleEvent(e broker.IEvent) error {
 
 // 注册到服务发现
 func (self *TServer) Register() error {
+	self.Lock()
 	regSrv := self.services
 	config := self.config
+	self.Unlock()
 
 	regFunc := func(service *registry.Service) error {
 		// create registry options
@@ -240,9 +247,14 @@ func (self *TServer) Register() error {
 	self.config.Advertise = addr
 
 	if cacheService {
+		self.Lock()
 		self.services = servics
+		self.Unlock()
 	}
+
+	self.Lock()
 	self.registered = true
+	self.Unlock()
 
 	// 注册订阅
 	// Router can exchange messages on broker
@@ -290,9 +302,9 @@ func (self *TServer) Deregister() error {
 	var err error
 	var advt, host, port string
 
-	//self.RLock()
+	self.RLock()
 	config := self.config
-	//self.RUnlock()
+	self.RUnlock()
 
 	// check the advertise address first
 	// if it exists then use it, otherwise
@@ -339,14 +351,21 @@ func (self *TServer) Deregister() error {
 		return err
 	}
 
-	//self.Lock()
+	self.Lock()
 	self.services = nil
+	self.Unlock()
 
-	if !self.registered {
+	self.RLock()
+	registered := self.registered
+	self.RUnlock()
+
+	if !registered {
 		return nil
 	}
 
+	self.Lock()
 	self.registered = false
+	self.Unlock()
 
 	// 订阅事宜
 	// close the subscriber

@@ -207,6 +207,10 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 		opt(&options)
 	}
 
+	if addr == "" {
+		addr = self.config.Addrs
+	}
+
 	var l net.Listener
 	var err error
 	if self.config.EnableACME && self.config.ACMEProvider != nil {

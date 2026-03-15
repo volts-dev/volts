@@ -257,13 +257,20 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 
 		// # get the new context from pool
+		self.RLock()
 		p, has := self.httpCtxPool[route.Id]
-		if !has {
-			p = &sync.Pool{New: func() interface{} {
-				return NewHttpContext(self)
-			}}
+		self.RUnlock()
 
-			self.httpCtxPool[route.Id] = p
+		if !has {
+			self.Lock()
+			p, has = self.httpCtxPool[route.Id]
+			if !has {
+				p = &sync.Pool{New: func() interface{} {
+					return NewHttpContext(self)
+				}}
+				self.httpCtxPool[route.Id] = p
+			}
+			self.Unlock()
 		}
 
 		ctx := p.Get().(*THttpContext)
@@ -325,12 +332,21 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 	} else {
 		// 初始化Context
+		self.RLock()
 		p, has := self.rpcCtxPool[route.Id]
-		if !has { // TODO 优化
-			p = &sync.Pool{New: func() interface{} {
-				return NewRpcHandler(self)
-			}}
-			self.rpcCtxPool[route.Id] = p
+		self.RUnlock()
+
+		if !has {
+			self.Lock()
+			// Double check after acquiring write lock
+			p, has = self.rpcCtxPool[route.Id]
+			if !has {
+				p = &sync.Pool{New: func() interface{} {
+					return NewRpcHandler(self)
+				}}
+				self.rpcCtxPool[route.Id] = p
+			}
+			self.Unlock()
 		}
 
 		ctx := p.Get().(*TRpcContext)
@@ -398,9 +414,12 @@ func (self *TRouter) route(route *route, ctx IContext) {
 }
 
 func (self *TRouter) isClosed() bool {
-	// 直接检查通道是否已关闭
-	_, isOpen := <-self.exit
-	return !isOpen
+	select {
+	case <-self.exit:
+		return true
+	default:
+		return false
+	}
 }
 
 // 过滤自己

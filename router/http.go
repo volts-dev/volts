@@ -102,6 +102,7 @@ type (
 		inited       bool     // -- 初始化固定值保存进POOL
 		val          reflect.Value
 		typ          reflect.Type
+		mu           sync.Mutex
 	}
 )
 
@@ -159,16 +160,20 @@ func (self *THttpContext) Next() {
 
 // TODO 添加验证Request 防止多次解析
 func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
 	if self.methodParams != nil {
 		return self.methodParams
 	}
 
-	self.methodParams = NewParamsSet(self)
 	var useBlank bool
 	if len(blank) > 0 {
 		useBlank = blank[0]
 	}
-	if !useBlank && self.methodParams.Length() == 0 {
+
+	self.methodParams = NewParamsSet(self)
+	if !useBlank {
 		// # parse the data from GET method #
 		q := self.request.URL.Query()
 		for key := range q {
@@ -176,21 +181,24 @@ func (self *THttpContext) MethodParams(blank ...bool) *TParamsSet {
 		}
 
 		// # parse the data from POST method #
-		var err error
 		ct := self.request.Header().Get("Content-Type")
-		ct, _, err = mime.ParseMediaType(ct)
-		if err != nil {
-			logger.Err(err)
-			return self.methodParams
-		} else {
+		if ct != "" {
+			var err error
+			ct, _, err = mime.ParseMediaType(ct)
+			if err != nil {
+				logger.Err(err)
+				return self.methodParams
+			}
+
 			if ct == "multipart/form-data" {
-				self.request.ParseMultipartForm(int64(self.router.Config().UploadBuf) << 20) // 32m
+				// 32m
+				self.request.ParseMultipartForm(int64(self.router.Config().UploadBuf) << 20)
 			} else {
-				self.request.ParseForm() //#Go通过r.ParseForm之后，把用户POST和GET的数据全部放在了r.Form里面
+				// Go's ParseForm populates r.Form with both POST and GET data
+				self.request.ParseForm()
 			}
 
 			for key := range self.request.Form {
-				//Debug("key2:", key)
 				self.methodParams.SetByField(key, self.request.FormValue(key))
 			}
 		}
@@ -316,17 +324,28 @@ func (self *THttpContext) IP() (res []string) {
 	return
 }
 
-// RemoteAddr returns more real IP address of visitor.
+// RemoteAddr returns the most likely real IP address of the visitor.
+// NOTE: This trusts headers like X-Real-IP and X-Forwarded-For. 
+// In a production environment, ensure this is only used behind a trusted proxy.
 func (self *THttpContext) RemoteAddr() string {
-	addr := self.request.Header().Get("X-Real-IP")
-	if len(addr) == 0 {
-		addr = self.request.Header().Get("X-Forwarded-For")
-		if addr == "" {
-			addr = self.request.RemoteAddr
-			if i := strings.LastIndex(addr, ":"); i > -1 {
-				addr = addr[:i]
+	// Try common proxy headers first
+	for _, hdr := range []string{"X-Real-IP", "X-Forwarded-For", "X-ProxyUser-Ip"} {
+		if addr := self.request.Header().Get(hdr); addr != "" {
+			if hdr == "X-Forwarded-For" {
+				// X-Forwarded-For can contain a comma-separated list of IPs.
+				// The first one is usually the original client.
+				if i := strings.IndexByte(addr, ','); i > -1 {
+					return strings.TrimSpace(addr[:i])
+				}
 			}
+			return strings.TrimSpace(addr)
 		}
+	}
+
+	// Fallback to RemoteAddr from the network connection
+	addr := self.request.RemoteAddr
+	if i := strings.LastIndex(addr, ":"); i > -1 {
+		return addr[:i]
 	}
 	return addr
 }

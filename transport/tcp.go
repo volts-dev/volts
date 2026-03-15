@@ -69,6 +69,10 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 		o(&options)
 	}
 
+	if addr == "" {
+		addr = self.config.Addrs
+	}
+
 	var l net.Listener
 	var err error
 

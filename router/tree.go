@@ -203,6 +203,9 @@ func (self *TTree) AddRoute(route *route) error {
 		return nil
 	}
 
+	self.Lock()
+	defer self.Unlock()
+
 	if len(route.Methods) == 0 {
 		return fmt.Errorf("route methods cannot be empty")
 	}
@@ -237,6 +240,9 @@ func (self *TTree) DelRoute(path string, route *route) error {
 		return nil
 	}
 
+	self.Lock()
+	defer self.Unlock()
+
 	for _, method := range route.Methods {
 		n := self.root[method]
 		if n == nil {
@@ -255,7 +261,7 @@ func (self *TTree) DelRoute(path string, route *route) error {
 
 		// 层级插入Nodes的Node到Root
 		for idx := range nodes {
-			p = n.delNode(self, p, nodes, idx)
+			p = self.delNode(p, nodes, idx)
 		}
 	}
 
@@ -493,7 +499,7 @@ func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
 
 	// 层级插入Nodes的Node到Root
 	for idx := range nodes {
-		p = cn.addNode(self, p, nodes, idx, isHook)
+		p = self.addNode(p, nodes, idx, isHook)
 	}
 }
 
@@ -715,7 +721,7 @@ func (self *treeNode) Equal(node *treeNode) bool {
 }
 
 // add node nodes[i] to parent node p
-func (self *treeNode) addNode(tree *TTree, parent *treeNode, nodes []*treeNode, i int, isHook bool) *treeNode {
+func (self *TTree) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bool) *treeNode {
 	if len(parent.Children) == 0 {
 		parent.Children = make([]*treeNode, 0)
 	}
@@ -730,7 +736,7 @@ func (self *treeNode) addNode(tree *TTree, parent *treeNode, nodes []*treeNode, 
 					n.Route.CombineHandler(nodes[i].Route)
 				} else {
 					n.Route = nodes[i].Route
-					tree.Count.Inc()
+					self.Count.Inc()
 				}
 			}
 			return n
@@ -743,7 +749,7 @@ func (self *treeNode) addNode(tree *TTree, parent *treeNode, nodes []*treeNode, 
 	return nodes[i]
 }
 
-func (self *treeNode) delNode(tree *TTree, parent *treeNode, nodes []*treeNode, i int) *treeNode {
+func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode {
 	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
 	for _, n := range parent.Children {
 		if n.Equal(nodes[i]) {
@@ -751,7 +757,7 @@ func (self *treeNode) delNode(tree *TTree, parent *treeNode, nodes []*treeNode, 
 			if i == len(nodes)-1 {
 				// 剥离目标控制器
 				n.Route.StripHandler(nodes[i].Route)
-				tree.Count.Dec() // 递减计数器
+				self.Count.Dec() // 递减计数器
 			}
 			return n
 		}
