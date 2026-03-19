@@ -1,6 +1,6 @@
 module github.com/volts-dev/volts
 
-go 1.23.0
+go 1.24
 
 toolchain go1.24.2
 
@@ -9,16 +9,16 @@ toolchain go1.24.2
 require (
 	github.com/bytedance/sonic v1.15.0
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/go-viper/mapstructure/v2 v2.4.0
+	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.32.0
 	github.com/miekg/dns v1.1.65
 	github.com/mitchellh/hashstructure v1.1.0
-	github.com/refraction-networking/utls v1.6.7
+	github.com/refraction-networking/utls v1.8.2
 	github.com/spf13/viper v1.21.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/volts-dev/dataset v0.0.0-20250822094950-f96019bef097
+	github.com/volts-dev/dataset v0.0.0-20260314091026-c8839e277a01
 	github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479
 	github.com/volts-dev/utils v0.0.0-20241206111447-ee54d4e2c42c
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
@@ -75,7 +75,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	github.com/volts-dev/cacher v0.0.0-20240807133529-d9d180f89348
+	github.com/volts-dev/cacher v0.0.0-20260314091036-7e3a317fca8b
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.40.0

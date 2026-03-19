@@ -26,90 +26,87 @@ func newFormat() *format {
 }
 
 func (self *format) GetBool(key string, defaultValue bool) bool {
-	self.SetDefault(key, defaultValue)
 	self.RLock()
 	defer self.RUnlock()
+	if !self.v.IsSet(key) {
+		return defaultValue
+	}
 	return self.v.GetBool(key)
 }
 
-// GetStringValue from default namespace
+// GetString from default namespace
 func (self *format) GetString(key, defaultValue string) string {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetString(key)
-	if val == "" {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return val
+	return self.v.GetString(key)
 }
 
-// GetIntValue from default namespace
+// GetInt from default namespace
 func (self *format) GetInt(key string, defaultValue int) int {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetInt(key)
-	if val == 0 {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return val
+	return self.v.GetInt(key)
 }
 
 func (self *format) GetInt32(key string, defaultValue int32) int32 {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetInt32(key)
-	if val == 0 {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return val
+	return self.v.GetInt32(key)
 }
 
 func (self *format) GetInt64(key string, defaultValue int64) int64 {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetInt64(key)
-	if val == 0 {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return val
+	return self.v.GetInt64(key)
 }
 
 func (self *format) GetIntSlice(key string, defaultValue []int) []int {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetIntSlice(key)
-	if len(val) == 0 {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return val
+	return self.v.GetIntSlice(key)
 }
 
 func (self *format) GetTime(key string, defaultValue time.Time) time.Time {
-	self.SetDefault(key, defaultValue)
 	self.RLock()
 	defer self.RUnlock()
+	if !self.v.IsSet(key) {
+		return defaultValue
+	}
 	return self.v.GetTime(key)
 }
 
 func (self *format) GetDuration(key string, defaultValue time.Duration) time.Duration {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetInt64(key)
-	if val == 0 {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-
+	val := self.v.GetInt64(key)
 	return time.Duration(val)
 }
 
 func (self *format) GetFloat64(key string, defaultValue float64) float64 {
 	self.RLock()
 	defer self.RUnlock()
-	val := self.v.GetFloat64(key)
-	if val == 0 {
+	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return val
+	return self.v.GetFloat64(key)
 }
 
 func (self *format) Unmarshal(rawVal interface{}) error {

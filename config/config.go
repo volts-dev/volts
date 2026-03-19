@@ -70,34 +70,42 @@ type (
 	}
 )
 
+// Default 返回系统初始化时的基础配置单例 (singleton)。
 func Default() *Config {
 	return defaultConfig
 }
 
+// Init 应用选项至默认单例配置，可用于更改应用路径模式、文件驱动等。
 func Init(opts ...Option) {
 	defaultConfig.Init(opts...)
 }
 
+// Register 使用默认单例载入额外的各个业务模块配置。
+// 并执行默认合并去重逻辑。
 func Register(cfg IConfig) {
 	defaultConfig.Register(cfg)
 }
 
+// Unregister 从内存和驱动中移除不再需要的业务配置模版。
 func Unregister(cfg IConfig) {
 	defaultConfig.Unregister(cfg)
 }
 
+// Load 指定重载配置文件入口并立即刷新至缓存和底层组件模型中。
 func Load(fileName ...string) error {
 	return defaultConfig.LoadFromFile(fileName...)
 }
 
+// New 创建并返回一个新的特定命名配置实体。
+// 通过加载同名空间配置以及支持绑定一系列 Option 以控制加载及缓存策略。
 func New(name string, opts ...Option) *Config {
-	// 取缓存
+	// 复用内存中旧有的 core 实例，若无则新建
 	var c *core
-	if c, ok := cfgs.Load(name); ok {
-		c = c.(*core)
+	if val, ok := cfgs.Load(name); ok {
+		c = val.(*core)
 	} else {
 		c = &core{
-			fmt:      newFormat(), // 配置主要文件格式读写实现,
+			fmt:      newFormat(), // 配置底层基于 Viper 等库实现
 			FileName: CONFIG_FILE_NAME,
 			Mode:     MODE_NORMAL,
 			name:     name,
@@ -129,7 +137,8 @@ func (self *Config) Core() *core {
 	return self.core
 }
 
-// 注册添加其他配置
+// Register 注册一个配置模型（实现 IConfig 接口）。
+// 注册时如果指定的配置文件中尚未包含该部分配置，将使用模型默认值保存并持久化到文件（受 AutoCreateFile 控制）。
 func (self *Config) Register(cfg IConfig) {
 	if c, ok := cfg.(iConfig); ok {
 		c.checkSelf(cfg)
@@ -142,29 +151,32 @@ func (self *Config) Register(cfg IConfig) {
 
 	core := self.Core()
 
-	// 直接覆盖
+	// 缓存到 core
 	core.models.Store(cfgStr, cfg)
 
-	//if !core.fmt.v.InConfig(cfgStr) {
-	// 保存配置到core
-	err := cfg.Save()
-	if err != nil {
-		log.Fatal(err)
+	if !self.InConfig(cfgStr) {
+		// 尚未存储该配置：使用默认值写入到内存（core）
+		err := cfg.Save()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if self.AutoCreateFile {
+			// 将内存态的配置固化写入到文件系统
+			err = self.SaveToFile()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 
-	// 保存配置到文件
-	err = self.SaveToFile()
-	if err != nil {
-		log.Fatal(err)
-	}
-	//}
-
-	// 加载配置
+	// 从 core 中装载真实的配置到模型实体
 	if err := cfg.Load(); err != nil {
 		log.Fatalf("load %v config failed!", cfgStr)
 	}
 }
 
+// Unregister 移除配置模型并保存持久化状态。
 func (self *Config) Unregister(cfg IConfig) {
 	self.Core().models.Delete(cfg.String())
 
@@ -201,6 +213,9 @@ func (self *Config) InConfig(path string) bool {
 	return self.Core().fmt.v.InConfig(path)
 }
 
+// LoadFromFile 尝试从文件系统加载配置。
+// 并会将已注册的配置模型与加载的数据文件进行校对。
+// 缺失的配置模型（未存在于文件）将被补全并根据 AutoCreateFile 开关写回。
 func (self *Config) LoadFromFile(fileName ...string) error {
 	core := self.Core()
 
@@ -210,22 +225,19 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 	filePath := filepath.Join(AppPath, core.FileName)
 	core.fmt.v.SetConfigFile(filePath)
 
-	fileExists := utils.FileExists(filePath) && self.AutoCreateFile
+	fileExists := utils.FileExists(filePath)
 
-	// Find and read the config file
-	// Handle errors reading the config file
+	// 如果文件存在，先载入文件所有内容
 	if fileExists {
 		if err := core.fmt.v.ReadInConfig(); err != nil {
 			return err
 		}
 	}
 
-	// 校正
-	// 保存默认配置
+	// 校对已在 core.models 里的配置模型。如果名字修改过，重新进行绑定。
 	core.models.Range(func(key any, value any) bool {
 		if v, ok := value.(IConfig); ok {
 			if key != v.String() {
-				// 配置路径被更改过
 				core.models.Delete(key)
 				core.models.Store(v.String(), v)
 			}
@@ -233,28 +245,28 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 		return true
 	})
 
-	changed := 0
+	changed := false
 	core.models.Range(func(key any, value any) bool {
 		if v, ok := value.(IConfig); ok {
+			// 如果没有文件提供原始配置，或者该节配置不在文件里
 			if !fileExists || !core.fmt.v.InConfig(v.String()) {
-				// 没有配置文件则保存默认配置
 				if err := v.Save(false); err != nil {
 					log.Fatalf("save %v config failed!", v.String())
 					return false
 				}
-				changed++
+				changed = true
 			} else {
+				// 配置存在，立即反序列化加载到对应的内存模型实例
 				if err := v.Load(); err != nil {
 					log.Fatalf("save %v config failed!", key)
 				}
 			}
-
 		}
 		return true
 	})
 
-	if changed > 0 {
-		// 保存新的配置
+	// 有变更且允许创建及修改文件，则刷回磁盘
+	if changed && self.AutoCreateFile {
 		return core.fmt.v.WriteConfig()
 	}
 
@@ -281,29 +293,32 @@ func (self *Config) Save(immed ...bool) error {
 	return nil
 }
 
+// LoadToModel 提供将 viper 内存缓存序列化装载到指定配置模型的接口。
 func (self *Config) LoadToModel(model IConfig) error {
 	core := self.Core()
 
-	// 如果配置不存于V
+	// 若该模型不在配置树的范围内（初次使用或未注册）
 	if !core.fmt.v.InConfig(model.String()) {
-		err := model.Save()
+		err := model.Save() // 持久化其默认值到核里
 		if err != nil {
 			return err
 		}
 	} else {
+		// 解码装载
 		err := core.fmt.UnmarshalKey(model.String(), model)
 		if err != nil {
 			return err
 		}
 	}
 
-	// 保存但不覆盖注册的Model
+	// 保存时如果尚未注册该模型则连带注册
 	if _, has := core.models.Load(model.String()); !has {
 		self.Register(model)
 	}
 	return nil
 }
 
+// SaveToFile 原地或切换后保存 core 缓存层配置到文件驱动。
 func (self *Config) SaveToFile(opts ...Option) error {
 	core := self.Core()
 
@@ -321,23 +336,23 @@ func (self *Config) SaveToFile(opts ...Option) error {
 	return core.fmt.v.WriteConfig()
 }
 
-// 从数据类型加载数据
-// 只支持map[string]any 和struct
+// SaveFromModel 提取模型对象的所有可见属性并转储至配置底层的 KV 缓存中。
+// 当前支持解析的类型为 struct 以及 map[string]any。
 func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 	opts := utils.Struct2ItfMap(model)
 
 	for k, v := range opts {
-		// 过滤自己
+		// 避免模型相互嵌套解析 config 引发死循环
 		if strings.EqualFold("config", k) {
 			continue
 		}
 
-		// 跳过零值/空值，不写入配置文件
-		if isZeroValue(v) {
-			continue
-		}
+		// 忽略零值或空值，防止其覆盖现有合法配置从而提高配置干净度
+		/*if isZeroValue(v) {
+			 continue
+		}*/
 
-		// time.Duration 保存为毫秒值，提高可读性
+		// 针对时间间隔 (time.Duration) 将其扁平化为毫无精度的毫秒级以增强向外输出配置的可读性
 		if d, ok := v.(time.Duration); ok {
 			v = d.Milliseconds()
 		}
