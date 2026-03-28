@@ -95,7 +95,7 @@ func TestBuildJsonConfigAndGet(t *testing.T) {
 func TestCoverageSuite(t *testing.T) {
 	// Covering options
 	testConfModel := newTestConfig()
-	cfg := New("coverageSuite", WithPrefix("testprefix"), WithConfig(testConfModel), WithNoAutoCreateFile())
+	cfg := New("coverageSuite", WithPrefix("testprefix"), WithConfig(testConfModel))
 
 	// Cover Unregister and InConfig
 	cfg.Unregister(testConfModel)

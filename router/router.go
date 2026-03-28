@@ -423,57 +423,24 @@ func (self *TRouter) isClosed() bool {
 }
 
 // 过滤自己
-func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
-	localServices := self.config.Registry.LocalServices()
-
-	// 将本地服务节点信息存储到 map 中，方便快速查找
-	localServiceMap := make(map[string]bool)
-	for _, curSrv := range localServices {
-		if curSrv != nil && len(curSrv.Nodes) > 0 {
-			localServiceMap[curSrv.Nodes[0].Id] = true
-		}
+func (self *TRouter) filteSelf(service *registry.Service, localSet map[string]struct{}) *registry.Service {
+	// 如果 localSet 为 nil，说明触发了不同步的安全屏蔽条件
+	if localSet == nil {
+		service.Nodes = nil
+		return service
 	}
 
-	nodes := make([]*registry.Node, 0)
+	nodes := make([]*registry.Node, 0, len(service.Nodes))
 	for _, n := range service.Nodes {
-		// 如果节点在本地服务 map 中存在，则跳过
-		if _, ok := localServiceMap[n.Id]; ok {
+		// 校验节点 ID 或节点通信 Address 是否为本实例，是则过滤掉，防止出现请求转发的自循环
+		if _, hasId := localSet[n.Id]; hasId {
 			continue
 		}
+		//if _, hasAddr := localSet[n.Address]; hasAddr {
+		//	continue
+		//}
 		nodes = append(nodes, n)
 	}
-	/*
-		for _, n := range service.Nodes {
-			//  TODO 解决监控拉取registry服务器服务列表比LocalServices获取注册的本地早
-			if len(localServices) == 0 && self.tree.Count.Load() > 0 {
-				break
-			}
-
-			for _, curSrv := range localServices {
-				node := curSrv.Nodes[0]
-				host, port, err := net.SplitHostPort(node.Address)
-				if err != nil {
-					log.Err(err)
-				}
-
-				if n.Id == node.Id {
-					goto out
-				}
-
-				h, p, err := net.SplitHostPort(n.Address)
-				if err != nil {
-					log.Err(err)
-				}
-
-				// 同个服务器
-				if host == h && port == p {
-					goto out
-				}
-
-			}
-			nodes = append(nodes, n)
-		out:
-		}*/
 
 	service.Nodes = nodes
 	return service
@@ -481,9 +448,33 @@ func (self *TRouter) filteSelf(service *registry.Service) *registry.Service {
 
 // store local endpoint
 func (self *TRouter) store(services []*registry.Service) {
+	if len(services) == 0 {
+		return
+	}
+
+	// 提取一次本地服务信息进行 O(1) 预计算，避免在 for 循环中发生 O(N*M) 的反复提取开销
+	var localSet map[string]struct{}
+	localServices := self.config.Registry.LocalServices()
+
+	// 解决监控拉取 Registry 服务器服务列表比 LocalServices 注册早的问题
+	if len(localServices) == 0 && self.tree.Count.Load() > 0 {
+		localSet = nil // nil 表示进入暂置空节点状态
+	} else {
+		localSet = make(map[string]struct{})
+		for _, curSrv := range localServices {
+			if curSrv == nil {
+				continue
+			}
+			for _, node := range curSrv.Nodes {
+				localSet[node.Id] = struct{}{}
+				//localSet[node.Address] = struct{}{}
+			}
+		}
+	}
+
 	// create a new endpoint mapping
 	for _, service := range services {
-		service = self.filteSelf(service)
+		service = self.filteSelf(service, localSet)
 		if len(service.Nodes) > 0 {
 			// map per endpoint
 			for _, sep := range service.Endpoints {
@@ -491,14 +482,16 @@ func (self *TRouter) store(services []*registry.Service) {
 					Path: sep.Path,
 				}
 				r := EndpiontToRoute(sep)
-				if utils.IndexOf("CONNECT", sep.Method...) != -1 {
+
+				// 判定缓存，去除底层的多次 for
+				isConnect := utils.IndexOf("CONNECT", sep.Method...) != -1
+				if isConnect {
 					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, []*registry.Service{service}))
 				} else {
 					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, []*registry.Service{service}))
 				}
 
-				err := self.tree.AddRoute(r)
-				if err != nil {
+				if err := self.tree.AddRoute(r); err != nil {
 					log.Err(err)
 				}
 			}
@@ -591,8 +584,8 @@ func (self *TRouter) refresh() {
 		list     []*registry.Service
 		attempts int
 		maxRetry = 10 // 最大重试次数
-
 	)
+
 	localServices := self.config.Registry.LocalServices()
 
 	for {

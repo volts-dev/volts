@@ -38,7 +38,7 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Name:     "selector",
+		Name:     "default",
 		Logger:   log,
 		Strategy: Random,
 		Registry: registry.NewNopRegistry(),
@@ -50,8 +50,13 @@ func newConfig(opts ...Option) *Config {
 
 func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+		return strings.Join([]string{self.PrefixName, "selector"}, ".")
 	}
+
+	if len(self.Name) > 0 {
+		return strings.Join([]string{"selector", self.Name}, ".")
+	}
+
 	return self.Name
 }
 
@@ -62,8 +67,6 @@ func (self *Config) Init(opts ...Option) {
 		}
 	}
 }
-
-
 
 func Debug() Option {
 	return func(cfg *Config) {

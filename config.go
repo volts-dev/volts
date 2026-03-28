@@ -49,7 +49,7 @@ func newConfig(opts ...Option) *Config {
 	if cfg.Client == nil {
 		cfg.Client = client.NewRpcClient(
 			/*client.WithTransport(self.Transport)*/
-			client.WithConfigPrefixName(cfg.Server.Config().Name),
+			client.WithConfigPrefixName(cfg.Server.Config().String()),
 		)
 	}
 	return cfg

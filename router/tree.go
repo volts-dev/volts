@@ -717,6 +717,25 @@ func (self *treeNode) Equal(node *treeNode) bool {
 	if self.Type != node.Type || self.Text != node.Text || self.ContentType != node.ContentType {
 		return false
 	}
+
+	// Check enums
+	if len(self.Values) != len(node.Values) {
+		return false
+	}
+	for i := range self.Values {
+		if self.Values[i] != node.Values[i] {
+			return false
+		}
+	}
+
+	// Check regex
+	if (self.regexp == nil) != (node.regexp == nil) {
+		return false
+	}
+	if self.regexp != nil && self.regexp.String() != node.regexp.String() {
+		return false
+	}
+
 	return true
 }
 

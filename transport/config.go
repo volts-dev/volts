@@ -103,7 +103,7 @@ func (self *DialConfig) Init(opts ...DialOption) {
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		//Name:         "transport",
+		Name:         "default",
 		DialTimeout:  DefaultTimeout,
 		ReadTimeout:  DefaultTimeout,
 		WriteTimeout: DefaultTimeout,
@@ -117,6 +117,11 @@ func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
 		return strings.Join([]string{self.PrefixName, "transport"}, ".")
 	}
+
+	if len(self.Name) > 0 {
+		return strings.Join([]string{"transport", self.Name}, ".")
+	}
+
 	return self.Name
 }
 
@@ -156,7 +161,7 @@ func Logger() logger.ILogger {
 }
 
 // Addrs to use for transport
-func Addrs(addrs string) Option {
+func WithAddrs(addrs string) Option {
 	return func(cfg *Config) {
 		cfg.Addrs = addrs
 	}
@@ -305,9 +310,7 @@ func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
 		// 注销配置
 		config.Unregister(cfg)
-
 		cfg.PrefixName = prefixName
-
 		// 重新注册
 		config.Register(cfg)
 	}

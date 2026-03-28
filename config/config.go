@@ -52,10 +52,10 @@ type (
 	}
 
 	Config struct {
-		AutoCreateFile bool `field:"-"`
 		Debug          bool
-		core           *core // 配置文件核心 为了支持继承nil指针问题
-		changed        bool
+		AutoCreateFile bool    `field:"-"`
+		core           *core   `field:"-"` // 配置文件核心 为了支持继承nil指针问题
+		changed        bool    `field:"-"`
 		model          IConfig `field:"-"`
 	}
 
@@ -146,6 +146,7 @@ func (self *Config) Register(cfg IConfig) {
 
 	cfgStr := cfg.String()
 	if cfgStr == "" {
+		log.Fatal("config name is empty")
 		return
 	}
 
@@ -156,17 +157,8 @@ func (self *Config) Register(cfg IConfig) {
 
 	if !self.InConfig(cfgStr) {
 		// 尚未存储该配置：使用默认值写入到内存（core）
-		err := cfg.Save()
-		if err != nil {
+		if err := cfg.Save(); err != nil {
 			log.Fatal(err)
-		}
-
-		if self.AutoCreateFile {
-			// 将内存态的配置固化写入到文件系统
-			err = self.SaveToFile()
-			if err != nil {
-				log.Fatal(err)
-			}
 		}
 	}
 
@@ -178,13 +170,20 @@ func (self *Config) Register(cfg IConfig) {
 
 // Unregister 移除配置模型并保存持久化状态。
 func (self *Config) Unregister(cfg IConfig) {
-	self.Core().models.Delete(cfg.String())
+	cfgStr := cfg.String()
+	self.Core().models.Delete(cfgStr)
 
-	// 保存配置到文件
-	err := self.SaveToFile()
-	if err != nil {
-		log.Fatal(err)
+	if self.InConfig(cfgStr) {
+		//self.Core().fmt.Unset(cfgStr)
+		self.Core().fmt.v.Set(cfgStr, nil)
+
+		// 保存配置到文件
+		err := self.SaveToFile()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
+
 }
 
 // config: the config struct with binding the options
@@ -225,9 +224,8 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 	filePath := filepath.Join(AppPath, core.FileName)
 	core.fmt.v.SetConfigFile(filePath)
 
-	fileExists := utils.FileExists(filePath)
-
 	// 如果文件存在，先载入文件所有内容
+	fileExists := utils.FileExists(filePath)
 	if fileExists {
 		if err := core.fmt.v.ReadInConfig(); err != nil {
 			return err
@@ -267,7 +265,7 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 
 	// 有变更且允许创建及修改文件，则刷回磁盘
 	if changed && self.AutoCreateFile {
-		return core.fmt.v.WriteConfig()
+		return self.SaveToFile()
 	}
 
 	return nil

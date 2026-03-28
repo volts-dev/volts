@@ -261,8 +261,13 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		self.pool.Release(conn, nil)
 		return result.resp, nil
 	case <-ctx.Done():
-		// 超时，关闭连接
+		// 超时，关闭连接（使阻塞的 Send/Recv 立即返回 error）
 		self.pool.Release(conn, ctx.Err())
+		// 等待 goroutine 退出，防止 goroutine 泄漏
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+		}
 		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
 	}
 }

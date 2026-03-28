@@ -158,7 +158,7 @@ type (
 
 func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg := &Config{
-		Name:      "client",
+		Name:      "default",
 		Logger:    log,
 		Transport: tr,
 		Retries:   3,
@@ -208,7 +208,7 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
 
 	// 初始化 registry
-	reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost...))
+	reg := registry.Use(cfg.RegistryType, registry.Addrs(cfg.RegistryHost...))
 	if reg != nil {
 		cfg.Registry = reg
 		cfg.Selector = selector.New(
@@ -223,8 +223,13 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 
 func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{"client", self.PrefixName}, ".")
+		return strings.Join([]string{self.PrefixName, "client"}, ".")
 	}
+
+	if len(self.Name) > 0 {
+		return strings.Join([]string{"client", self.Name}, ".")
+	}
+
 	return self.Name
 }
 

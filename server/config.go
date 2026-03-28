@@ -79,11 +79,10 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		PrefixName: "server",
-		Name:       DefaultName,
-		Uid:        uuid.New().String(),
-		Logger:     log,
-		Metadata:   map[string]string{},
+		Name:     DefaultName,
+		Uid:      uuid.New().String(),
+		Logger:   log,
+		Metadata: map[string]string{},
 		//Address:          DefaultAddress,
 		RegisterInterval: DefaultRegisterInterval,
 		RegisterTTL:      DefaultRegisterTTL,
@@ -110,7 +109,7 @@ func newConfig(opts ...Option) *Config {
 
 	if cfg.Transport == nil {
 		cfg.Init(WithTransport(transport.Default()))
-		cfg.Transport.Init(transport.Addrs(DefaultAddress))
+		cfg.Transport.Init(transport.WithAddrs(DefaultAddress))
 	}
 
 	// if not special router use create new
@@ -123,8 +122,13 @@ func newConfig(opts ...Option) *Config {
 
 func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, self.Name}, ".")
+		return strings.Join([]string{self.PrefixName, "server"}, ".")
 	}
+
+	if len(self.Name) > 0 {
+		return strings.Join([]string{"server", self.Name}, ".")
+	}
+
 	return self.Name
 }
 
@@ -260,7 +264,7 @@ func WithTransport(t transport.ITransport) Option {
 // Address to bind to - host:port or :port
 func Address(addr string) Option {
 	return func(cfg *Config) {
-		cfg.Transport.Config().Addrs = addr
+		cfg.Transport.Config().Init(transport.WithAddrs(addr))
 	}
 }
 

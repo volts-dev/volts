@@ -8,27 +8,17 @@ import (
 
 type tcpTransportSocket struct {
 	conn net.Conn
-	// transport ITransport // NOTE 添加到自ROUTER耦合度极度降低
-
 	// ReadTimeout sets readdeadline for underlying net.Conns
 	ReadTimeout time.Duration
 	// WriteTimeout sets writedeadline for underlying net.Conns
 	WriteTimeout time.Duration
-
-	//enc    *gob.Encoder
-	//dec    *gob.Decoder
-	//encBuf *bufio.Writer
 }
 
 func NewTcpTransportSocket(conn net.Conn, readTimeout, writeTimeout time.Duration) *tcpTransportSocket {
-	//encBuf := bufio.NewWriter(conn)
 	return &tcpTransportSocket{
 		conn:         conn,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
-		//encBuf:    encBuf,
-		//enc:       gob.NewEncoder(encBuf), // FIXME
-		//dec:       gob.NewDecoder(conn),   // FIXME
 	}
 }
 
@@ -54,7 +44,7 @@ func (t *tcpTransportSocket) Recv(m *Message) error {
 		t.conn.SetReadDeadline(time.Now().Add(t.ReadTimeout))
 	}
 
-	return m.Decode(t.conn) //return t.dec.Decode(&m)
+	return m.Decode(t.conn)
 }
 
 func (t *tcpTransportSocket) Send(m *Message) error {

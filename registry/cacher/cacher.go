@@ -60,7 +60,7 @@ func New(r registry.IRegistry, opts ...registry.Option) ICacher {
 
 	var defaultOpts []registry.Option
 	defaultOpts = append(defaultOpts,
-		registry.WithName(""),
+		//registry.WithName(""),
 		registry.RegisterTTL(DefaultTTL))
 
 	return &cache{

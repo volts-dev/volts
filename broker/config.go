@@ -72,7 +72,7 @@ var (
 func NewConfig(opts ...Option) *Config {
 	cfg := &Config{
 		//Config: config.Default(),
-		//Name:             "broker",
+		Name:             "default",
 		BroadcastVersion: "broadcast",
 		RegisterTTL:      time.Minute,
 		RegisterInterval: time.Second * 30,
@@ -91,7 +91,7 @@ func (self *Config) String() string {
 		return strings.Join([]string{"broker", self.Name}, ".")
 	}
 
-	return ""
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -101,8 +101,6 @@ func (self *Config) Init(opts ...Option) {
 		}
 	}
 }
-
-
 
 func Logger() logger.ILogger {
 	return log

@@ -25,6 +25,16 @@ func newFormat() *format {
 	}
 }
 
+func (self *format) Unset(key string) {
+	newViper := viper.New()
+	for k, v := range self.v.AllSettings() {
+		if k != key {
+			newViper.Set(k, v)
+		}
+	}
+	self.v = newViper
+}
+
 func (self *format) GetBool(key string, defaultValue bool) bool {
 	self.RLock()
 	defer self.RUnlock()
@@ -131,6 +141,12 @@ func (self *format) SetValue(key string, value interface{}) {
 func (self *format) SetDefault(key string, value interface{}) {
 	self.Lock()
 	self.v.SetDefault(key, value)
+	self.Unlock()
+}
+
+func (self *format) Delete(key string) {
+	self.Lock()
+	self.v.Set(key, nil)
 	self.Unlock()
 }
 

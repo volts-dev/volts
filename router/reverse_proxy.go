@@ -50,11 +50,15 @@ func getService(ctx *THttpContext) (string, error) {
 	// get the next service node
 	s, err := next()
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 
-	// FIXME http/https
-	return fmt.Sprintf("http://%s", s.Address), nil
+	protocol := "http"
+	if s.Metadata != nil && s.Metadata["protocol"] == "https" {
+		protocol = "https"
+	}
+
+	return fmt.Sprintf("%s://%s", protocol, s.Address), nil
 }
 
 // serveWebSocket used to serve a web socket proxied connection

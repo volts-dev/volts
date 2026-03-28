@@ -63,6 +63,7 @@ type (
 // new and init a config
 func NewConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Name:    "default",
 		Logger:  log,
 		Context: context.Background(),
 		Timeout: time.Millisecond * 100,
@@ -81,7 +82,7 @@ func (self *Config) String() string {
 		return strings.Join([]string{"registry", self.Name}, ".")
 	}
 
-	return ""
+	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -91,8 +92,6 @@ func (self *Config) Init(opts ...Option) {
 		}
 	}
 }
-
-
 
 func Logger() logger.ILogger {
 	return log

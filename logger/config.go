@@ -49,8 +49,6 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
-
-
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
@@ -66,11 +64,11 @@ func WithWrite(name string) Option {
 // 修改Config.json的路径
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
-		cfg.Unregister(cfg)
+		if cfg.PrefixName != "" {
+			cfg.Unregister(cfg)
+		}
 		cfg.PrefixName = prefixName
 		cfg.Register(cfg)
-		// 重新加载
-		//cfg.Load()
 	}
 }
 

@@ -58,6 +58,7 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
+		Name:           "default",
 		Logger:         log,
 		Recover:        true,
 		RecoverHandler: recoverHandler,
@@ -79,6 +80,11 @@ func (self *Config) String() string {
 	if len(self.PrefixName) > 0 {
 		return strings.Join([]string{self.PrefixName, "router"}, ".")
 	}
+
+	if len(self.Name) > 0 {
+		return strings.Join([]string{"router", self.Name}, ".")
+	}
+
 	return self.Name
 }
 
