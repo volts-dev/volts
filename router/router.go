@@ -47,8 +47,8 @@ type (
 		middleware  *TMiddlewareManager
 		template    *template.TTemplateSet
 		respPool    sync.Pool
-		httpCtxPool map[int]*sync.Pool //根据Route缓存
-		rpcCtxPool  map[int]*sync.Pool
+		httpCtxPool sync.Map // 根据Route缓存，使用sync.Map以支持并发和自动清理
+		rpcCtxPool  sync.Map // 使用sync.Map替代map[int]*sync.Pool
 		// compiled regexp for host and path
 		exit chan bool
 	}
@@ -95,11 +95,9 @@ func New(opts ...Option) *TRouter {
 		TGroup: NewGroup(
 			WithStatic(), /* 支持静态文件 */
 		),
-		config:      cfg,
-		middleware:  newMiddlewareManager(),
-		httpCtxPool: make(map[int]*sync.Pool),
-		rpcCtxPool:  make(map[int]*sync.Pool),
-		exit:        make(chan bool),
+		config:     cfg,
+		middleware: newMiddlewareManager(),
+		exit:       make(chan bool),
 	}
 	cfg.Router = router
 	//~router.respPool.New = func() interface{} {
@@ -257,23 +255,16 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 
 		// # get the new context from pool
-		self.RLock()
-		p, has := self.httpCtxPool[route.Id]
-		self.RUnlock()
-
-		if !has {
-			self.Lock()
-			p, has = self.httpCtxPool[route.Id]
-			if !has {
-				p = &sync.Pool{New: func() interface{} {
-					return NewHttpContext(self)
-				}}
-				self.httpCtxPool[route.Id] = p
-			}
-			self.Unlock()
+		p, ok := self.httpCtxPool.Load(route.Id)
+		if !ok {
+			p, _ = self.httpCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
+				return NewHttpContext(self)
+			}})
 		}
 
-		ctx := p.Get().(*THttpContext)
+		pool := p.(*sync.Pool)
+
+		ctx := pool.Get().(*THttpContext)
 		ctx.route = *route // TODO 优化重复使用
 		if !ctx.inited {
 			ctx.router = self
@@ -290,7 +281,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		ctx.Apply()
 
 		// 回收资源
-		p.Put(ctx) // Pool Handler
+		pool.Put(ctx) // Pool Handler
 		rsp.ResponseWriter = nil
 		self.respPool.Put(rsp) // Pool 回收TResponseWriter
 	}
@@ -332,24 +323,15 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 	} else {
 		// 初始化Context
-		self.RLock()
-		p, has := self.rpcCtxPool[route.Id]
-		self.RUnlock()
-
-		if !has {
-			self.Lock()
-			// Double check after acquiring write lock
-			p, has = self.rpcCtxPool[route.Id]
-			if !has {
-				p = &sync.Pool{New: func() interface{} {
-					return NewRpcHandler(self)
-				}}
-				self.rpcCtxPool[route.Id] = p
-			}
-			self.Unlock()
+		p, ok := self.rpcCtxPool.Load(route.Id)
+		if !ok {
+			p, _ = self.rpcCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
+				return NewRpcHandler(self)
+			}})
 		}
 
-		ctx := p.Get().(*TRpcContext)
+		pool := p.(*sync.Pool)
+		ctx := pool.Get().(*TRpcContext)
 		if !ctx.inited {
 			ctx.router = self
 			ctx.route = *route
@@ -360,6 +342,8 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 
 		// 执行控制器
 		self.route(route, ctx)
+
+		pool.Put(ctx) // Pool 回收 Handler
 	}
 
 	// 返回数据
@@ -504,7 +488,11 @@ func (self *TRouter) watch() {
 	var attempts int
 
 	// 5秒后才启动监测
-	time.Sleep(5 * time.Second)
+	select {
+	case <-time.After(5 * time.Second):
+	case <-self.exit:
+		return
+	}
 
 	for {
 		if self.isClosed() {
@@ -522,35 +510,40 @@ func (self *TRouter) watch() {
 
 		// 无监视者等待
 		if w == nil {
-			time.Sleep(60 * time.Second)
+			select {
+			case <-time.After(60 * time.Second):
+			case <-self.exit:
+				return
+			}
 			continue
 		}
 
 		//ch := make(chan bool)
 		// 创建带取消功能的 context
 		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
 
 		go func() {
+			defer close(done)
 			select {
 			case <-ctx.Done():
 				w.Stop()
 			case <-self.exit:
 				w.Stop()
+				cancel() // Cancel the context when exit signal is received
 			}
 		}()
-
 		// reset if we get here
 		attempts = 0
 
 		for {
-			// process next event
 			res, err := w.Next()
 			if err != nil {
+				log.Errf("error getting next endoint: %v", err)
 				log.Errf("error getting next endoint: %v", err)
 				cancel()
 				break
 			}
-
 			// skip these things
 			if res == nil || res.Service == nil {
 				continue
@@ -569,14 +562,18 @@ func (self *TRouter) watch() {
 
 		// 确保 watcher goroutine 已经退出
 		cancel()
-		<-ctx.Done() // 等待 goroutine 完全退出
+		<-done // Wait for goroutine to finish properly
 	}
 }
 
 // refresh list of api services
 func (self *TRouter) refresh() {
 	// 5秒后才启动监测
-	time.Sleep(5 * time.Second)
+	select {
+	case <-time.After(5 * time.Second):
+	case <-self.exit:
+		return
+	}
 
 	var (
 		err      error
@@ -597,12 +594,20 @@ func (self *TRouter) refresh() {
 				log.Errf("max retry exceeded for listing services, giving up")
 				attempts = 0 // reset to prevent overflow
 			}
-			time.Sleep(time.Duration(attempts) * time.Second)
+			select {
+			case <-time.After(time.Duration(attempts) * time.Second):
+			case <-self.exit:
+				return
+			}
 			continue
 		}
 		// 无监视者等待
 		if len(list) == 0 {
-			time.Sleep(60 * time.Second)
+			select {
+			case <-time.After(60 * time.Second):
+			case <-self.exit:
+				return
+			}
 			continue
 		}
 

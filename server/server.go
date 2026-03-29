@@ -231,8 +231,10 @@ func (self *TServer) Register() error {
 		servics = append(servics, service)
 	}
 
-	// get registered value
+	// get registered value (with proper locking)
+	self.RLock()
 	registered := self.registered
+	self.RUnlock()
 
 	if !registered {
 		log.Infof("Registry [%s] Registering node: %s", config.Registry.String(), node.Id)
@@ -381,7 +383,7 @@ func (self *TServer) Deregister() error {
 				log.Err(err)
 			}
 		}
-		self.subscribers[sb] = nil
+		delete(self.subscribers, sb)
 	}
 
 	return nil
@@ -484,9 +486,9 @@ func (self *TServer) Start() error {
 			select {
 			// register self on interval
 			case <-t.C:
-				//self.RLock()
+				self.RLock()
 				registered := self.registered
-				//self.RUnlock()
+				self.RUnlock()
 				rerr := cfg.RegisterCheck(self.config.Context)
 				if rerr != nil {
 					if !registered {
@@ -513,9 +515,9 @@ func (self *TServer) Start() error {
 			}
 		}
 
-		//self.RLock()
+		self.RLock()
 		registered := self.registered
-		//self.RUnlock()
+		self.RUnlock()
 		if registered {
 			// deregister self
 			if err := self.Deregister(); err != nil {

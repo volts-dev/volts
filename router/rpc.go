@@ -126,6 +126,12 @@ func (self *TRpcContext) reset(rw *transport.RpcResponse, req *transport.RpcRequ
 	self.request = req
 	self.response = rw
 	self.data = nil // 清空
+	self.pathParams = nil
+	self.isDone = false
+	self.handlerIndex = 0
+	if Route != nil {
+		self.route = *Route
+	}
 }
 
 func (self *TRpcContext) setData(v interface{}) {

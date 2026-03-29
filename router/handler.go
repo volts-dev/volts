@@ -320,6 +320,7 @@ func (self *handlerManager) Get(id int) *handler {
 
 func (self *handlerManager) Put(id int, h *handler) {
 	var c memory.StackCache
+
 	if v, ok := self.handlerPool.Load(id); ok {
 		c = v.(memory.StackCache)
 	} else {

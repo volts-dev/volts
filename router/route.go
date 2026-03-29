@@ -1,6 +1,8 @@
 package router
 
 import (
+	"sync/atomic"
+
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -35,7 +37,7 @@ type (
 	}
 )
 
-var idQueue int = 0 //id 自动递增值
+var idQueue int32 = 0 //id 自动递增值
 
 func RouteToEndpiont(r *route) *registry.Endpoint {
 	ep := &registry.Endpoint{
@@ -67,7 +69,7 @@ func EndpiontToRoute(ep *registry.Endpoint) *route {
 func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, action string) *route {
 	r := &route{
 		group:           group,
-		Id:              idQueue + 1,
+		Id:              int(atomic.AddInt32(&idQueue, 1)),
 		Url:             url,
 		Path:            path,
 		PathDelimitChar: '/',

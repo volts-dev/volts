@@ -8,8 +8,25 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/volts-dev/volts/selector"
+)
+
+var (
+	// 定义一个全局的传输层，避免每个请求都新建，同时通过配置优化连接池
+	reverseProxyTransport = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second, // 建立连接超时
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       60 * time.Second, // 空闲连接超时，建议略低于后端服务的超时时间
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:     false, // 如果 EOF/Reset 持续，可以尝试设为 true 测试
+	}
 )
 
 // TODO 改名称
@@ -39,7 +56,27 @@ func HttpReverseProxy(ctx *THttpContext) {
 		return
 	}
 
-	httputil.NewSingleHostReverseProxy(rp).ServeHTTP(ctx.Response(), ctx.Request().Request)
+	proxy := httputil.NewSingleHostReverseProxy(rp)
+	proxy.Transport = reverseProxyTransport
+
+	// 保存原始的 Director 并增强
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		// 很多后端服务（如 Nginx 或严格的 Go Server）需要正确的 Host 头部
+		req.Host = rp.Host
+	}
+
+	// 添加错误处理，记录更多细节
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)
+		// 这种错误通常意味着后端不可达或崩溃
+		if ctx.Response().Status() == 0 {
+			ctx.WriteHeader(http.StatusBadGateway)
+		}
+	}
+
+	proxy.ServeHTTP(ctx.Response(), ctx.Request().Request)
 }
 
 // getService returns the service for this request from the selector
@@ -115,7 +152,8 @@ func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
 	go cp(conn, nc)
 	go cp(nc, conn)
 
-	<-errCh
+	<-errCh // Wait for first goroutine
+	<-errCh // Wait for second goroutine to complete
 }
 
 func isWebSocket(ctx *THttpContext) bool {

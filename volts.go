@@ -72,25 +72,29 @@ func (self *service) Start() error {
 }
 
 func (self *service) Stop() error {
-	var gerr error
+	var errs []error
 
 	for _, fn := range self.config.BeforeStop {
 		if err := fn(); err != nil {
-			gerr = err
+			errs = append(errs, err)
 		}
 	}
 
 	if err := self.config.Server.Stop(); err != nil {
-		return err
+		errs = append(errs, err)
 	}
 
 	for _, fn := range self.config.AfterStop {
 		if err := fn(); err != nil {
-			gerr = err
+			errs = append(errs, err)
 		}
 	}
 
-	return gerr
+	// Return first error if any
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
 }
 
 func (self *service) Run() error {
@@ -123,7 +127,7 @@ func (self *service) Run() error {
 
 	ch := make(chan os.Signal, 1)
 	if self.config.Signal {
-		signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL)
+		signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	}
 
 	select {

@@ -263,8 +263,6 @@ func (self *THttpContext) Apply() {
 
 		self.isDone = true
 	}
-
-	return
 }
 
 func (self *THttpContext) Route() route {
