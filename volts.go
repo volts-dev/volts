@@ -1,6 +1,7 @@
 package volts
 
 import (
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -90,11 +91,7 @@ func (self *service) Stop() error {
 		}
 	}
 
-	// Return first error if any
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (self *service) Run() error {

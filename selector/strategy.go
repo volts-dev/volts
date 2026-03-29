@@ -4,7 +4,6 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/volts-dev/volts/registry"
 )
@@ -12,10 +11,6 @@ import (
 var strategyMap = map[string]func(services []*registry.Service) Next{
 	"random":     Random,
 	"roundrobin": RoundRobin,
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
 }
 
 func Register(name string, fn func(services []*registry.Service) Next) {

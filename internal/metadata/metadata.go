@@ -21,7 +21,7 @@ func (md Metadata) Get(key string) (string, bool) {
 	}
 
 	// attempt to get lower case
-	val, ok = md[strings.Title(key)]
+	val, ok = md[strings.ToLower(key)]
 	return val, ok
 }
 
@@ -30,10 +30,8 @@ func (md Metadata) Set(key, val string) {
 }
 
 func (md Metadata) Delete(key string) {
-	// delete key as-is
 	delete(md, key)
-	// delete also Title key
-	delete(md, strings.Title(key))
+	delete(md, strings.ToLower(key))
 }
 
 // Copy makes a copy of the metadata
@@ -77,7 +75,7 @@ func Get(ctx context.Context, key string) (string, bool) {
 	}
 
 	// attempt to get lower case
-	val, ok = md[strings.Title(key)]
+	val, ok = md[strings.ToLower(key)]
 
 	return val, ok
 }
@@ -85,17 +83,7 @@ func Get(ctx context.Context, key string) (string, bool) {
 // FromContext returns metadata from the given context
 func FromContext(ctx context.Context) (Metadata, bool) {
 	md, ok := ctx.Value(metadataKey{}).(Metadata)
-	if !ok {
-		return nil, ok
-	}
-
-	// capitalise all values
-	newMD := make(Metadata, len(md))
-	for k, v := range md {
-		newMD[strings.Title(k)] = v
-	}
-
-	return newMD, ok
+	return md, ok
 }
 
 // NewContext creates a new context with the given metadata

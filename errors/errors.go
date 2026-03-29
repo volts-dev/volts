@@ -10,7 +10,7 @@ import (
 var (
 	Shutdown          = New("", 0, "connection is shut down")
 	PermissionDenied  = New("", 500, "permission denied.")
-	UnvailableService = New("", 500, "Unvailable Service")
+	UnavailableService = New("", 500, "Unavailable Service")
 )
 
 type (
@@ -40,8 +40,8 @@ func New(id string, code int, detail string) error {
 // fails, it will set the given string as the error detail.
 func Parse(err string) *Error {
 	e := new(Error)
-	errr := json.Unmarshal([]byte(err), e)
-	if errr != nil {
+	jsonErr := json.Unmarshal([]byte(err), e)
+	if jsonErr != nil {
 		e.Detail = err
 	}
 	return e

@@ -255,12 +255,9 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 
 		// # get the new context from pool
-		p, ok := self.httpCtxPool.Load(route.Id)
-		if !ok {
-			p, _ = self.httpCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
-				return NewHttpContext(self)
-			}})
-		}
+		p, _ := self.httpCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
+			return NewHttpContext(self)
+		}})
 
 		pool := p.(*sync.Pool)
 
@@ -323,12 +320,9 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 	} else {
 		// 初始化Context
-		p, ok := self.rpcCtxPool.Load(route.Id)
-		if !ok {
-			p, _ = self.rpcCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
-				return NewRpcHandler(self)
-			}})
-		}
+		p, _ := self.rpcCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
+			return NewRpcHandler(self)
+		}})
 
 		pool := p.(*sync.Pool)
 		ctx := pool.Get().(*TRpcContext)
@@ -503,8 +497,11 @@ func (self *TRouter) watch() {
 		w, err := self.config.Registry.Watcher()
 		if err != nil {
 			attempts++
+			if attempts > 10 {
+				attempts = 10
+			}
 			log.Errf("error watching endpoints: %v", err)
-			//time.Sleep(time.Duration(attempts) * time.Second)
+			time.Sleep(time.Duration(attempts) * time.Second)
 			continue
 		}
 
@@ -539,8 +536,7 @@ func (self *TRouter) watch() {
 		for {
 			res, err := w.Next()
 			if err != nil {
-				log.Errf("error getting next endoint: %v", err)
-				log.Errf("error getting next endoint: %v", err)
+				log.Errf("error getting next endpoint: %v", err)
 				cancel()
 				break
 			}

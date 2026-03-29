@@ -334,7 +334,7 @@ func (self *TLogger) Fatalf(format string, args ...interface{}) {
 
 // Log WARNING level message.
 func (self *TLogger) Warnf(format string, v ...interface{}) {
-	msg := fmt.Sprintf("[WARM] "+format, v...)
+	msg := fmt.Sprintf("[WARN] "+format, v...)
 	self.manager.write(LevelWarn, msg)
 }
 
@@ -371,7 +371,7 @@ func (self *TLogger) Info(v ...interface{}) {
 // Log WARNING level message.
 func (self *TLogger) Warn(v ...interface{}) {
 	msg := fmt.Sprint(v...)
-	self.manager.write(LevelWarn, "[WARM] "+msg)
+	self.manager.write(LevelWarn, "[WARN] "+msg)
 }
 
 // Log ERROR level message.

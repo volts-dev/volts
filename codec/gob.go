@@ -3,41 +3,28 @@ package codec
 import (
 	"bytes"
 	"encoding/gob"
-	"log"
 )
 
-type gobCodec struct {
-	buf bytes.Buffer
-}
+type gobCodec struct{}
 
 var Gob SerializeType = RegisterCodec("Gob", newGobCodec())
 
-func newGobCodec() *byteCodec {
-	return &byteCodec{}
+func newGobCodec() *gobCodec {
+	return &gobCodec{}
 }
 
-// Encode returns raw slice of bytes.
+// Encode encodes an object into a slice of bytes using gob encoding.
 func (c gobCodec) Encode(i interface{}) ([]byte, error) {
-	var network bytes.Buffer        // Stand-in for a network connection
-	enc := gob.NewEncoder(&network) // Will write to network.
-	err := enc.Encode(i)
-	if err != nil {
-		log.Fatal("encode error:", err)
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(i); err != nil {
+		return nil, err
 	}
-
-	return network.Bytes(), nil
+	return buf.Bytes(), nil
 }
 
-// Decode returns raw slice of bytes.
+// Decode decodes an object from a slice of bytes using gob encoding.
 func (c gobCodec) Decode(data []byte, i interface{}) error {
-	var network bytes.Buffer // Stand-in for a network connection
-
-	dec := gob.NewDecoder(&network) // Will read from network.
-	err := dec.Decode(&data)
-	if err != nil {
-		return err
-	}
-	return nil
+	return gob.NewDecoder(bytes.NewReader(data)).Decode(i)
 }
 
 func (c gobCodec) String() string {
