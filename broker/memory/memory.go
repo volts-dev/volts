@@ -37,7 +37,7 @@ type (
 	memorySubscriber struct {
 		id      string
 		topic   string
-		exit    chan bool
+		broker  *memoryBroker
 		handler broker.Handler
 		opts    *broker.SubscribeConfig
 	}
@@ -172,9 +172,9 @@ func (m *memoryBroker) Subscribe(topic string, handler broker.Handler, opts ...b
 	}
 
 	sub := &memorySubscriber{
-		exit:    make(chan bool, 1),
 		id:      uuid.New().String(),
 		topic:   topic,
+		broker:  m,
 		handler: handler,
 		opts:    &options,
 	}
@@ -182,20 +182,6 @@ func (m *memoryBroker) Subscribe(topic string, handler broker.Handler, opts ...b
 	m.Lock()
 	m.Subscribers[topic] = append(m.Subscribers[topic], sub)
 	m.Unlock()
-
-	go func() {
-		<-sub.exit
-		m.Lock()
-		var newSubscribers []*memorySubscriber
-		for _, sb := range m.Subscribers[topic] {
-			if sb.id == sub.id {
-				continue
-			}
-			newSubscribers = append(newSubscribers, sb)
-		}
-		m.Subscribers[topic] = newSubscribers
-		m.Unlock()
-	}()
 
 	return sub, nil
 }
@@ -241,6 +227,15 @@ func (m *memorySubscriber) Topic() string {
 }
 
 func (m *memorySubscriber) Unsubscribe() error {
-	m.exit <- true
+	b := m.broker
+	b.Lock()
+	defer b.Unlock()
+	var remaining []*memorySubscriber
+	for _, sb := range b.Subscribers[m.topic] {
+		if sb.id != m.id {
+			remaining = append(remaining, sb)
+		}
+	}
+	b.Subscribers[m.topic] = remaining
 	return nil
 }

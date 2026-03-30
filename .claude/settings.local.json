@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(~/go/bin/go1.24.2 build:*)",
+      "Bash(find /Users/shadow/SectionZero/MyProject/Go/src/vs/vectors/cmd -name *.go)",
+      "Bash(grep -n \"SetupTenant\\\\|type.*Setup\" /Users/shadow/SectionZero/MyProject/Go/src/vs/vectors/module/registry/internal/types/*.go)",
+      "Bash(grep -n \"func.*InstallModule\\\\|InstallModule\" /Users/shadow/SectionZero/MyProject/Go/src/vs/vectors/core/tenant/*.go)",
+      "Bash(grep -n \"LoadSession\\\\|func.*LoadSession\" /Users/shadow/SectionZero/MyProject/Go/src/vs/vectors/module/registry/internal/manager/*.go)",
+      "Bash(grep -n \"func.*Tx\\\\|func.*Records\\\\|func.*TSession\\\\|func.*IModel\" /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/orm/*.go)",
+      "Bash(go test:*)",
+      "Bash(go version:*)"
+    ]
+  }
+}

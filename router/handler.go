@@ -582,6 +582,16 @@ func (self *handler) Invoke(ctx IContext) *handler {
 	return self
 }
 
+// InvokeSubscriber 专用于订阅消息分发，不经过 IContext 路径
+func (self *handler) InvokeSubscriber(ctx *TSubscriberContext) error {
+	for _, hd := range self.funcs {
+		if hd.SubFunc != nil {
+			hd.SubFunc(ctx)
+		}
+	}
+	return nil
+}
+
 // 初始化
 // NOTE:仅限于回收使用
 func (self *handler) reset() *handler {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/volts-dev/utils"
+	"github.com/volts-dev/volts/broker"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -40,6 +41,7 @@ type (
 	}
 
 	TSubscriberContext struct {
+		Event broker.IEvent // 当前消息事件，处理器通过此字段读取 Topic/Message/Ack
 	}
 	// Subscriber interface represents a subscription to a given topic using
 	// a specific subscriber function or object with endpoints. It mirrors

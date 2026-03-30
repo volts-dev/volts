@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -47,6 +46,7 @@ func NewPublisher(opts ...PublisherOption) *Publisher {
 	pub := &Publisher{
 		id: uuid.New().String(),
 	}
+	pub.once.Store(false) // 初始化 atomic.Value，避免首次 Load 返回 nil 导致类型断言失败
 	pub.Init(opts...)
 	return pub
 }
@@ -100,10 +100,7 @@ func (self *Publisher) Publish(ctx context.Context, msg IMessage, opts ...Publis
 		return err
 	}
 
-	l, ok := self.once.Load().(bool)
-	if !ok {
-		return fmt.Errorf("failed to cast to bool")
-	}
+	l, _ := self.once.Load().(bool)
 
 	if !l {
 		if err = self.Broker.Start(); err != nil {

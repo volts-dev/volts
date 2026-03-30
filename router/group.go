@@ -389,9 +389,14 @@ func (self *TGroup) Subscribe(subscriber ISubscriber) error {
 
 	self.Lock()
 	defer self.Unlock()
+
+	if self.subscribers == nil {
+		self.subscribers = make(map[ISubscriber][]broker.ISubscriber)
+	}
+
 	_, ok := self.subscribers[subscriber]
 	if ok {
-		return fmt.Errorf("subscriber %v already exists", self)
+		return fmt.Errorf("subscriber %v already exists", subscriber.Topic())
 	}
 	self.subscribers[subscriber] = nil
 	return nil
@@ -411,7 +416,9 @@ func (self *TGroup) NewSubGroup(relativePath string) *TGroup {
 	group.TemplateVar = self.TemplateVar
 	group.tree = self.tree
 	group.Metadata = self.Metadata
+	self.Lock()
 	self.subgroup = append(self.subgroup, group)
+	self.Unlock()
 	return group
 }
 
@@ -512,6 +519,10 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 			// First arg must be context.Context
 			// RPC route validate
 			if utils.IndexOf("CONNECT", methods...) > -1 {
+				if ctrlType.NumIn() < 2 {
+					log.Fatalf("RPC method %s must accept a context as the first parameter", url.Action)
+					return nil
+				}
 				ctxType := ctrlType.In(1)
 				if ctxType != RpcContextType && ctxType != ContextType {
 					log.Fatalf("method %s must use context pointer as the first parameter", url.Action)

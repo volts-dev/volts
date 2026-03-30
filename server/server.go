@@ -86,6 +86,23 @@ func Default(opts ...Option) *TServer {
 }
 
 func (s *TServer) HandleEvent(e broker.IEvent) error {
+	s.RLock()
+	subs := s.subscribers
+	s.RUnlock()
+
+	topic := e.Topic()
+	ctx := &router.TSubscriberContext{Event: e}
+
+	for sb := range subs {
+		if sb.Topic() != topic {
+			continue
+		}
+		for _, hd := range sb.Handlers() {
+			if err := hd.InvokeSubscriber(ctx); err != nil {
+				log.Errf("subscriber handler error on topic %s: %v", topic, err)
+			}
+		}
+	}
 	return nil
 }
 
