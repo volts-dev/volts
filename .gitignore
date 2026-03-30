@@ -1,3 +1,9 @@
 *.exe
 .history
 !.gitignore
+
+# compiled binaries (demo outputs)
+/pubsub
+/pubsub_web
+demo/**/cmd/*
+!demo/**/cmd/*.go
