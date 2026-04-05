@@ -8,7 +8,8 @@
       "Bash(grep -n \"LoadSession\\\\|func.*LoadSession\" /Users/shadow/SectionZero/MyProject/Go/src/vs/vectors/module/registry/internal/manager/*.go)",
       "Bash(grep -n \"func.*Tx\\\\|func.*Records\\\\|func.*TSession\\\\|func.*IModel\" /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/orm/*.go)",
       "Bash(go test:*)",
-      "Bash(go version:*)"
+      "Bash(go version:*)",
+      "Bash(ls /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/*_test.go)"
     ]
   }
 }

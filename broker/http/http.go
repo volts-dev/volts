@@ -17,6 +17,7 @@ import (
 
 	"github.com/volts-dev/volts/broker"
 	maddr "github.com/volts-dev/volts/internal/addr"
+	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	vnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/router"
@@ -257,7 +258,7 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 	exit := make(chan bool)
 
 	// 监听链接
-	go func() {
+	igoroutine.Go(func() {
 		for {
 			// listen for connections
 			err := ts.Serve(self.router)
@@ -282,7 +283,7 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 			// no error just exit
 			return
 		}
-	}()
+	}, func(err error) { log.Err(err.Error()) })
 
 	// mark the server as started
 	self.started.Store(true)
@@ -290,7 +291,7 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 	log.Infof("Listening on %s - %s", ts.Addr(), self.transport.String())
 
 	// 监听退出
-	go func() {
+	igoroutine.Go(func() {
 		t := new(time.Ticker)
 
 		// only process if it exists
@@ -345,7 +346,7 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 
 		// swap back address
 		self.address = addr
-	}()
+	}, func(err error) { log.Err(err.Error()) })
 
 	// set cache
 	//self.r = cache.New(self.config.Registry)
@@ -504,7 +505,7 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 	}
 
 	// do the rest async
-	go func() {
+	igoroutine.Go(func() {
 		// get a third of the backlog
 		messages := self.getMessage(topic, 8)
 		delay := (len(messages) > 1)
@@ -519,7 +520,7 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 				time.Sleep(time.Millisecond * 100)
 			}
 		}
-	}()
+	}, func(err error) { log.Err(err.Error()) })
 
 	return nil
 }

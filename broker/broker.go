@@ -6,7 +6,7 @@ import (
 )
 
 type (
-	// IBroker 提供微服务之前的信息交换总线
+	// IBroker 提供微服务之间的消息交换总线
 	IBroker interface {
 		String() string // 返回对象名称
 		Init(...Option) error

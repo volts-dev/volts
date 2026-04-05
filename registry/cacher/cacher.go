@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	util "github.com/volts-dev/volts/internal/registry"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
@@ -434,7 +435,7 @@ func (c *cache) watch(w registry.Watcher) error {
 	stop := make(chan bool)
 
 	// manage this loop
-	go func() {
+	igoroutine.Go(func() {
 		defer w.Stop()
 
 		select {
@@ -445,7 +446,7 @@ func (c *cache) watch(w registry.Watcher) error {
 		case <-stop:
 			return
 		}
-	}()
+	}, func(err error) { log.Err(err.Error()) })
 
 	for {
 		res, err := w.Next()

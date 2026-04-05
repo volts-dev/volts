@@ -12,6 +12,7 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/transport"
@@ -520,7 +521,7 @@ func (self *TRouter) watch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 
-		go func() {
+		igoroutine.Go(func() {
 			defer close(done)
 			select {
 			case <-ctx.Done():
@@ -529,7 +530,7 @@ func (self *TRouter) watch() {
 				w.Stop()
 				cancel() // Cancel the context when exit signal is received
 			}
-		}()
+		}, func(err error) { log.Err(err.Error()) })
 		// reset if we get here
 		attempts = 0
 

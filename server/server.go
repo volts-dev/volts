@@ -13,6 +13,7 @@ import (
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/internal/backoff"
+	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	"github.com/volts-dev/volts/internal/metadata"
 	vnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/logger"
@@ -423,7 +424,7 @@ func (self *TServer) Start() error {
 	exit := make(chan bool)
 
 	// 监听链接
-	go func() {
+	igoroutine.Go(func() {
 		for {
 			// listen for connections
 			err := ts.Serve(self.config.Router)
@@ -447,14 +448,14 @@ func (self *TServer) Start() error {
 			// no error just exit
 			return
 		}
-	}()
+	}, func(err error) { log.Err(err.Error()) })
 	// mark the server as started
 	self.started.Store(true)
 
 	log.Infof("Listening on %s - %s", ts.Addr().String(), cfg.Transport.String())
 
 	// 监听退出
-	go func() {
+	igoroutine.Go(func() {
 		var t *time.Ticker
 		var tickerC <-chan time.Time
 		if cfg.RegisterInterval > 0 {
@@ -519,7 +520,7 @@ func (self *TServer) Start() error {
 		if err := cfg.Broker.Close(); err != nil {
 			log.Errf("Broker [%s] Disconnect error: %v", bname, err)
 		}
-	}()
+	}, func(err error) { log.Err(err.Error()) })
 
 	return nil
 }
