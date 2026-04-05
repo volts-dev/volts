@@ -1,5 +1,8 @@
 *.exe
 .history
+.claude
+.vscode
+.idea
 !.gitignore
 
 # compiled binaries (demo outputs)

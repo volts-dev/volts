@@ -154,10 +154,9 @@ func parseSubscriber(topic string, sub any, opts ...SubscriberOption) (handlers 
 	switch v := sub.(type) {
 	case func(*TSubscriberContext):
 		hd = &handler{
-			Id:      int(crc32.ChecksumIEEE([]byte(topic))),
-			Manager: defaultHandlerManager,
-			Config:  &ControllerConfig{},
-			Type:    SubscriberHandler,
+			Id:     int(crc32.ChecksumIEEE([]byte(topic))),
+			Config: &ControllerConfig{},
+			Type:   SubscriberHandler,
 			//pos:     -1,
 
 			ctrlType:  reflect.TypeOf(v),
@@ -231,10 +230,9 @@ func parseSubscriber(topic string, sub any, opts ...SubscriberOption) (handlers 
 			}
 
 			hd = &handler{
-				Id:      int(crc32.ChecksumIEEE([]byte(topic))),
-				Manager: defaultHandlerManager,
-				Config:  &ControllerConfig{},
-				Type:    SubscriberHandler,
+				Id:     int(crc32.ChecksumIEEE([]byte(topic))),
+				Config: &ControllerConfig{},
+				Type:   SubscriberHandler,
 				//pos:     -1,
 
 				ctrlType:  ctrlValue.Type(),

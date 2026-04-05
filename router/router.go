@@ -187,6 +187,9 @@ func (self *TRouter) RegisterMiddleware(middlewares ...func(IRouter) IMiddleware
 
 // register module
 func (self *TRouter) RegisterGroup(groups ...IGroup) {
+	self.Lock()
+	defer self.Unlock()
+
 	for _, group := range groups {
 		//group := group
 		self.tree.Conbine(group.GetRoutes())
@@ -256,20 +259,19 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 
 		// # get the new context from pool
-		p, _ := self.httpCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
+		p, _ := self.httpCtxPool.LoadOrStore(route.Id(), &sync.Pool{New: func() interface{} {
 			return NewHttpContext(self)
 		}})
 
 		pool := p.(*sync.Pool)
 
 		ctx := pool.Get().(*THttpContext)
-		ctx.route = *route // TODO 优化重复使用
+		ctx.route = route // TODO 优化重复使用
 		if !ctx.inited {
 			ctx.router = self
 			ctx.inited = true
 			ctx.Template = template.Default()
 		}
-
 		ctx.reset(rsp, r)
 		ctx.setPathParams(params)
 
@@ -277,8 +279,6 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 
 		// 结束Route并返回内容
 		ctx.Apply()
-
-		// 回收资源
 		pool.Put(ctx) // Pool Handler
 		rsp.ResponseWriter = nil
 		self.respPool.Put(rsp) // Pool 回收TResponseWriter
@@ -321,7 +321,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 	} else {
 		// 初始化Context
-		p, _ := self.rpcCtxPool.LoadOrStore(route.Id, &sync.Pool{New: func() interface{} {
+		p, _ := self.rpcCtxPool.LoadOrStore(route.Id(), &sync.Pool{New: func() interface{} {
 			return NewRpcHandler(self)
 		}})
 
@@ -329,7 +329,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		ctx := pool.Get().(*TRpcContext)
 		if !ctx.inited {
 			ctx.router = self
-			ctx.route = *route
+			ctx.route = route
 			ctx.inited = true
 		}
 		ctx.reset(w, r, self, route)
@@ -385,10 +385,19 @@ func (self *TRouter) route(route *route, ctx IContext) {
 		}()
 	}
 
-	// TODO:将所有需要执行的Handler 存疑列表或者树-Node保存函数和参数
-	for _, handler := range route.handlers {
+	for _, handlerId := range route.Handlers() {
 		// TODO 回收需要特殊通道 直接调用占用了处理时间
-		handler.init(self).Invoke(ctx).recycle()
+		handler := defaultHandlerManager.Get(handlerId)
+		if handler == nil {
+			log.Errf("Handler %d not found", handlerId)
+			continue
+		}
+
+		if !handler.inited {
+			handler.init(self)
+		}
+
+		handler.Invoke(ctx)
 	}
 }
 
@@ -456,6 +465,7 @@ func (self *TRouter) store(services []*registry.Service) {
 		service = self.filteSelf(service, localSet)
 		if len(service.Nodes) > 0 {
 			// map per endpoint
+			var handlerId int
 			for _, sep := range service.Endpoints {
 				url := &TUrl{
 					Path: sep.Path,
@@ -465,11 +475,13 @@ func (self *TRouter) store(services []*registry.Service) {
 				// 判定缓存，去除底层的多次 for
 				isConnect := utils.IndexOf("CONNECT", sep.Method...) != -1
 				if isConnect {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, []*registry.Service{service}))
+					handlerId = generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, []*registry.Service{service}).Id
+
 				} else {
-					r.handlers = append(r.handlers, generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, []*registry.Service{service}))
+					handlerId = generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, []*registry.Service{service}).Id
 				}
 
+				r.handlers = append(r.handlers, handlerId)
 				if err := self.tree.AddRoute(r); err != nil {
 					log.Err(err)
 				}
@@ -598,36 +610,30 @@ func (self *TRouter) refresh() {
 			}
 			continue
 		}
+
 		// 无监视者等待
-		if len(list) == 0 {
-			select {
-			case <-time.After(60 * time.Second):
-			case <-self.exit:
-				return
-			}
-			continue
-		}
+		if len(list) != 0 {
+			attempts = 0
 
-		attempts = 0
+			// for each service, get service and store endpoints
+			for _, s := range list {
+				if self.isLocalService(s, localServices) {
+					continue
+				}
 
-		// for each service, get service and store endpoints
-		for _, s := range list {
-			if self.isLocalService(s, localServices) {
-				continue
+				services, err = self.config.RegistryCacher.GetService(s.Name)
+				if err != nil {
+					log.Errf("unable to get service: %v", err)
+					continue
+				}
+				self.store(services)
 			}
-
-			services, err = self.config.RegistryCacher.GetService(s.Name)
-			if err != nil {
-				log.Errf("unable to get service: %v", err)
-				continue
-			}
-			self.store(services)
 		}
 
 		// refresh list in 10 minutes... cruft
 		// use registry watching
 		select {
-		case <-time.After(time.Minute * 10):
+		case <-time.After(time.Duration(self.config.RouterTreeRefreshInterval) * time.Second):
 		case <-self.exit:
 			return
 		}

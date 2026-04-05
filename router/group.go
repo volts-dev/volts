@@ -544,7 +544,7 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	}
 
 	route := newRoute(self, methods, url, url.Path, self.config.FilePath, self.config.Name, url.Action)
-	route.handlers = append(route.handlers, hd)
+	route.handlers = append(route.handlers, hd.Id)
 
 	// register route
 	self.tree.AddRoute(route)

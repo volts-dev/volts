@@ -80,7 +80,7 @@ type (
 		response *transport.THttpResponse //http.ResponseWriter
 		request  *transport.THttpRequest  //
 		router   *TRouter
-		route    route //执行本次Handle的Route
+		route    *route //执行本次Handle的Route
 
 		// data set
 		data         *TParamsSet // 数据缓存在各个Controler间调用
@@ -265,12 +265,12 @@ func (self *THttpContext) Apply() {
 	}
 }
 
-func (self *THttpContext) Route() route {
+func (self *THttpContext) Route() IRoute {
 	return self.route
 }
 
 func (self *THttpContext) Handler(index ...int) *handler {
-	idx := self.handlerIndex
+	idx := 0
 	if len(index) > 0 {
 		idx = index[0]
 	}
@@ -279,7 +279,10 @@ func (self *THttpContext) Handler(index ...int) *handler {
 		return self.handler
 	}
 
-	return self.route.handlers[idx]
+	handlerId := self.route.handlers[idx]
+	self.handler = defaultHandlerManager.Get(handlerId)
+	self.handlerIndex = idx
+	return self.handler
 }
 
 // 数据缓存供传递用
@@ -323,7 +326,7 @@ func (self *THttpContext) IP() (res []string) {
 }
 
 // RemoteAddr returns the most likely real IP address of the visitor.
-// NOTE: This trusts headers like X-Real-IP and X-Forwarded-For. 
+// NOTE: This trusts headers like X-Real-IP and X-Forwarded-For.
 // In a production environment, ensure this is only used behind a trusted proxy.
 func (self *THttpContext) RemoteAddr() string {
 	// Try common proxy headers first
@@ -561,10 +564,10 @@ func (self *THttpContext) RenderTemplate(tmpl string, args interface{}) {
 		)
 	}
 
-	if self.route.FilePath == "" {
+	if self.route.filePath == "" {
 		self.TemplateSrc = filepath.Join(config.TEMPLATE_DIR, tmpl)
 	} else {
-		self.TemplateSrc = filepath.Join(self.route.FilePath, config.TEMPLATE_DIR, tmpl)
+		self.TemplateSrc = filepath.Join(self.route.filePath, config.TEMPLATE_DIR, tmpl)
 	}
 }
 

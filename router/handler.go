@@ -49,11 +49,6 @@ type (
 		Ready(*ControllerConfig)
 	}
 
-	handlerManager struct {
-		handlerPool sync.Map // map[int]*sync.Pool
-		router      *TRouter
-	}
-
 	// 控制器配置 可实现特殊功能
 	// 功能：中间件过滤器
 	ControllerConfig struct {
@@ -72,7 +67,7 @@ type (
 
 	// 路由节点绑定的控制器 func(Handler)
 	handler struct {
-		Manager  *handlerManager
+		sync.RWMutex
 		Config   *ControllerConfig
 		Services []*registry.Service // 该路由服务线路 提供网关等特殊服务用// Versions of this service
 
@@ -91,6 +86,14 @@ type (
 		ctrlType  reflect.Type  // 供生成新的控制器
 		ctrlValue reflect.Value // 每个handler的控制器必须是唯一的
 		ctrlModel interface{}   // 提供Ctx特殊调用
+		inited    bool
+	}
+
+	handlerManager struct {
+		sync.RWMutex
+		handlerPool  sync.Map
+		router       *TRouter
+		handlerModel map[int]*handler
 	}
 )
 
@@ -126,26 +129,18 @@ func GetFuncName(i interface{}, seps ...rune) string {
 		return ""
 	}
 
-	// 获取函数名称
-	//var fn string
 	var runtimeFunc *runtime.Func
 	if v, ok := i.(reflect.Value); ok {
-		//fn = v.Type().String()
-		//fn = runtime.FuncForPC(v.Pointer()).Name()
 		runtimeFunc = runtime.FuncForPC(v.Pointer())
 	} else {
-		//fn = runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 		runtimeFunc = runtime.FuncForPC(reflect.ValueOf(i).Pointer())
 	}
 
-	// 获取运行时函数信息
 	if runtimeFunc == nil {
 		return ""
 	}
 
-	// 获取函数全名
 	fn := runtimeFunc.Name()
-	// 如果没有分隔符，直接返回函数名的最后一部分
 	if len(seps) == 0 {
 		if lastIndex := strings.LastIndexByte(fn, '.'); lastIndex != -1 {
 			return fn[lastIndex+1:]
@@ -153,13 +148,24 @@ func GetFuncName(i interface{}, seps ...rune) string {
 		return fn
 	}
 
-	// 创建分隔符查找 map 提升性能
+	// 优化：针对常见量（1个分隔符）使用快路径
+	if len(seps) == 1 {
+		sep := seps[0]
+		fields := strings.FieldsFunc(fn, func(r rune) bool {
+			return r == sep
+		})
+		if size := len(fields); size > 0 {
+			return fields[size-1]
+		}
+		return ""
+	}
+
+	// 创建分隔符查找 map
 	sepMap := make(map[rune]bool, len(seps))
 	for _, sep := range seps {
 		sepMap[sep] = true
 	}
 
-	// 用 seps 进行分割
 	fields := strings.FieldsFunc(fn, func(sep rune) bool {
 		return sepMap[sep]
 	})
@@ -172,6 +178,7 @@ func GetFuncName(i interface{}, seps ...rune) string {
 
 func newHandlerManager() *handlerManager {
 	return &handlerManager{
+		handlerModel: make(map[int]*handler),
 		// handlerPool: make(map[int]*sync.Pool),
 	}
 }
@@ -182,19 +189,23 @@ func newHandlerManager() *handlerManager {
 // 生成handler原型
 // NOTE:不可用于实时环境
 func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, services []*registry.Service) *handler {
-	h := &handler{
-		Manager:  defaultHandlerManager,
-		Config:   &ControllerConfig{},
-		Type:     handlerType,
-		Services: services,
-	}
-
 	// 生成唯一标识用于缓存
 	// 使用 Path、TransportType 和 HandlerType 等组合生成唯一 Id，避免同路径下的不同 TransportType (HTTP/RPC) 发生冲突
 	idStr := fmt.Sprintf("%s:%v:%v:%s", url.Path, tt, handlerType, GetFuncName(handlers[0], filepath.Separator))
-	h.Id = int(crc32.ChecksumIEEE([]byte(idStr)))
-	h.Name = fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), h.Id)
-	h.pos.Store(-1) // 初始化位置为-1
+	uid := int(crc32.ChecksumIEEE([]byte(idStr)))
+
+	h := &handler{
+		Id:       uid,
+		Name:     fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), uid),
+		Config:   &ControllerConfig{},
+		Type:     handlerType,
+		Services: services,
+		pos:      *atomic.NewInt32(-1), // 初始化位置为-1
+	}
+	//h.pos.Store(-1)
+
+	// store the handler model
+	defaultHandlerManager.Store(h)
 
 	// 添加中间件的闭包
 	addMiddlewares := func() {
@@ -308,6 +319,12 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 	}
 }
 
+func (self *handlerManager) Store(h *handler) {
+	self.Lock()
+	defer self.Unlock()
+	self.handlerModel[h.Id] = h
+}
+
 func (self *handlerManager) Get(id int) *handler {
 	if v, ok := self.handlerPool.Load(id); ok {
 		if h := v.(memory.StackCache).Pop(); h != nil {
@@ -315,6 +332,11 @@ func (self *handlerManager) Get(id int) *handler {
 		}
 	}
 
+	self.RLock()
+	defer self.RUnlock()
+	if hd, ok := self.handlerModel[id]; ok {
+		return hd.clone()
+	}
 	return nil
 }
 
@@ -332,6 +354,45 @@ func (self *handlerManager) Put(id int, h *handler) {
 	}
 
 	c.Push(h)
+}
+
+func (self *handler) SetServices(services []*registry.Service) {
+	self.Lock()
+	defer self.Unlock()
+	self.Services = services
+}
+
+func (self *handler) clone() *handler {
+	self.RLock()
+	defer self.RUnlock()
+
+	h := &handler{
+		Config:        self.Config,
+		Id:            self.Id,
+		Name:          self.Name,
+		FuncName:      self.FuncName,
+		Type:          self.Type,
+		TransportType: self.TransportType,
+		funcs:         nil, // 初始化为空，克隆时深度拷贝
+		ctrlName:      self.ctrlName,
+		ctrlType:      self.ctrlType,
+		ctrlValue:     self.ctrlValue,
+		ctrlModel:     self.ctrlModel,
+	}
+
+	if self.funcs != nil {
+		h.funcs = make([]*handle, len(self.funcs))
+		copy(h.funcs, self.funcs)
+	}
+
+	h.pos.Store(self.pos.Load())
+
+	if self.Services != nil {
+		h.Services = make([]*registry.Service, len(self.Services))
+		copy(h.Services, self.Services)
+	}
+
+	return h
 }
 
 // 处理器名称
@@ -352,24 +413,24 @@ func (self *handler) Controller() any {
 // 初始化生成新的处理器
 // 任务:创建/缓存/初始化
 // 调用Recycle回收
-func (self *handler) init(router *TRouter) *handler {
-	h := self.Manager.Get(self.Id)
-	if h != nil {
-		return h
+func (self *handler) init(router *TRouter) {
+	self.Lock()
+	defer self.Unlock()
+
+	if self.inited {
+		return
 	}
 
-	h = &handler{}
-	*h = *self //复制handler原型
-	if h.ctrlName != "" {
+	if self.ctrlName != "" {
 		// 新建控制器
-		h.ctrlValue = reflect.New(h.ctrlType)
-		ctrl := h.ctrlValue.Elem()
+		self.ctrlValue = reflect.New(self.ctrlType)
+		ctrl := self.ctrlValue.Elem()
 
 		/* 代码位置不可移动 */
 		// 初始化控制器配置
 		// 断言必须非Elem()
-		if c, ok := h.ctrlValue.Interface().(controllerInit); ok {
-			c.Init(h.Config)
+		if c, ok := self.ctrlValue.Interface().(controllerInit); ok {
+			c.Init(self.Config)
 		}
 
 		var (
@@ -383,7 +444,7 @@ func (self *handler) init(router *TRouter) *handler {
 		for i := 0; i < ctrl.NumField(); i++ {
 			midVal = ctrl.Field(i) // get the middleware value
 			if !midVal.CanSet() {
-				log.Warnf("Field %s in controller %s is not exported and cannot be set.", ctrl.Type().Field(i).Name, h.ctrlName)
+				log.Warnf("Field %s in controller %s is not exported and cannot be set.", ctrl.Type().Field(i).Name, self.ctrlName)
 				continue
 			}
 
@@ -418,7 +479,7 @@ func (self *handler) init(router *TRouter) *handler {
 
 			ml := router.middleware.Get(midName)
 			if ml == nil {
-				log.Panicf("Controller %s need middleware %s to be registered!", h.ctrlName, midName)
+				log.Panicf("Controller %s need middleware %s to be registered!", self.ctrlName, midName)
 			}
 
 			midNewVal := reflect.ValueOf(ml(router))
@@ -442,16 +503,16 @@ func (self *handler) init(router *TRouter) *handler {
 			}
 
 			// 检测中间件黑名单
-			h.Config.mutex.RLock()
-			filters, ok := h.Config.midFilter[midName]
+			self.Config.mutex.RLock()
+			filters, ok := self.Config.midFilter[midName]
 			if ok {
-				_, skip := filters[strings.ToLower(h.FuncName)]
-				h.Config.mutex.RUnlock()
+				_, skip := filters[strings.ToLower(self.FuncName)]
+				self.Config.mutex.RUnlock()
 				if skip {
 					continue
 				}
 			} else {
-				h.Config.mutex.RUnlock()
+				self.Config.mutex.RUnlock()
 			}
 
 			// 添加中间件
@@ -461,54 +522,54 @@ func (self *handler) init(router *TRouter) *handler {
 				// Example:Event
 				//log.Dbg(ctrl.Interface(), midVal.Type().String(), ctrl.Interface().(IMiddleware))
 				if mw, ok := ctrl.Interface().(IMiddleware); ok {
-					h.funcs = append(h.funcs, &handle{IsFunc: false, Middleware: mw})
+					self.funcs = append(self.funcs, &handle{IsFunc: false, Middleware: mw})
 				}
 			} else {
 				//log.Dbg(midVal.Interface(), midVal.Type().String(), midVal.Interface().(IMiddleware))
 				if mw, ok := midVal.Interface().(IMiddleware); ok {
-					h.funcs = append(h.funcs, &handle{IsFunc: false, Middleware: mw})
+					self.funcs = append(self.funcs, &handle{IsFunc: false, Middleware: mw})
 				}
 			}
 		}
 
 		// 写入handler
 		// MethodByName特性取到的值receiver默认为v
-		hd := ctrl.MethodByName(h.FuncName)
+		hd := ctrl.MethodByName(self.FuncName)
 		if !hd.IsValid() {
-			log.Errf("Method %s not found in controller %s", h.FuncName, h.ctrlName)
+			log.Errf("Method %s not found in controller %s", self.FuncName, self.ctrlName)
 			//goto initMiddlewares
 		}
 
 		switch hd.Type().In(0) {
 		case ContextType:
 			if fn, ok := hd.Interface().(func(IContext)); ok {
-				if h.TransportType != HttpHandler {
-					h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(fn)})
+				if self.TransportType != HttpHandler {
+					self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(fn)})
 				} else {
-					h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(fn)})
+					self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(fn)})
 				}
 			}
 		case RpcContextType:
-			h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))})
+			self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))})
 		case HttpContextType:
-			h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
+			self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
 		default:
 			log.Errf("the handler %v is not supportable!", hd)
 		}
 
 		// 所有的指针准备就绪后生成Interface
 		// NOTE:必须初始化结构指针才能生成完整的Model,之后修改CtrlValue将不会有效果
-		h.ctrlModel = h.ctrlValue.Interface()
+		self.ctrlModel = self.ctrlValue.Interface()
 
 		// 初始化控制器配置
 		// 断言必须非Elem()
-		if c, ok := h.ctrlModel.(controllerReady); ok {
-			c.Ready(h.Config)
+		if c, ok := self.ctrlModel.(controllerReady); ok {
+			c.Ready(self.Config)
 		}
 	}
 
 	/* 初始化中间件 */
-	for _, handle := range h.funcs {
+	for _, handle := range self.funcs {
 		if handle.Middleware == nil && handle.MiddlewareCreator != nil {
 			middleware := handle.MiddlewareCreator(router)
 			handle.Middleware = middleware
@@ -517,8 +578,8 @@ func (self *handler) init(router *TRouter) *handler {
 		}
 	}
 
-	h.reset()
-	return h
+	self.reset()
+	self.inited = true
 }
 
 // 统一处理 HTTP 和 RPC 的 handler 调用逻辑
@@ -568,18 +629,22 @@ func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error 
 
 		self.pos.Add(1)
 	}
+
 	return nil
 }
 
-func (self *handler) Invoke(ctx IContext) *handler {
-	ctx.setHandler(self)
+func (self *handler) Invoke(ctx IContext) {
+	defer func() {
+		self.reset()
+		defaultHandlerManager.Put(self.Id, self)
+	}()
 
-	self.pos.Add(1)
+	ctx.setHandler(self)
+	self.pos.Inc()
+
 	if err := self.invokeHandlers(ctx, self.TransportType); err != nil {
 		log.Panic(err)
 	}
-
-	return self
 }
 
 // InvokeSubscriber 专用于订阅消息分发，不经过 IContext 路径
@@ -606,9 +671,4 @@ func (self *handler) reset() *handler {
 
 	self.pos.Store(-1) // 重置位置
 	return self
-}
-
-func (self *handler) recycle() {
-	self.reset()
-	self.Manager.Put(self.Id, self)
 }

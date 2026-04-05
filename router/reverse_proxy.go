@@ -21,11 +21,12 @@ var (
 			Timeout:   10 * time.Second, // 建立连接超时
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       60 * time.Second, // 空闲连接超时，建议略低于后端服务的超时时间
+		MaxIdleConns:          1024,
+		MaxIdleConnsPerHost:   1024,             // 极其重要！默认只有 2，高并发下会导致大量连接重连导致 EOF
+		IdleConnTimeout:       90 * time.Second, // 空闲连接超时
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		DisableKeepAlives:     false, // 如果 EOF/Reset 持续，可以尝试设为 true 测试
+		DisableKeepAlives:     false,
 	}
 )
 
@@ -59,14 +60,15 @@ func HttpReverseProxy(ctx *THttpContext) {
 	proxy := httputil.NewSingleHostReverseProxy(rp)
 	proxy.Transport = reverseProxyTransport
 
-	// 保存原始的 Director 并增强
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
+	// 使用现代的 Rewrite 代替 Director
+	proxy.Rewrite = func(r *httputil.ProxyRequest) {
+		r.SetURL(rp)
 		// 很多后端服务（如 Nginx 或严格的 Go Server）需要正确的 Host 头部
-		req.Host = rp.Host
+		r.Out.Host = rp.Host
+		r.SetXForwarded() // 自动设置 X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host
 	}
 
+	log.Dbgf("http: proxy: %s | Method: %s | Path: %s | Target: %s", ctx.Request().Method, ctx.Request().Request.URL.Path, service)
 	// 添加错误处理，记录更多细节
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)

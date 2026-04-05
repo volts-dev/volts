@@ -26,7 +26,7 @@ func staticHandler(urlPattern string, filePath string) func(c *THttpContext) {
 		// Check if file exists and/or if we have permission to access it
 		if _, err := fs.Open(file); err != nil {
 			// 对最后一个控制器返回404
-			if ctx.handlerIndex == len(ctx.route.handlers)-1 {
+			if ctx.handlerIndex == len(ctx.Route().Handlers())-1 {
 				ctx.response.WriteHeader(http.StatusNotFound)
 			}
 

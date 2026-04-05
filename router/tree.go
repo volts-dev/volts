@@ -178,7 +178,7 @@ func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
 		if node.Route != nil && node.Route.group != nil && node.Route.group.config.IsService {
 			grp := node.Route.group
 			// TODO 检测
-			if _, ok := validator[node.Route.Path]; !ok {
+			if _, ok := validator[node.Route.path]; !ok {
 				//
 			}
 
@@ -203,29 +203,32 @@ func (self *TTree) AddRoute(route *route) error {
 		return nil
 	}
 
-	self.Lock()
-	defer self.Unlock()
-
-	if len(route.Methods) == 0 {
+	if len(route.methods) == 0 {
 		return fmt.Errorf("route methods cannot be empty")
 	}
 
-	for _, method := range route.Methods {
+	self.Lock()
+	defer self.Unlock()
+
+	for _, method := range route.methods {
 		method = strings.ToUpper(method)
-		delimitChar := route.PathDelimitChar
+		delimitChar := route.pathDelimitChar
 
 		// to parse path as a List node
-		nodes, _ := self.parsePath(route.Path, delimitChar)
+		nodes, err := self.parsePath(route.path, delimitChar)
+		if err != nil {
+			return err
+		}
 		// 验证合法性
 		if !validNodes(nodes) {
-			log.Panicf("express %s is not supported", route.Path)
+			return fmt.Errorf("express %s is not supported", route.path)
 		}
 
 		// 绑定Route到最后一个Node
 		node := nodes[len(nodes)-1]
-		route.Action = node.Text // 赋值Action
+		// route.Action = node.Text // 赋值Action // TODO: Action should be set during creation or via setter if needed.
 		node.Route = route
-		node.Path = route.Path // 存储路由绑定的URL
+		node.Path = route.path // 存储路由绑定的URL
 
 		// insert the node to tree
 		self.addNodes(method, nodes, false)
@@ -243,7 +246,7 @@ func (self *TTree) DelRoute(path string, route *route) error {
 	self.Lock()
 	defer self.Unlock()
 
-	for _, method := range route.Methods {
+	for _, method := range route.methods {
 		n := self.root[method]
 		if n == nil {
 			return nil
@@ -255,7 +258,12 @@ func (self *TTree) DelRoute(path string, route *route) error {
 		}
 
 		// to parse path as a List node
-		nodes, _ := self.parsePath(path, delimitChar)
+		nodes, err := self.parsePath(path, delimitChar)
+		if err != nil {
+			return err
+		}
+		// 绑定Route用于删除匹配
+		nodes[len(nodes)-1].Route = route
 
 		var p *treeNode = n // 复制方法对应的Root
 
@@ -309,9 +317,9 @@ func (self *TTree) PrintTrees() {
 
 func (r *TTree) Match(method string, path string) (*route, Params) {
 	r.RLock()
-	root := r.root[method]
-	r.RUnlock()
+	defer r.RUnlock()
 
+	root := r.root[method]
 	if root == nil {
 		return nil, nil
 	}
@@ -330,7 +338,7 @@ func (r *TTree) Match(method string, path string) (*route, Params) {
 	params := make(Params, 0, strings.Count(path, string(delimitChar)))
 	for _, n := range root.Children {
 		e := r.matchNode(n, path, delimitChar, &params)
-		if e != nil {
+		if e != nil && e.Route != nil {
 			return e.Route, params
 		}
 	}
@@ -339,6 +347,8 @@ func (r *TTree) Match(method string, path string) (*route, Params) {
 }
 
 func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params *Params) *treeNode {
+	paramsLen := len(*params) // 记录进入当前节点前的参数数量
+
 	switch node.Type {
 	case StaticNode:
 		// match static node
@@ -352,6 +362,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 				if e != nil {
 					return e
 				}
+				*params = (*params)[:paramsLen] // 失败回退参数
 			}
 		}
 	case AnyNode:
@@ -363,7 +374,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 					*params = append(*params, param{node.Text[1:], path[:idx]})
 					return h
 				}
-
+				*params = (*params)[:paramsLen] // 失败回退参数
 			}
 		}
 
@@ -376,11 +387,12 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 		first_Char := path[0]
 		if first_Char == delimitChar {
 			for _, c := range node.Children {
-				h := r.matchNode(c, path[0:], delimitChar, params)
+				h := r.matchNode(c, path, delimitChar, params)
 				if h != nil {
-					*params = append(*params, param{node.Text[1:], path[:0]})
+					//*params = append(*params, param{node.Text[1:], path[:0]})
 					return h
 				}
+				*params = (*params)[:paramsLen] // 失败回退参数
 			}
 			return nil
 		}
@@ -407,12 +419,10 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 			*params = append(*params, param{node.Text[1:], path})
 			return node
 		} else { // !NOTE! 匹配回溯 当匹配进入错误子节点返回nil到父节点重新匹配父节点
-			var retnil bool
 			for _, c := range node.Children {
 				idx := strings.Index(path, c.Text) // #匹配前面检索到的/之前的字符串
 				if idx > -1 {
-					if len(path[:idx]) > 1 && strings.IndexByte(path[:idx], delimitChar) > -1 {
-						retnil = true
+					if len(path[:idx]) > 0 && strings.IndexByte(path[:idx], delimitChar) > -1 {
 						continue
 					}
 
@@ -438,17 +448,12 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 						*params = append(*params, param{node.Text[1:], path[:idx]})
 						return h
 					}
-					retnil = true
+					*params = (*params)[:paramsLen] // 失败回退参数
 				}
-			}
-
-			if retnil || len(node.Children) > 0 {
-				return nil
 			}
 		}
 
 	case RegexpNode:
-
 		idx := strings.IndexByte(path, delimitChar)
 		if idx > -1 {
 			if node.regexp.MatchString(path[:idx]) {
@@ -458,6 +463,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 						*params = append(*params, param{node.Text[1:], path[:idx]})
 						return h
 					}
+					*params = (*params)[:paramsLen] // 失败回退参数
 				}
 			}
 		} else {
@@ -469,6 +475,7 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 						*params = append(*params, param{node.Text[1:], path[:idx]})
 						return h
 					}
+					*params = (*params)[:paramsLen] // 失败回退参数
 				}
 			}
 
@@ -477,7 +484,6 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 				return node
 			}
 		}
-
 	}
 
 	return nil
@@ -509,9 +515,9 @@ func (self *TTree) addNodes(method string, nodes []*treeNode, isHook bool) {
 	Result: @ Nodes List
 	        @ is it dyn route
 */
-func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
+func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, error) {
 	if path == "" {
-		panic("path cannot be empty")
+		return nil, fmt.Errorf("path cannot be empty")
 	}
 
 	if delimitChar == '/' && path[0] != '/' {
@@ -525,7 +531,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 		node           *treeNode
 	)
 	nodes := make([]*treeNode, 0)
-	isDyn := false
 	l := len(path)
 
 	for i = 0; i < l; i++ {
@@ -555,7 +560,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 				}
 			}
 			if bracketLevel > 0 {
-				panic(fmt.Sprintf("lack of %v", string(RBracket)))
+				return nil, fmt.Errorf("lack of %v", string(RBracket))
 			}
 
 			content := path[start : i-1]
@@ -617,7 +622,11 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 				}
 
 				if isRegex {
-					node = &treeNode{Type: RegexpNode, regexp: regexp.MustCompile("^(" + pattern + ")$"), Text: ":" + name}
+					re, err := regexp.Compile("^(" + pattern + ")$")
+					if err != nil {
+						return nil, err
+					}
+					node = &treeNode{Type: RegexpNode, regexp: re, Text: ":" + name}
 				} else {
 					node = &treeNode{Type: VariantNode, Level: level + 1, ContentType: typ, Values: enumValues, Text: ":" + name}
 				}
@@ -626,7 +635,6 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 			}
 
 			nodes = append(nodes, node)
-			isDyn = true
 
 			// Level logic
 			if level == 0 {
@@ -653,11 +661,10 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 			for ; i < l && utils.IsAlnumByte(path[i]); i++ {
 			}
 			nodes = append(nodes, &treeNode{Type: AnyNode, Level: -1, Text: path[startOffset:i]})
-			isDyn = true
 			startOffset = i
 			i--
 			if i == l-1 {
-				return nodes, isDyn
+				return nodes, nil
 			}
 
 		default:
@@ -673,7 +680,7 @@ func (r *TTree) parsePath(path string, delimitChar byte) ([]*treeNode, bool) {
 		nodes = append(nodes, &treeNode{Type: StaticNode, Text: path[startOffset:l]})
 	}
 
-	return nodes, isDyn
+	return nodes, nil
 }
 
 // conbine 2 node together
@@ -770,13 +777,25 @@ func (self *TTree) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bo
 
 func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode {
 	// 如果:找到[已经注册]的分支节点则从该节继续[查找/添加]下一个节点
-	for _, n := range parent.Children {
+	for idx, n := range parent.Children {
 		if n.Equal(nodes[i]) {
-			// 如果:插入的节点层级已经到末尾,则为该节点注册路由
+			// 如果:已经到末尾,则为该节点注销路由
 			if i == len(nodes)-1 {
 				// 剥离目标控制器
-				n.Route.StripHandler(nodes[i].Route)
+				n.Route.stripHandler(nodes[i].Route)
 				self.Count.Dec() // 递减计数器
+
+				// 优化:如果该节点没有 Handler 且没有子节点，则将该节点从父节点中移除
+				if len(n.Route.handlers) == 0 && len(n.Children) == 0 {
+					parent.Children = append(parent.Children[:idx], parent.Children[idx+1:]...)
+				}
+			} else {
+				// 递归处理子节点
+				self.delNode(n, nodes, i+1)
+				// 优化:如果子节点在处理后变为空，也进行清理
+				if n.Route == nil && len(n.Children) == 0 {
+					parent.Children = append(parent.Children[:idx], parent.Children[idx+1:]...)
+				}
 			}
 			return n
 		}

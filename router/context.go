@@ -27,7 +27,7 @@ type (
 		PathParams() *TParamsSet
 		Write([]byte) (int, error)
 		WriteStream(interface{}) error
-		Route() route
+		Route() IRoute
 		Router() IRouter
 		Context(context ...context.Context) context.Context
 		RespondByJson(data interface{})

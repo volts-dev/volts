@@ -33,14 +33,15 @@ type (
 		RecoverHandler func(IContext)     `field:"-"`
 
 		// mapping to config file
-		Recover           bool     `field:"recover"`
-		RouterTreePrinter bool     `field:"router_tree_printer"`
-		RequestPrinter    bool     `field:"request_printer"`
-		StaticDir         []string `field:"static_dir"` // the static dir allow to visit
-		StaticExt         []string `field:"static_ext"` // the static file format allow to visit
-		UsePprof          bool
-		UploadBuf         int `field:"upload_buf"` // 上传文件大小MB
-		UseRootStatics    bool
+		Recover                   bool     `field:"recover"`
+		RouterTreePrinter         bool     `field:"router_tree_printer"`
+		RouterTreeRefreshInterval int      `field:"router_tree_refresh_interval"`
+		RequestPrinter            bool     `field:"request_printer"`
+		StaticDir                 []string `field:"static_dir"` // the static dir allow to visit
+		StaticExt                 []string `field:"static_ext"` // the static file format allow to visit
+		UsePprof                  bool
+		UploadBuf                 int `field:"upload_buf"` // 上传文件大小MB
+		UseRootStatics            bool
 	}
 
 	GroupOption func(*GroupConfig)
@@ -58,12 +59,13 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Name:           "default",
-		Logger:         log,
-		Recover:        true,
-		RecoverHandler: recoverHandler,
-		UploadBuf:      25,
-		UseRootStatics: true,
+		Name:                      "default",
+		Logger:                    log,
+		Recover:                   true,
+		RecoverHandler:            recoverHandler,
+		UploadBuf:                 25,
+		UseRootStatics:            true,
+		RouterTreeRefreshInterval: 60,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)

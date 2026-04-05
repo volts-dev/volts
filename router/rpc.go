@@ -26,7 +26,7 @@ type (
 		router       *TRouter
 		data         *TParamsSet // 数据缓存在各个Controler间调用
 		pathParams   *TParamsSet
-		route        route //执行本次Handle的Route
+		route        *route //执行本次Handle的Route
 		inited       bool
 		handlerIndex int
 		handler      *handler
@@ -72,7 +72,7 @@ func (self *TRpcContext) Response() *transport.RpcResponse {
 	return self.response
 }
 
-func (self *TRpcContext) Route() route {
+func (self *TRpcContext) Route() IRoute {
 	return self.route
 }
 
@@ -81,7 +81,7 @@ func (self *TRpcContext) HandlerIndex() int {
 }
 
 func (self *TRpcContext) Handler(index ...int) *handler {
-	idx := self.handlerIndex
+	idx := 0
 	if len(index) > 0 {
 		idx = index[0]
 	}
@@ -90,7 +90,10 @@ func (self *TRpcContext) Handler(index ...int) *handler {
 		return self.handler
 	}
 
-	return self.route.handlers[idx]
+	handlerId := self.route.handlers[idx]
+	self.handler = defaultHandlerManager.Get(handlerId)
+	self.handlerIndex = idx
+	return self.handler
 }
 
 func (self *TRpcContext) Context(ctx ...context.Context) context.Context {
@@ -129,9 +132,7 @@ func (self *TRpcContext) reset(rw *transport.RpcResponse, req *transport.RpcRequ
 	self.pathParams = nil
 	self.isDone = false
 	self.handlerIndex = 0
-	if Route != nil {
-		self.route = *Route
-	}
+	self.route = Route
 }
 
 func (self *TRpcContext) setData(v interface{}) {

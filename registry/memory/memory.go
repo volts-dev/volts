@@ -125,11 +125,10 @@ func (m *registryState) sendEvent(r *registry.Result) {
 			m.Lock()
 			delete(m.watchers, w.id)
 			m.Unlock()
-		default:
-			select {
-			case w.res <- r:
-			case <-time.After(sendEventTime):
-			}
+		case w.res <- r:
+		case <-time.After(sendEventTime):
+			// Timeout if the watcher is too slow
+			log.Warnf("Watcher %s is slow, event dropped", w.id)
 		}
 	}
 }
@@ -207,7 +206,17 @@ func (m *memRegistry) Register(s *registry.Service, opts ...registry.Option) err
 		}
 	}
 
-	cfg.LocalServices = append(cfg.LocalServices, s)
+	// 避免重复添加本地服务
+	exists := false
+	for _, ls := range cfg.LocalServices {
+		if ls.Name == s.Name && ls.Version == s.Version {
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		cfg.LocalServices = append(cfg.LocalServices, s)
+	}
 
 	if addedNodes {
 		log.Dbgf("Registry added new node to service: %s, version: %s", s.Name, s.Version)
@@ -261,11 +270,9 @@ func (m *memRegistry) GetService(name string) ([]*registry.Service, error) {
 		return nil, registry.ErrNotFound
 	}
 
-	services := make([]*registry.Service, len(m.records[name]))
-	i := 0
+	services := make([]*registry.Service, 0, len(records))
 	for _, record := range records {
-		services[i] = recordToService(record)
-		i++
+		services = append(services, recordToService(record))
 	}
 
 	return services, nil

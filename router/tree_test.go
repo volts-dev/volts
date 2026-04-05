@@ -245,16 +245,12 @@ func TestTreeComprehensive(t *testing.T) {
 	}
 }
 
-func TestTreePanics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic for missing closing brace, but did not")
-		}
-	}()
-
+func TestTreeErrors(t *testing.T) {
 	tree := NewRouteTree()
 	route := newRoute(nil, []string{"GET"}, nil, "/api/{action", "", "", "")
-	tree.AddRoute(route)
+	if err := tree.AddRoute(route); err == nil {
+		t.Errorf("Expected error for missing closing brace, but did not")
+	}
 }
 
 func TestTreeNestedBraces(t *testing.T) {
@@ -313,7 +309,7 @@ func TestTreeDelRoute(t *testing.T) {
 	// Depending on implementation, it might keep the node but remove handlers or delete the node.
 	// We'll check if handlers are gone or route is nil.
 	r, _ = tree.Match("GET", "/api/data")
-	if r != nil && len(r.handlers) > 0 {
+	if r != nil && len(r.Handlers()) != 0 {
 		t.Error("Route should be deleted or have no handlers")
 	}
 }
