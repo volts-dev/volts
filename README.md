@@ -1,5 +1,7 @@
 # Volts
 
+> 一个轻量、接口驱动的 Go 框架，用于构建 HTTP 服务器、RPC 服务和事件驱动微服务。
+>
 > A lightweight, interface-driven Go framework for building HTTP servers, RPC services, and event-driven microservices.
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev)
@@ -8,59 +10,59 @@
 
 ---
 
-## Overview
+## 简介 / Overview
 
-Volts is a Go web + RPC framework built around a clean, layered interface architecture. It provides a single unified programming model that scales from simple HTTP endpoints to full microservice meshes — without forcing you to swap frameworks as your service grows.
+Volts 是一个围绕清晰分层接口架构构建的 Go Web + RPC 框架。它提供统一的编程模型，从简单 HTTP 端点到完整微服务网格均适用，无需随着服务增长而切换框架。
 
-**Key characteristics:**
+**核心特性 / Key characteristics:**
 
-- **Interface-first** — every major component (`IServer`, `IRouter`, `ITransport`, `IBroker`, `IRegistry`, `IClient`) is an interface. Swap implementations without touching business logic.
-- **Options pattern throughout** — all configuration uses `func(*Config)` closures, keeping zero-value structs always valid.
-- **Context pooling** — per-route `sync.Pool` maps recycle HTTP and RPC contexts on the hot path, keeping GC pressure minimal.
-- **Single binary, multiple protocols** — HTTP, RPC over TCP, and pub/sub messaging coexist in the same process with the same router.
+- **接口优先 / Interface-first** — 每个主要组件（`IServer`、`IRouter`、`ITransport`、`IBroker`、`IRegistry`、`IClient`）均为接口，可随时替换实现而不影响业务逻辑。
+- **Options 模式 / Options pattern throughout** — 所有配置使用 `func(*Config)` 闭包，零值结构始终有效。
+- **Context 对象池 / Context pooling** — 每条路由维护独立 `sync.Pool`，在热路径上复用 HTTP 和 RPC 上下文，将 GC 压力降到最低。
+- **单进程多协议 / Single binary, multiple protocols** — HTTP、TCP RPC 和发布订阅消息在同一进程、同一路由器中共存。
 
 ---
 
-## Architecture
+## 架构 / Architecture
 
 ```
 IService  (volts.go)
-  ├── IServer      (server/)      — lifecycle, registry, broker wiring
-  │     └── IRouter (router/)    — radix-tree routing, handler pipeline
+  ├── IServer      (server/)      — 生命周期、注册、broker 接入 / lifecycle, registry, broker wiring
+  │     └── IRouter (router/)    — Radix Tree 路由、Handler 流水线 / radix-tree routing, handler pipeline
   │           └── IContext        — THttpContext | TRpcContext
-  ├── ITransport   (transport/)  — HTTP or TCP wire protocol, TLS, ACME
-  ├── IRegistry    (registry/)   — service discovery backend
-  ├── IBroker      (broker/)     — pub/sub messaging bus
-  ├── IClient      (client/)     — outbound RPC / HTTP calls
-  └── ISelector    (selector/)   — load-balancing over registry nodes
+  ├── ITransport   (transport/)  — HTTP 或 TCP 传输层、TLS、ACME / HTTP or TCP wire protocol, TLS, ACME
+  ├── IRegistry    (registry/)   — 服务发现后端 / service discovery backend
+  ├── IBroker      (broker/)     — 发布/订阅消息总线 / pub/sub messaging bus
+  ├── IClient      (client/)     — 出站 RPC / HTTP 调用 / outbound RPC / HTTP calls
+  └── ISelector    (selector/)   — 注册节点负载均衡 / load-balancing over registry nodes
 ```
 
-**Request flow**
+**请求流程 / Request flow**
 
 ```
 Client Request
-  → ITransport  (accept connection)
-  → IServer     (pass to router)
-  → IRouter     (radix-tree match)
-  → handler chain (middleware → handler)
-  → IContext    (write response back through transport)
+  → ITransport  （接受连接 / accept connection）
+  → IServer     （传递给路由器 / pass to router）
+  → IRouter     （Radix Tree 匹配 / radix-tree match）
+  → Handler 链  （中间件 → 处理器 / middleware → handler）
+  → IContext    （通过传输层写回响应 / write response back through transport）
 ```
 
 ---
 
-## Installation
+## 安装 / Installation
 
 ```bash
 go get github.com/volts-dev/volts
 ```
 
-Requires **Go 1.24+**.
+需要 **Go 1.24+** / Requires **Go 1.24+**.
 
 ---
 
-## Quick Start
+## 快速开始 / Quick Start
 
-### HTTP Server
+### HTTP 服务 / HTTP Server
 
 ```go
 package main
@@ -90,7 +92,7 @@ func main() {
 }
 ```
 
-### Controller (Struct-based)
+### 结构体控制器 / Controller (Struct-based)
 
 ```go
 type UserCtrl struct{}
@@ -105,18 +107,18 @@ func (c UserCtrl) Post(ctx *router.THttpContext) {
 
 func main() {
     r := router.New()
-    r.Url("REST", "/users", new(UserCtrl)) // maps GET/POST/PUT/DELETE automatically
+    r.Url("REST", "/users", new(UserCtrl)) // 自动映射 GET/POST/PUT/DELETE / maps automatically
     volts.New(volts.Server(server.New(server.WithRouter(r)))).Run()
 }
 ```
 
-### Route Groups
+### 路由分组 / Route Groups
 
 ```go
 r := router.New()
 
 v1 := router.NewGroup(router.WithGroupPathPrefix("/api/v1"))
-v1.Url("GET", "/users", listUsers)
+v1.Url("GET",  "/users", listUsers)
 v1.Url("POST", "/users", createUser)
 
 r.RegisterGroup(v1)
@@ -124,11 +126,13 @@ r.RegisterGroup(v1)
 
 ---
 
-## RPC Server
+## RPC 服务 / RPC Server
+
+Volts 通过 `CONNECT` 方法支持基于 TCP 的二进制 RPC，同一路由器同时处理 HTTP 和 RPC 路由。
 
 Volts supports binary RPC over TCP using the `CONNECT` method. The same router handles both HTTP and RPC routes.
 
-**Server**
+**服务端 / Server**
 
 ```go
 type Arith struct{}
@@ -150,17 +154,19 @@ func main() {
 }
 ```
 
-**Client**
+**客户端 / Client**
 
 ```go
-cli, _ := client.NewHttpClient()
-req, _ := cli.NewRequest("Arith.Mul", "Test.Endpoint", &Args{Num1: 3, Num2: 4})
-cli.Call(req, client.WithAddress("127.0.0.1:35999"))
+cli, _ := client.NewRpcClient()
+req, _ := cli.NewRequest("Arith", "Mul", &Args{Num1: 3, Num2: 4})
+resp, err := cli.Call(req, client.WithAddress("127.0.0.1:35999"))
 ```
 
 ---
 
-## Publish / Subscribe
+## 发布/订阅 / Publish / Subscribe
+
+Volts 内置 broker 抽象，支持事件驱动消息传递。处理 HTTP 请求的同一服务器也可以订阅主题。
 
 Volts includes a built-in broker abstraction for event-driven messaging. The same server that handles HTTP requests can also subscribe to topics.
 
@@ -175,17 +181,17 @@ import (
     "github.com/volts-dev/volts/server"
 )
 
-// 1. Define message
+// 1. 定义消息 / Define message
 type OrderEvent struct{ OrderID string; Amount float64 }
 
 func (e *OrderEvent) Topic() string        { return "order.created" }
 func (e *OrderEvent) ContentType() string  { return "application/json" }
 func (e *OrderEvent) Payload() interface{} { return e }
 
-// 2. Subscribe
+// 2. 订阅 / Subscribe
 func onOrder(ctx *router.TSubscriberContext) {
     msg := ctx.Event.Message()
-    // process msg.Body ...
+    // 处理消息 / process msg.Body ...
 }
 
 func main() {
@@ -196,22 +202,24 @@ func main() {
     srv := server.New(server.WithRouter(r), server.WithBroker(b))
     srv.Start()
 
-    // 3. Publish
+    // 3. 发布 / Publish
     pub := server.NewPublisher(server.WithPublisherBroker(b))
     pub.Publish(context.Background(), &OrderEvent{OrderID: "ORD-001", Amount: 99.9})
 }
 ```
 
-### Supported Brokers
+**支持的 Broker / Supported Brokers**
 
-| Backend | Import | Use Case |
+| 后端 / Backend | 导入 / Import | 适用场景 / Use Case |
 |---|---|---|
-| **Memory** | `broker/memory` | Local testing, single-process event fan-out |
-| **HTTP** | `broker/http` | Cross-service pub/sub without a message broker |
+| **Memory** | `broker/memory` | 本地测试、单进程事件扇出 / Local testing, single-process event fan-out |
+| **HTTP** | `broker/http` | 跨服务发布订阅，无需消息中间件 / Cross-service pub/sub without a message broker |
 
 ---
 
-## Middleware
+## 中间件 / Middleware
+
+中间件以结构体嵌入方式注入控制器，框架自动发现生命周期钩子（`Init`、`Before`、`After`、`Panic`）。
 
 Middleware is embedded in handler structs. The framework discovers lifecycle hooks (`Init`, `Before`, `After`, `Panic`) automatically.
 
@@ -219,11 +227,11 @@ Middleware is embedded in handler structs. The framework discovers lifecycle hoo
 import "github.com/volts-dev/volts-middleware/event"
 
 type UserCtrl struct {
-    event.TEvent // embeds Before / After / Panic hooks
+    event.TEvent // 嵌入 Before / After / Panic 钩子 / embeds lifecycle hooks
 }
 
 func (c UserCtrl) Before(ctx *router.THttpContext) {
-    // runs before every method in UserCtrl
+    // 在 UserCtrl 每个方法前执行 / runs before every method in UserCtrl
 }
 
 func (c UserCtrl) Get(ctx *router.THttpContext) {
@@ -233,7 +241,9 @@ func (c UserCtrl) Get(ctx *router.THttpContext) {
 
 ---
 
-## Service Discovery & Registry
+## 服务发现 & 注册 / Service Discovery & Registry
+
+将服务注册到发现后端，使客户端自动定位：
 
 Register your service with a discovery backend so clients can find it automatically:
 
@@ -241,7 +251,7 @@ Register your service with a discovery backend so clients can find it automatica
 import (
     "github.com/volts-dev/volts/registry/consul"
     "github.com/volts-dev/volts/registry/etcd"
-    _ "github.com/volts-dev/volts/registry/mdns"  // zero-config LAN discovery
+    _ "github.com/volts-dev/volts/registry/mdns"  // 零配置局域网发现 / zero-config LAN discovery
 )
 
 // Consul
@@ -257,24 +267,24 @@ app := volts.New(
 )
 ```
 
-| Backend | Package | Notes |
+| 后端 / Backend | 包 / Package | 备注 / Notes |
 |---|---|---|
-| **mDNS** | `registry/mdns` | Zero-config, LAN-only |
-| **Memory** | `registry/memory` | In-process, testing |
-| **Consul** | `registry/consul` | Production-grade, health checks |
-| **etcd** | `registry/etcd` | Kubernetes-native |
+| **mDNS** | `registry/mdns` | 零配置，仅局域网 / Zero-config, LAN-only |
+| **Memory** | `registry/memory` | 进程内，用于测试 / In-process, testing |
+| **Consul** | `registry/consul` | 生产级，支持健康检查 / Production-grade, health checks |
+| **etcd** | `registry/etcd` | Kubernetes 原生 / Kubernetes-native |
 
 ---
 
-## Transport
+## 传输层 / Transport
 
 ```go
 import "github.com/volts-dev/volts/transport"
 
-// HTTP (default)
+// HTTP（默认 / default）
 volts.Transport(transport.NewHTTPTransport(transport.WithAddrs(":8080")))
 
-// TCP (for RPC)
+// TCP（RPC 场景 / for RPC）
 volts.Transport(transport.NewTCPTransport())
 
 // TLS
@@ -284,71 +294,60 @@ volts.Transport(transport.NewHTTPTransport(
 ))
 ```
 
+通过 `internal/acme` 支持 ACME / Let's Encrypt 自动证书签发。
+
 ACME / Let's Encrypt automatic certificate provisioning is supported via `internal/acme`.
 
 ---
 
-## Codec
+## 编解码 / Codec
+
+消息序列化通过 `Content-Type` 按请求协商，所有 codec 以内容类型哈希注册并自动选择。
 
 Message serialization is negotiated per request via `Content-Type`. All codecs are registered by content-type hash and selected automatically.
 
-| Format | Content-Type | Notes |
+| 格式 / Format | Content-Type | 备注 / Notes |
 |---|---|---|
-| JSON (Sonic) | `application/json` | Default, SIMD-accelerated |
-| MessagePack | `application/msgpack` | Compact binary |
-| Protobuf | `application/protobuf` | Schema-based |
-| Gob | `application/gob` | Go-native |
-| Raw bytes | `application/bytes` | Zero-copy passthrough |
+| JSON (Sonic) | `application/json` | 默认，SIMD 加速 / Default, SIMD-accelerated |
+| MessagePack | `application/msgpack` | 紧凑二进制 / Compact binary |
+| Protobuf | `application/protobuf` | 基于 Schema / Schema-based |
+| Gob | `application/gob` | Go 原生 / Go-native |
+| Raw bytes | `application/bytes` | 零拷贝直通 / Zero-copy passthrough |
 
 ---
 
-## Real-Time Web (SSE Demo)
-
-The `demo/pubsub_web` example shows how to bridge the broker to browser clients using Server-Sent Events:
-
-```
-broker subscriber → Hub.Broadcast() → SSE /events → EventSource (JS)
-```
-
-```bash
-go run ./demo/pubsub_web/cmd/
-# open http://localhost:8080
-```
-
-The page renders a live dashboard updating every second — no WebSocket library needed.
-
----
-
-## Project Layout
+## 项目结构 / Project Layout
 
 ```
 volts/
-├── broker/          # pub/sub — memory & HTTP backends
-├── client/          # outbound HTTP and RPC calls
+├── broker/          # 发布订阅 — Memory & HTTP 后端 / pub/sub — memory & HTTP backends
+├── client/          # 出站 HTTP 和 RPC 调用 / outbound HTTP and RPC calls
 ├── codec/           # JSON/Sonic, MsgPack, Protobuf, Gob, bytes
-├── config/          # top-level config loading (Viper)
-├── demo/            # runnable examples
+├── config/          # 顶层配置加载 (Viper) / top-level config loading (Viper)
+├── demo/            # 可运行示例 / runnable examples
 │   ├── web/         # HTTP: hello world, REST, middleware, module groups
 │   ├── rpc/         # TCP RPC: server + client
 │   ├── pubsub/      # broker: pub/sub with memory backend
 │   └── pubsub_web/  # SSE: real-time browser dashboard
-├── internal/        # shared utilities (pool, TLS, mDNS, ACME, backoff)
-├── logger/          # structured logging (zap)
-├── registry/        # service discovery — Consul, etcd, mDNS, memory
-├── router/          # radix-tree routing, handler reflection, context pool
-├── selector/        # load-balancing strategy over registry nodes
-├── server/          # lifecycle, registry wiring, broker subscriptions
-└── transport/       # HTTP and TCP transports, TLS, message framing
+├── internal/        # 共享工具（pool, TLS, mDNS, ACME, backoff）/ shared utilities
+├── logger/          # 结构化日志 (zap) / structured logging (zap)
+├── registry/        # 服务发现 — Consul, etcd, mDNS, memory / service discovery
+├── router/          # Radix Tree 路由、Handler 反射、Context 池 / routing, handler, context pool
+├── selector/        # 注册节点负载均衡策略 / load-balancing strategy over registry nodes
+├── server/          # 生命周期、注册接入、broker 订阅 / lifecycle, registry, broker subscriptions
+└── transport/       # HTTP 和 TCP 传输层、TLS、消息帧 / HTTP and TCP transports, TLS, message framing
 ```
 
 ---
 
-## Configuration
+## 配置 / Configuration
+
+所有配置使用 Options 模式，每个包都暴露 `New(opts ...Option)`。
 
 All configuration uses the options pattern. Every package exposes `New(opts ...Option)`.
 
 ```go
-// Server options
+// 服务器选项 / Server options
 server.New(
     server.Address(":8080"),
     server.WithName("my-service"),
@@ -360,14 +359,14 @@ server.New(
     server.RegisterInterval(15 * time.Second),
 )
 
-// Router options
+// 路由器选项 / Router options
 router.New(
-    router.WithRoutesTreePrinter(), // print route table on start
-    router.WithRequestPrinter(),    // log every request
-    router.WithPprof(),             // mount /debug/pprof
+    router.WithRoutesTreePrinter(), // 启动时打印路由表 / print route table on start
+    router.WithRequestPrinter(),    // 记录每个请求 / log every request
+    router.WithPprof(),             // 挂载 /debug/pprof
 )
 
-// App lifecycle hooks
+// 应用生命周期钩子 / App lifecycle hooks
 volts.New(
     volts.Server(srv),
     volts.BeforeStart(func() error { /* ... */ return nil }),
@@ -377,7 +376,7 @@ volts.New(
 
 ---
 
-## Service Lifecycle
+## 服务生命周期 / Service Lifecycle
 
 ```
 app.Run()
@@ -385,9 +384,9 @@ app.Run()
        ├─ config.Load()
        ├─ transport.Listen()
        ├─ broker.Start()
-       ├─ server.Register()  → registry + broker subscriptions
-       └─ (loop) transport.Serve() → router → handler
-  └─ wait for SIGINT / SIGTERM / SIGQUIT
+       ├─ server.Register()  → 注册到 registry + broker 订阅 / registry + broker subscriptions
+       └─ (循环 / loop) transport.Serve() → router → handler
+  └─ 等待 SIGINT / SIGTERM / SIGQUIT / wait for OS signal
   └─ app.Stop()
        ├─ server.Deregister()
        ├─ broker.Close()
@@ -396,69 +395,78 @@ app.Run()
 
 ---
 
-## Commands
+## 常用命令 / Commands
 
 ```bash
-# Build
+# 构建 / Build
 go build ./...
 
-# Run all tests
+# 运行所有测试 / Run all tests
 go test ./...
 
-# Run with race detector
+# 竞态检测 / Run with race detector
 go test -race ./...
 
-# Specific package
+# 特定包 / Specific package
 go test ./router/...
 go test ./broker/memory/...
 
-# Benchmarks
+# 基准测试 / Benchmarks
 go test ./router/ -bench=. -benchmem
 
-# Vet
+# 静态检查 / Vet
 go vet ./...
 ```
 
 ---
 
-## Applicable Domains
+## 适用领域 / Applicable Domains
+
+Volts 设计为通用基础设施层，其接口驱动架构使其适用于需要多协议或多部署拓扑并存的场景。
 
 Volts is designed to be a general-purpose infrastructure layer. Its interface-driven architecture makes it suitable wherever multiple protocols or deployment topologies need to coexist.
 
-### Today
+### 当前 / Today
 
-| Domain | How Volts fits |
+| 领域 / Domain | Volts 适配方式 / How Volts fits |
 |---|---|
-| **Web APIs** | HTTP router with REST mapping, path params, middleware pipeline |
-| **Internal RPC** | TCP transport with binary codec, service discovery, load balancing |
-| **Event-driven services** | Broker abstraction with memory/HTTP backends, typed message handlers |
-| **Microservice platforms** | Registry (Consul/etcd/mDNS), selector, per-service deployment |
-| **Real-time dashboards** | SSE endpoint bridged from broker, proven by the pubsub_web demo |
-| **Reverse proxy / gateway** | Built-in proxy handler (`router/reverse_proxy.go`) with WebSocket support |
+| **Web API** | HTTP 路由器，REST 映射，路径参数，中间件流水线 / HTTP router with REST mapping, path params, middleware pipeline |
+| **内部 RPC / Internal RPC** | TCP 传输层，二进制 codec，服务发现，负载均衡 / TCP transport with binary codec, service discovery, load balancing |
+| **事件驱动服务 / Event-driven services** | Broker 抽象，Memory/HTTP 后端，类型化消息处理器 / Broker abstraction with memory/HTTP backends |
+| **微服务平台 / Microservice platforms** | Registry (Consul/etcd/mDNS)，Selector，每服务独立部署 / Registry, selector, per-service deployment |
+| **实时仪表盘 / Real-time dashboards** | SSE 端点桥接 broker，pubsub_web demo 已验证 / SSE endpoint bridged from broker |
+| **反向代理/网关 / Reverse proxy / gateway** | 内置代理处理器，支持 WebSocket / Built-in proxy handler with WebSocket support |
 
-### Near-term
+### 近期 / Near-term
 
-| Domain | Path |
+| 领域 / Domain | 路径 / Path |
 |---|---|
-| **gRPC gateway** | Swap transport layer; codec already supports Protobuf |
-| **IoT device backends** | TCP transport + binary codec suit constrained devices; mDNS enables zero-config LAN discovery |
-| **WebSocket services** | Hijacker interface already present in THttpResponse; upgrade path is straightforward |
-| **Multi-tenant SaaS** | Demonstrated by the vectors project built on top of volts |
-| **NATS / Kafka broker adapters** | Implement IBroker to add cloud-native message buses without changing service code |
-| **WASM edge compute** | Interface isolation means transports and registries can be replaced with edge-compatible implementations |
+| **gRPC 网关 / gRPC gateway** | 替换传输层；codec 已支持 Protobuf / Swap transport layer; codec already supports Protobuf |
+| **IoT 设备后端 / IoT device backends** | TCP 传输层 + 二进制 codec；mDNS 支持零配置局域网发现 / TCP transport + binary codec; mDNS enables zero-config LAN discovery |
+| **WebSocket 服务 / WebSocket services** | THttpResponse 已实现 Hijacker 接口，升级路径简单 / Hijacker interface already present; upgrade path is straightforward |
+| **NATS / Kafka Broker 适配器** | 实现 IBroker 接口即可接入云原生消息总线 / Implement IBroker to add cloud-native message buses |
 
-### Long-term
+### 长期愿景 / Long-term
 
-| Domain | Vision |
+| 领域 / Domain | 愿景 / Vision |
 |---|---|
-| **Service mesh data plane** | IRegistry + ISelector already encode the discovery/load-balancing contract; a sidecar proxy is a natural extension |
-| **AI inference serving** | High-throughput binary RPC over TCP with Protobuf codec suits model serving endpoints |
-| **Distributed workflow engines** | Broker pub/sub + registry form the coordination primitives; a durable task queue sits on top |
-| **Plugin / module marketplaces** | The module group system (demonstrated in vectors) provides install/uninstall lifecycle per tenant |
+| **Service Mesh 数据面 / Service mesh data plane** | IRegistry + ISelector 已编码发现/负载均衡契约；边车代理是自然延伸 / IRegistry + ISelector already encode the discovery contract |
+| **AI 推理服务 / AI inference serving** | 高吞吐 TCP RPC + Protobuf codec 适合模型服务端点 / High-throughput binary RPC over TCP with Protobuf codec suits model serving |
+| **插件市场 / Plugin marketplaces** | Module Group 系统提供每租户安装/卸载生命周期 / The module group system provides install/uninstall lifecycle per tenant |
 
 ---
 
-## Contributing
+## 路线图 / Roadmap
+
+详细技术栈升级建议请参阅：[技术栈重构设计文档](docs/superpowers/specs/2026-04-07-tech-stack-redesign.md)
+
+For detailed tech stack upgrade recommendations, see: [Tech Stack Redesign Design Document](docs/superpowers/specs/2026-04-07-tech-stack-redesign.md)
+
+---
+
+## 贡献 / Contributing
+
+欢迎 Issue 和 Pull Request，提交前请运行 `go vet ./...` 和 `go test -race ./...`。
 
 Issues and pull requests are welcome. Please run `go vet ./...` and `go test -race ./...` before submitting.
 
@@ -468,4 +476,4 @@ Issues and pull requests are welcome. Please run `go vet ./...` and `go test -ra
 
 ## License
 
-MIT © volts-dev
+MIT
