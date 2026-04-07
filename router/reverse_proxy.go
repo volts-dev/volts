@@ -57,27 +57,24 @@ func HttpReverseProxy(ctx *THttpContext) {
 		return
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(rp)
-	proxy.Transport = reverseProxyTransport
-
-	// 使用现代的 Rewrite 代替 Director
-	proxy.Rewrite = func(r *httputil.ProxyRequest) {
-		r.SetURL(rp)
-		// 很多后端服务（如 Nginx 或严格的 Go Server）需要正确的 Host 头部
-		r.Out.Host = rp.Host
-		r.SetXForwarded() // 自动设置 X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host
+	// 直接构造 ReverseProxy，只设置 Rewrite（不使用 NewSingleHostReverseProxy，
+	// 因为它内部会设置 Director，与 Rewrite 同时存在会 panic）
+	proxy := &httputil.ReverseProxy{
+		Transport: reverseProxyTransport,
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(rp)
+			r.Out.Host = rp.Host
+			r.SetXForwarded()
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)
+			if ctx.Response().Status() == 0 {
+				ctx.WriteHeader(http.StatusBadGateway)
+			}
+		},
 	}
 
 	log.Dbgf("http: proxy: %s | Method: %s | Path: %s | Target: %s", ctx.Request().Method, ctx.Request().Request.URL.Path, service)
-	// 添加错误处理，记录更多细节
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)
-		// 这种错误通常意味着后端不可达或崩溃
-		if ctx.Response().Status() == 0 {
-			ctx.WriteHeader(http.StatusBadGateway)
-		}
-	}
-
 	proxy.ServeHTTP(ctx.Response(), ctx.Request().Request)
 }
 
