@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -512,14 +513,16 @@ func (self *TServer) Start() error {
 			swg.Wait()
 		}
 
-		// close transport listener
-		ch <- ts.Close()
+		// 关闭传输层并聚合 broker 错误，确保所有关闭错误均被返回
+		tsErr := ts.Close()
 
-		// disconnect the broker
 		log.Infof("Broker [%s] Disconnected from %s", bname, cfg.Broker.Address())
-		if err := cfg.Broker.Close(); err != nil {
-			log.Errf("Broker [%s] Disconnect error: %v", bname, err)
+		brokerErr := cfg.Broker.Close()
+		if brokerErr != nil {
+			log.Errf("Broker [%s] Disconnect error: %v", bname, brokerErr)
 		}
+
+		ch <- errors.Join(tsErr, brokerErr)
 	}, func(err error) { log.Err(err.Error()) })
 
 	return nil

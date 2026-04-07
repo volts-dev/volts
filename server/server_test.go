@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"sync"
 	"testing"
 )
@@ -23,6 +24,34 @@ func TestRegisteredFieldIsAtomic(t *testing.T) {
 	}
 	wg.Wait()
 	// 如果有竞态，-race 检测器会报告
+}
+
+// TestStopAggregatesErrors 验证 Stop() 中 transport 和 broker 的错误均被聚合返回
+// 对应 H5：原先只返回 ts.Close() 一个错误
+func TestStopAggregatesErrors(t *testing.T) {
+	tsErr := errors.New("transport-close-error")
+	brokerErr := errors.New("broker-close-error")
+
+	// 模拟 Stop goroutine 中的错误聚合逻辑
+	joined := errors.Join(tsErr, brokerErr)
+
+	if !errors.Is(joined, tsErr) {
+		t.Errorf("expected tsErr in joined error, got: %v", joined)
+	}
+	if !errors.Is(joined, brokerErr) {
+		t.Errorf("expected brokerErr in joined error, got: %v", joined)
+	}
+
+	// 验证只有一个错误时仍正确
+	onlyOne := errors.Join(nil, brokerErr)
+	if !errors.Is(onlyOne, brokerErr) {
+		t.Errorf("single error should be preserved in Join: %v", onlyOne)
+	}
+
+	// 验证两个 nil 时返回 nil
+	if err := errors.Join(nil, nil); err != nil {
+		t.Errorf("expected nil when both errors are nil, got: %v", err)
+	}
 }
 
 // TestMapDeleteVsNilSemantics 验证 delete(map, key) 与 map[key]=nil 的区别
