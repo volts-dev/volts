@@ -139,7 +139,19 @@ func (self *TRouter) Register(ep *registry.Endpoint) error {
 
 func (self *TRouter) Deregister(ep *registry.Endpoint) error {
 	path := ep.Metadata["path"]
-	return self.tree.DelRoute(path, EndpiontToRoute(ep))
+	r := EndpiontToRoute(ep)
+
+	// 在删除前，先从 tree 中查出已注册路由的真实 ID，用于清理 pool 条目
+	// route ID 是自增计数器，每次 EndpiontToRoute 产生不同 ID，
+	// 必须通过 tree.Match 获取实际存储的 route ID
+	for _, method := range ep.Method {
+		if existing, _ := self.tree.Match(method, path); existing != nil {
+			self.httpCtxPool.Delete(existing.Id())
+			self.rpcCtxPool.Delete(existing.Id())
+		}
+	}
+
+	return self.tree.DelRoute(path, r)
 }
 
 func (self *TRouter) Endpoints() (services map[*TGroup][]*registry.Endpoint) {

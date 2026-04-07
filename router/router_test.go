@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/volts-dev/volts/registry"
 )
 
 // TestHttpCtxPoolLoadOrStoreIsRaceFree 验证并发访问同一路由时 pool 只创建一次且无竞态
@@ -49,6 +51,52 @@ func TestHttpCtxPoolLoadOrStoreIsRaceFree(t *testing.T) {
 			t.Errorf("pool[%d]=%p != pool[0]=%p: multiple pool instances created (race condition)",
 				i, pools[i], pools[0])
 		}
+	}
+}
+
+// TestDeregisterCleansPoolEntry 验证路由注销后 pool map 对应 key 被删除
+func TestDeregisterCleansPoolEntry(t *testing.T) {
+	r := New()
+	defer close(r.exit)
+
+	ep := &registry.Endpoint{
+		Name:   "test.Service",
+		Path:   "/pool-cleanup-test",
+		Method: []string{"GET"},
+		Metadata: map[string]string{
+			"path": "/pool-cleanup-test",
+		},
+	}
+
+	// 注册路由
+	if err := r.Register(ep); err != nil {
+		t.Fatal("Register failed:", err)
+	}
+
+	route, _ := r.tree.Match("GET", "/pool-cleanup-test")
+	if route == nil {
+		t.Fatal("route not found after Register")
+	}
+	routeId := route.Id()
+
+	// 手动创建 pool 条目（模拟首次请求触发）
+	r.httpCtxPool.LoadOrStore(routeId, &sync.Pool{New: func() interface{} {
+		return NewHttpContext(r)
+	}})
+
+	// 确认 pool 条目存在
+	if _, ok := r.httpCtxPool.Load(routeId); !ok {
+		t.Fatal("pool entry should exist before Deregister")
+	}
+
+	// 注销路由
+	if err := r.Deregister(ep); err != nil {
+		t.Fatal("Deregister failed:", err)
+	}
+
+	// pool 条目应被清理
+	if _, ok := r.httpCtxPool.Load(routeId); ok {
+		t.Error("pool entry should be deleted after Deregister, but still exists (H1 bug)")
 	}
 }
 
