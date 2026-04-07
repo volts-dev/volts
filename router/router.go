@@ -238,9 +238,14 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 	}
 
 	if r.Method == "CONNECT" { // serve as a raw network server
-		conn, _, err := w.(http.Hijacker).Hijack()
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			log.Errf("rpc hijacking: ResponseWriter does not implement http.Hijacker, addr=%s", r.RemoteAddr)
+			return
+		}
+		conn, _, err := hj.Hijack()
 		if err != nil {
-			log.Errf("rpc hijacking %v:%v", r.RemoteAddr, ": ", err.Error())
+			log.Errf("rpc hijacking %v: %v", r.RemoteAddr, err.Error())
 		}
 		io.WriteString(conn, "HTTP/1.0 200 Connected to RPC\n\n")
 

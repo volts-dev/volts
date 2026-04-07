@@ -14,8 +14,8 @@ type httpResponse struct {
 	_header  map[string]string
 	body     *body.TBody
 
-	Status     string // e.g. "200 OK"
-	StatusCode int    // e.g. 200
+	Status string // e.g. "200 OK"
+	Code   int    // HTTP status code, e.g. 200
 }
 
 // TODO 修改到结构里
@@ -51,6 +51,10 @@ func (self *httpResponse) Location() (*url.URL, error) {
 }
 
 func (r *httpResponse) Read(out interface{}) error {
-
 	return nil
 }
+
+func (self *httpResponse) StatusCode() int {
+	return self.Code
+}
+

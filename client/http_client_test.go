@@ -68,7 +68,7 @@ func TestPostRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	log.Dbg(resp.StatusCode, string(resp.Body().AsBytes()))
+	log.Dbg(resp.StatusCode(), string(resp.Body().AsBytes()))
 }
 
 func TestOrderHeader(t *testing.T) {

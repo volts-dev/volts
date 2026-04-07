@@ -122,7 +122,10 @@ func New(opts ...broker.Option) broker.IBroker {
 		config:      cfg,
 		address:     addr,
 		registry:    cfg.Registry,
-		client:      &http.Client{Transport: newTransport(cfg.TLSConfig)},
+		client: &http.Client{
+			Transport: newTransport(cfg.TLSConfig),
+			Timeout:   30 * time.Second,
+		},
 		subscribers: make(map[string][]*httpSubscriber),
 		exit:        make(chan chan error),
 		//mux:         http.NewServeMux(),

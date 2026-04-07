@@ -61,7 +61,7 @@ func (self *RpcClient) Config() *Config {
 }
 
 // 新建请求
-func (self *RpcClient) NewRequest(service, method string, request interface{}, options ...RequestOption) (*rpcRequest, error) {
+func (self *RpcClient) NewRequest(service, method string, request interface{}, options ...RequestOption) (IRequest, error) {
 	options = append(options,
 		WithCodec(self.config.Serialize),
 	)
@@ -69,7 +69,7 @@ func (self *RpcClient) NewRequest(service, method string, request interface{}, o
 }
 
 // 阻塞请求
-func (self *RpcClient) Call(request IRequest, opts ...CallOption) (*rpcResponse, error) {
+func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	callOpts.SelectOptions = append(callOpts.SelectOptions, selector.WithFilter(selector.FilterTrasport(self.config.Transport)))
@@ -111,7 +111,7 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (*rpcResponse,
 	}
 
 	var gerr error
-	var response *rpcResponse
+	var response IResponse
 	// get the retries
 	retries := callOpts.Retries
 
@@ -131,11 +131,12 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (*rpcResponse,
 		} else {
 			// 本机 IP 自动转为 loopback 以获得最低延迟
 			node.Address = addr.LocalFormat(node.Address)
-			response, err = self.call(ctx, node, request, callOpts)
+			resp, err := self.call(ctx, node, request, callOpts)
 			// if the call succeeded lets bail early
 			if err == nil {
-				return response, nil
+				return resp, nil
 			}
+			response = resp
 			gerr = err
 		}
 

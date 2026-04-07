@@ -261,7 +261,7 @@ func (self *HttpClient) printRequest(buf *bytes.Buffer, req *http.Request, rsp *
 			buf.WriteString("\n")
 		}
 		buf.WriteString(fmt.Sprintf("Address: %s  \n", rsp.Request().URL.String()))
-		buf.WriteString(fmt.Sprintf("Response code: %d  \n", rsp.StatusCode))
+		buf.WriteString(fmt.Sprintf("Response code: %d  \n", rsp.Code))
 		buf.WriteString("Received Headers:\n")
 		for n, h := range rsp.Header() {
 			buf.WriteString(fmt.Sprintf("%s: %s  \n", n, strings.Join(h, ";")))
@@ -368,7 +368,7 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 		response:   hrsp,
 		body:       bd,
 		Status:     hrsp.Status,
-		StatusCode: hrsp.StatusCode,
+		Code: hrsp.StatusCode,
 	}
 
 	if h.config.PrintRequest {
@@ -380,7 +380,15 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 }
 
 // 阻塞请求
-func (self *HttpClient) Call(request *httpRequest, opts ...CallOption) (*httpResponse, error) {
+func (self *HttpClient) Call(request IRequest, opts ...CallOption) (IResponse, error) {
+	req, ok := request.(*httpRequest)
+	if !ok {
+		return nil, fmt.Errorf("HttpClient.Call: expected *httpRequest, got %T", request)
+	}
+	return self.callTyped(req, opts...)
+}
+
+func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*httpResponse, error) {
 	// make a copy of call opts
 	callOpts := self.config.CallOptions
 	callOpts.SelectOptions = append(callOpts.SelectOptions, selector.WithFilter(selector.FilterTrasport(self.config.Transport)))

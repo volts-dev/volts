@@ -783,7 +783,10 @@ func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode
 			if i == len(nodes)-1 {
 				// 剥离目标控制器
 				n.Route.stripHandler(nodes[i].Route)
-				self.Count.Dec() // 递减计数器
+				// 确保计数器不低于 0，避免溢出
+				if self.Count.Load() > 0 {
+					self.Count.Dec()
+				}
 
 				// 优化:如果该节点没有 Handler 且没有子节点，则将该节点从父节点中移除
 				if len(n.Route.handlers) == 0 && len(n.Children) == 0 {

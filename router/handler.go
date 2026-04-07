@@ -584,12 +584,16 @@ func (self *handler) init(router *TRouter) {
 
 // 统一处理 HTTP 和 RPC 的 handler 调用逻辑
 func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error {
-	for int(self.pos.Load()) < len(self.funcs) {
+	for {
+		pos := int(self.pos.Load())
+		if pos >= len(self.funcs) {
+			break
+		}
 		if ctx.IsDone() {
 			break
 		}
 
-		hd := self.funcs[self.pos.Load()]
+		hd := self.funcs[pos]
 		if hd.IsFunc {
 			switch self.TransportType {
 			case HttpHandler:

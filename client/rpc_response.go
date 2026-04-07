@@ -27,3 +27,10 @@ func (self *rpcResponse) ContentType() string {
 func (r *rpcResponse) Header() header.Header {
 	return r.header
 }
+
+func (r *rpcResponse) StatusCode() int {
+	if r.message != nil {
+		return int(r.message.MessageStatusType())
+	}
+	return 0
+}

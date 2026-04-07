@@ -8,18 +8,13 @@ import (
 type (
 	// Client is the interface used to make requests to services.
 	// It supports Request/Response via Transport and Publishing via the Broker.
-	// It also supports bidirectional streaming of requests.
+	// Note: NewRequest is intentionally excluded — RpcClient and HttpClient have
+	// incompatible NewRequest signatures and should be used directly.
 	IClient interface {
 		Init(...Option) error
 		Config() *Config
-		////NewMessage(topic string, msg interface{}, opts ...MessageOption) Message
-		///NewRequest(service, endpoint string, req interface{}, reqOpts ...RequestOption) Request
-		//Call(ctx context.Context, req Request, rsp interface{} ) error
-		//Call(ctx context.Context, request IRequest, opts ...CallOption) (IResponse, error)
-		//Stream(ctx context.Context, req Request, opts ...CallOption) (Stream, error)
-		//Publish(ctx context.Context, msg Message, opts ...PublishOption) error
-		//String() string
-		//NewRequest(service, method string, request interface{}, reqOpts ...RequestOption) IRequest
+		// Call makes a synchronous call and returns the response
+		Call(request IRequest, opts ...CallOption) (IResponse, error)
 	}
 
 	// Request is the interface for a synchronous request used by Call or Stream
@@ -45,12 +40,9 @@ type (
 	// Response is the response received from a service
 	IResponse interface {
 		Body() *body.TBody
-		// Read the response
-		//Codec() codec.Reader
-		// read the header
 		Header() header.Header
-		// Read the undecoded response
-		//Read(out interface{}) error
+		// StatusCode returns the HTTP/RPC status code of the response
+		StatusCode() int
 	}
 )
 
