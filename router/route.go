@@ -204,7 +204,7 @@ func (self *route) Handlers() []int {
 }
 
 // StripHandler 从当前路由中剔除目标路由包含的所有处理器（Handler）。
-// 
+//
 // 该操作实质上是处理器 ID 列表的“减法”运算（self.handlers = self.handlers - target.handlers）。
 // 常用场景包括：在服务发现更新时，从本地路由中移除已下线的服务节点对应的处理器。
 //
