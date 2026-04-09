@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -13,20 +14,33 @@ import (
 	"github.com/volts-dev/volts/selector"
 )
 
+const (
+	// maxProxyRetryBody 超过此大小的请求体不缓冲，不做自动重试
+	maxProxyRetryBody = 1 << 20 // 1 MB
+)
+
 var (
-	// 定义一个全局的传输层，避免每个请求都新建，同时通过配置优化连接池
+	// reverseProxyTransport 是共享的出站连接池。
+	//
+	// 关键配置说明：
+	// - ForceAttemptHTTP2 故意不设：HTTP/2 所有请求共用一条连接，
+	//   该连接 EOF 时所有并发请求全部失败，且 CloseIdleConnections 对
+	//   "正在使用中"的连接无效。HTTP/1.1 每个请求独立连接，故障隔离更好。
+	// - IdleConnTimeout(60s) < 典型后端 keepalive(Nginx 75s)，
+	//   确保本侧先淘汰空闲连接，避免复用后端已关闭的 stale 连接。
+	// - ResponseHeaderTimeout 防止后端无响应时无限等待（调试断点常见场景）。
 	reverseProxyTransport = &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second, // 建立连接超时
+			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:          1024,
-		MaxIdleConnsPerHost:   1024,             // 极其重要！默认只有 2，高并发下会导致大量连接重连导致 EOF
-		IdleConnTimeout:       90 * time.Second, // 空闲连接超时
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       60 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		DisableKeepAlives:     false,
+		ResponseHeaderTimeout: 30 * time.Second, // 防止调试断点导致无限挂起
 	}
 )
 
@@ -57,25 +71,55 @@ func HttpReverseProxy(ctx *THttpContext) {
 		return
 	}
 
-	// 直接构造 ReverseProxy，只设置 Rewrite（不使用 NewSingleHostReverseProxy，
-	// 因为它内部会设置 Director，与 Rewrite 同时存在会 panic）
+	// 缓冲请求体，使 http.Transport 可以在 stale 连接时自动重试（含 POST/PUT）。
+	// GetBody 是 http.Transport 内部重试的触发条件：有 GetBody 时，transport
+	// 检测到 errServerClosedIdle 后会自动重建连接并重放请求，无需在 ErrorHandler
+	// 里手动 retry（手动 retry 传入的是已消费 Body 的 outgoing request，POST 会丢 body）。
+	inReq := ctx.Request().Request
+	var rewriteFn func(*httputil.ProxyRequest)
+	if inReq.Body != nil && inReq.ContentLength > 0 && inReq.ContentLength <= maxProxyRetryBody {
+		bodyBytes, err := io.ReadAll(inReq.Body)
+		if err != nil {
+			ctx.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		inReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		rewriteFn = func(pr *httputil.ProxyRequest) {
+			pr.SetURL(rp)
+			pr.Out.Host = rp.Host
+			pr.SetXForwarded()
+			// 为 outgoing request 设置 GetBody，让 transport 自动重试 stale 连接
+			pr.Out.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			pr.Out.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+			}
+			pr.Out.ContentLength = int64(len(bodyBytes))
+		}
+	} else {
+		rewriteFn = func(pr *httputil.ProxyRequest) {
+			pr.SetURL(rp)
+			pr.Out.Host = rp.Host
+			pr.SetXForwarded()
+		}
+	}
+
 	proxy := &httputil.ReverseProxy{
 		Transport: reverseProxyTransport,
-		Rewrite: func(r *httputil.ProxyRequest) {
-			r.SetURL(rp)
-			r.Out.Host = rp.Host
-			r.SetXForwarded()
-		},
+		Rewrite:   rewriteFn,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)
+			// ★ 关键修复：强制关闭客户端连接。
+			// 不设此 header，Go HTTP server 会把这条连接放回 keep-alive 池，
+			// 客户端复用该连接发下一个请求时读到损坏状态 → EOF。
+			// 这是"一旦出现所有后续请求都 EOF"的真正根因。
+			w.Header().Set("Connection", "close")
 			if ctx.Response().Status() == 0 {
 				ctx.WriteHeader(http.StatusBadGateway)
 			}
 		},
 	}
 
-	log.Dbgf("http: proxy: %s | Method: %s | Path: %s | Target: %s", ctx.Request().Method, ctx.Request().Request.URL.Path, service)
-	proxy.ServeHTTP(ctx.Response(), ctx.Request().Request)
+	proxy.ServeHTTP(ctx.Response(), inReq)
 }
 
 // getService returns the service for this request from the selector

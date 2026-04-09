@@ -191,7 +191,12 @@ func newHandlerManager() *handlerManager {
 func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, services []*registry.Service) *handler {
 	// 生成唯一标识用于缓存
 	// 使用 Path、TransportType 和 HandlerType 等组合生成唯一 Id，避免同路径下的不同 TransportType (HTTP/RPC) 发生冲突
-	idStr := fmt.Sprintf("%s:%v:%v:%s", url.Path, tt, handlerType, GetFuncName(handlers[0], filepath.Separator))
+	serviceName := "local"
+	if services != nil {
+		srv := services[0]
+		serviceName = srv.Name + ":" + srv.Version
+	}
+	idStr := fmt.Sprintf("%s:%s:%v:%v:%s", serviceName, url.Path, tt, handlerType, GetFuncName(handlers[0], filepath.Separator))
 	uid := int(crc32.ChecksumIEEE([]byte(idStr)))
 
 	h := &handler{
@@ -322,6 +327,7 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 func (self *handlerManager) Store(h *handler) {
 	self.Lock()
 	defer self.Unlock()
+	log.Dbgf("%d", h.Id)
 	self.handlerModel[h.Id] = h
 }
 
@@ -360,39 +366,6 @@ func (self *handler) SetServices(services []*registry.Service) {
 	self.Lock()
 	defer self.Unlock()
 	self.Services = services
-}
-
-func (self *handler) clone() *handler {
-	self.RLock()
-	defer self.RUnlock()
-
-	h := &handler{
-		Config:        self.Config,
-		Id:            self.Id,
-		Name:          self.Name,
-		FuncName:      self.FuncName,
-		Type:          self.Type,
-		TransportType: self.TransportType,
-		funcs:         nil, // 初始化为空，克隆时深度拷贝
-		ctrlName:      self.ctrlName,
-		ctrlType:      self.ctrlType,
-		ctrlValue:     self.ctrlValue,
-		ctrlModel:     self.ctrlModel,
-	}
-
-	if self.funcs != nil {
-		h.funcs = make([]*handle, len(self.funcs))
-		copy(h.funcs, self.funcs)
-	}
-
-	h.pos.Store(self.pos.Load())
-
-	if self.Services != nil {
-		h.Services = make([]*registry.Service, len(self.Services))
-		copy(h.Services, self.Services)
-	}
-
-	return h
 }
 
 // 处理器名称
@@ -582,6 +555,39 @@ func (self *handler) init(router *TRouter) {
 	self.inited = true
 }
 
+func (self *handler) clone() *handler {
+	self.RLock()
+	defer self.RUnlock()
+
+	h := &handler{
+		Config:        self.Config,
+		Id:            self.Id,
+		Name:          self.Name,
+		FuncName:      self.FuncName,
+		Type:          self.Type,
+		TransportType: self.TransportType,
+		funcs:         nil, // 初始化为空，克隆时深度拷贝
+		ctrlName:      self.ctrlName,
+		ctrlType:      self.ctrlType,
+		ctrlValue:     self.ctrlValue,
+		ctrlModel:     self.ctrlModel,
+	}
+
+	if self.funcs != nil {
+		h.funcs = make([]*handle, len(self.funcs))
+		copy(h.funcs, self.funcs)
+	}
+
+	h.pos.Store(self.pos.Load())
+
+	if self.Services != nil {
+		h.Services = make([]*registry.Service, len(self.Services))
+		copy(h.Services, self.Services)
+	}
+
+	return h
+}
+
 // 统一处理 HTTP 和 RPC 的 handler 调用逻辑
 func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error {
 	for {
@@ -631,18 +637,13 @@ func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error 
 			hd.Middleware.Handler(ctx)
 		}
 
-		self.pos.Add(1)
+		self.pos.Inc()
 	}
 
 	return nil
 }
 
 func (self *handler) Invoke(ctx IContext) {
-	defer func() {
-		self.reset()
-		defaultHandlerManager.Put(self.Id, self)
-	}()
-
 	ctx.setHandler(self)
 	self.pos.Inc()
 

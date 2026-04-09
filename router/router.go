@@ -415,6 +415,10 @@ func (self *TRouter) route(route *route, ctx IContext) {
 		}
 
 		handler.Invoke(ctx)
+
+		// 回收handler
+		handler.reset()
+		defaultHandlerManager.Put(handlerId, handler)
 	}
 }
 

@@ -7,6 +7,7 @@ toolchain go1.24.2
 //replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
 
 require (
+	github.com/bwmarrin/snowflake v0.3.0
 	github.com/bytedance/sonic v1.15.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
@@ -18,7 +19,7 @@ require (
 	github.com/refraction-networking/utls v1.8.2
 	github.com/spf13/viper v1.21.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/volts-dev/dataset v0.0.0-20260314091026-c8839e277a01
+	github.com/volts-dev/dataset v0.0.0-20260327150141-d193079889ee
 	github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479
 	github.com/volts-dev/utils v0.0.0-20241206111447-ee54d4e2c42c
 	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
@@ -33,11 +34,9 @@ require (
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
-	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -56,7 +55,6 @@ require (
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/go-acme/lego/v4 v4.14.2
 	github.com/golang/protobuf v1.5.4 // indirect
