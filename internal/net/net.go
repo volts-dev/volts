@@ -25,9 +25,32 @@ func HostPort(addr string, port interface{}) string {
 	return fmt.Sprintf("%s:%v", host, port)
 }
 
+// normalizeBindAddr 将纯回环监听地址转换为全接口监听地址。
+// localhost:PORT / 127.0.0.1:PORT / ::1:PORT → :PORT
+// 其他地址原样返回。
+func normalizeBindAddr(addr string) string {
+	// 处理 ::1:PORT 格式（net.SplitHostPort 无法直接解析）
+	if strings.HasPrefix(addr, "::1:") {
+		port := strings.TrimPrefix(addr, "::1:")
+		// 确保 port 部分不含冒号（避免误匹配）
+		if !strings.Contains(port, ":") {
+			return ":" + port
+		}
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return ":" + port
+	}
+	return addr
+}
+
 // Listen takes addr:portmin-portmax and binds to the first available port
 // Example: Listen("localhost:5000-6000", fn)
 func Listen(addr string, fn func(string) (net.Listener, error)) (net.Listener, error) {
+	addr = normalizeBindAddr(addr) // 将回环地址扩展为全接口绑定
 
 	if strings.Count(addr, ":") == 1 && strings.Count(addr, "-") == 0 {
 		return fn(addr)
