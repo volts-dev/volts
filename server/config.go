@@ -109,7 +109,11 @@ func newConfig(opts ...Option) *Config {
 
 	if cfg.Transport == nil {
 		cfg.Init(WithTransport(transport.Default()))
-		cfg.Transport.Init(transport.WithAddrs(DefaultAddress))
+		addr := cfg.Address
+		if addr == "" {
+			addr = DefaultAddress
+		}
+		cfg.Transport.Init(transport.WithAddrs(addr))
 	}
 
 	// if not special router use create new
@@ -264,7 +268,10 @@ func WithTransport(t transport.ITransport) Option {
 // Address to bind to - host:port or :port
 func Address(addr string) Option {
 	return func(cfg *Config) {
-		cfg.Transport.Config().Init(transport.WithAddrs(addr))
+		cfg.Address = addr
+		if cfg.Transport != nil {
+			cfg.Transport.Config().Init(transport.WithAddrs(addr))
+		}
 	}
 }
 

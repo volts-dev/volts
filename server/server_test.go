@@ -86,3 +86,16 @@ func TestMapDeleteVsNilSemantics(t *testing.T) {
 		t.Errorf("nil map assignment: expected 1 entry, got %d", len(m2))
 	}
 }
+
+func TestAddressOptionSyncsBothFields(t *testing.T) {
+	const addr = ":19999"
+	srv := New(Address(addr))
+	cfg := srv.Config()
+
+	if cfg.Address != addr {
+		t.Errorf("cfg.Address = %q, want %q", cfg.Address, addr)
+	}
+	if cfg.Transport.Config().Addrs != addr {
+		t.Errorf("Transport.Addrs = %q, want %q", cfg.Transport.Config().Addrs, addr)
+	}
+}
