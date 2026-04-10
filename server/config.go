@@ -107,6 +107,10 @@ func newConfig(opts ...Option) *Config {
 		}
 	}
 
+	// Transport 在此处初始化，晚于 cfg.Init(opts...)。
+	// 若用户通过 Address() option 提前设置了 cfg.Address（彼时 Transport 为 nil，
+	// Address() 无法同步 Transport.Addrs），此处补偿性地将 cfg.Address 传给 Transport。
+	// 注意：config.Register(cfg) 已在此前调用，cfg.Address 已是最终值（含配置文件覆盖）。
 	if cfg.Transport == nil {
 		cfg.Init(WithTransport(transport.Default()))
 		addr := cfg.Address

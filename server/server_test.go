@@ -4,6 +4,8 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/volts-dev/volts/transport"
 )
 
 // TestRegisteredFieldIsAtomic 验证 registered 字段通过 atomic.Bool 操作，无竞态
@@ -90,6 +92,22 @@ func TestMapDeleteVsNilSemantics(t *testing.T) {
 func TestAddressOptionSyncsBothFields(t *testing.T) {
 	const addr = ":19999"
 	srv := New(Address(addr))
+	cfg := srv.Config()
+
+	if cfg.Address != addr {
+		t.Errorf("cfg.Address = %q, want %q", cfg.Address, addr)
+	}
+	if cfg.Transport.Config().Addrs != addr {
+		t.Errorf("Transport.Addrs = %q, want %q", cfg.Transport.Config().Addrs, addr)
+	}
+}
+
+func TestAddressOptionWithExplicitTransport(t *testing.T) {
+	const addr = ":19998"
+	srv := New(
+		WithTransport(transport.NewHTTPTransport()),
+		Address(addr),
+	)
 	cfg := srv.Config()
 
 	if cfg.Address != addr {
