@@ -1,6 +1,7 @@
 package router
 
 import (
+	"io/fs"
 	"path"
 	"strings"
 
@@ -42,6 +43,7 @@ type (
 		UsePprof                  bool
 		UploadBuf                 int `field:"upload_buf"` // 上传文件大小MB
 		UseRootStatics            bool
+		StaticCacheTTL            int `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
 	}
 
 	GroupOption func(*GroupConfig)
@@ -54,6 +56,7 @@ type (
 		IsService     bool   // 是否在registry注册为独立的服务
 		PathPrefix    string
 		StaticHandler func(IContext) `field:"-"`
+		EmbedFS       fs.FS `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
 	}
 )
 
@@ -64,6 +67,7 @@ func newConfig(opts ...Option) *Config {
 		Recover:                   true,
 		RecoverHandler:            recoverHandler,
 		UploadBuf:                 25,
+		StaticCacheTTL:            60,
 		UseRootStatics:            true,
 		RouterTreeRefreshInterval: 60,
 	}
