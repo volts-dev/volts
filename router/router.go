@@ -101,12 +101,17 @@ func New(opts ...Option) *TRouter {
 		exit:       make(chan bool),
 	}
 	cfg.Router = router
+	router.TGroup.config.StaticCacheTTL = cfg.StaticCacheTTL
 	//~router.respPool.New = func() interface{} {
 	//	return &transport.THttpResponse{}
 	//}
 
 	go router.watch()   // 实时订阅
 	go router.refresh() // 定时刷新
+	go func() {
+		<-router.exit
+		StopAllStaticStores()
+	}()
 
 	return router
 }

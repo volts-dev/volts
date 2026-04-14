@@ -297,7 +297,11 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		absolutePath = _path.Join(self.config.PathPrefix, urlPattern) // the url path
 	}
 
-	ttl := time.Duration(60) * time.Second // 默认 60s；后续可从 RouterConfig 读取
+	ttlSec := self.config.StaticCacheTTL
+	if ttlSec == 0 {
+		ttlSec = 60
+	}
+	ttl := time.Duration(ttlSec) * time.Second
 	store := newStaticStore(ttl, groupFilepath, self.config.EmbedFS)
 	registerStaticStore(store)
 	if _, err := os.Stat(groupFilepath); err == nil {

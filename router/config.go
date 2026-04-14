@@ -55,8 +55,9 @@ type (
 		FilePath      string // 当前源代码文件夹路径
 		IsService     bool   // 是否在registry注册为独立的服务
 		PathPrefix    string
-		StaticHandler func(IContext) `field:"-"`
-		EmbedFS       fs.FS `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
+		StaticHandler  func(IContext) `field:"-"`
+		EmbedFS        fs.FS `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
+		StaticCacheTTL int   `field:"-"` // 0 = use default (60s); negative = never expire
 	}
 )
 

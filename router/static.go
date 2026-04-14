@@ -52,13 +52,13 @@ func StopAllStaticStores() {
 // 读取优先级：cache 命中 → 磁盘（diskDir）→ embed.FS。
 // fsnotify 监听 diskDir，文件变动时失效对应 cache entry。
 type TStaticStore struct {
-	cache      *memory.TMemoryCache
-	ttl        time.Duration
-	diskDir    string // 磁盘目录（可为空）
-	embedFS    fs.FS  // embed 来源（可为 nil）
-	stopOnce   sync.Once
-	watchOnce  sync.Once
-	stop       chan struct{}
+	cache     *memory.TMemoryCache
+	ttl       time.Duration
+	diskDir   string // 磁盘目录（可为空）
+	embedFS   fs.FS  // embed 来源（可为 nil）
+	stopOnce  sync.Once
+	watchOnce sync.Once
+	stop      chan struct{}
 }
 
 func newStaticStore(ttl time.Duration, diskDir string, embedFS fs.FS) *TStaticStore {
@@ -153,7 +153,17 @@ func (s *TStaticStore) Watch() error {
 			watchErr = err
 			return
 		}
-		if err := watcher.Add(s.diskDir); err != nil {
+		// Walk diskDir and add all subdirectories to watcher.
+		// NOTE: directories created after Watch() is called are not automatically watched.
+		if err := filepath.WalkDir(s.diskDir, func(walkPath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil // skip inaccessible paths
+			}
+			if d.IsDir() {
+				return watcher.Add(walkPath)
+			}
+			return nil
+		}); err != nil {
 			watcher.Close()
 			watchErr = err
 			return

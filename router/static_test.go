@@ -177,6 +177,26 @@ func TestStaticStore_StopIdempotent(t *testing.T) {
 	store.Stop()
 }
 
+func TestStaticStore_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(filepath.Dir(dir), "secret.txt")
+	_ = os.WriteFile(secret, []byte("secret"), 0644)
+	defer os.Remove(secret)
+
+	store := newStaticStore(60*time.Second, dir, nil)
+
+	traversalPaths := []string{
+		"../secret.txt",
+		"../../etc/passwd",
+		"foo/../../secret.txt",
+	}
+	for _, p := range traversalPaths {
+		if _, err := store.Open(p); err == nil {
+			t.Errorf("Open(%q) should have failed, got nil error", p)
+		}
+	}
+}
+
 func TestSetStatic_WithEmbedFS(t *testing.T) {
 	fsys := fstest.MapFS{
 		"img/logo.png": &fstest.MapFile{Data: []byte("PNG_DATA")},
