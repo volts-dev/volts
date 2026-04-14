@@ -103,3 +103,76 @@ func TestStaticStore_Miss(t *testing.T) {
 		t.Fatalf("expected fs.ErrNotExist, got %v", err)
 	}
 }
+
+func TestStaticStore_Invalidate(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "inv.txt"), []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store := newStaticStore(60*time.Second, dir, nil)
+
+	// 预热 cache
+	f, err := store.Open("inv.txt")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	io.ReadAll(f)
+	f.Close()
+
+	// 修改磁盘，再 Invalidate
+	os.WriteFile(filepath.Join(dir, "inv.txt"), []byte("v2"), 0644)
+	store.Invalidate("inv.txt")
+
+	// 再次读取，应该得到 v2
+	f2, err := store.Open("inv.txt")
+	if err != nil {
+		t.Fatalf("Open after invalidate: %v", err)
+	}
+	data, _ := io.ReadAll(f2)
+	f2.Close()
+	if string(data) != "v2" {
+		t.Fatalf("after invalidate expected v2, got %q", data)
+	}
+}
+
+func TestStaticStore_Watch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "watch.txt"), []byte("initial"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store := newStaticStore(60*time.Second, dir, nil)
+	defer store.Stop()
+
+	if err := store.Watch(); err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+
+	// 预热 cache
+	f, err := store.Open("watch.txt")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	io.ReadAll(f)
+	f.Close()
+
+	// 修改磁盘文件，等待 watcher 失效 cache
+	os.WriteFile(filepath.Join(dir, "watch.txt"), []byte("updated"), 0644)
+	time.Sleep(100 * time.Millisecond) // 等待 fsnotify 事件
+
+	f2, err := store.Open("watch.txt")
+	if err != nil {
+		t.Fatalf("Open after watch update: %v", err)
+	}
+	data, _ := io.ReadAll(f2)
+	f2.Close()
+	if string(data) != "updated" {
+		t.Fatalf("watcher should have invalidated cache: got %q", data)
+	}
+}
+
+func TestStaticStore_StopIdempotent(t *testing.T) {
+	store := newStaticStore(60*time.Second, "", nil)
+	// 多次调用 Stop 不应 panic
+	store.Stop()
+	store.Stop()
+}
