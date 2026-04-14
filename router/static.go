@@ -52,24 +52,25 @@ func StopAllStaticStores() {
 // 读取优先级：cache 命中 → 磁盘（diskDir）→ embed.FS。
 // fsnotify 监听 diskDir，文件变动时失效对应 cache entry。
 type TStaticStore struct {
-	cache    *memory.TMemoryCache
-	ttl      time.Duration
-	diskDir  string // 磁盘目录（可为空）
-	embedFS  fs.FS  // embed 来源（可为 nil）
-	stopOnce sync.Once
-	stop     chan struct{}
+	cache      *memory.TMemoryCache
+	ttl        time.Duration
+	diskDir    string // 磁盘目录（可为空）
+	embedFS    fs.FS  // embed 来源（可为 nil）
+	stopOnce   sync.Once
+	watchOnce  sync.Once
+	stop       chan struct{}
 }
 
 func newStaticStore(ttl time.Duration, diskDir string, embedFS fs.FS) *TStaticStore {
-	// WithExpire/WithInterval take seconds as int; use a reasonable default for
-	// the GC interval (same as ttl, clamped to at least 1s).
-	intervalSec := int(ttl.Seconds())
-	if intervalSec <= 0 {
+	expireSec := int(ttl.Seconds())
+	intervalSec := expireSec
+	if expireSec <= 0 {
+		expireSec = -1 // cacher: -1 = never expire (vacuum skips TTL<=0)
 		intervalSec = 60
 	}
 
 	return &TStaticStore{
-		cache:   memory.New(memory.WithExpire(intervalSec), memory.WithInterval(intervalSec)),
+		cache:   memory.New(memory.WithExpire(expireSec), memory.WithInterval(intervalSec)),
 		ttl:     ttl,
 		diskDir: diskDir,
 		embedFS: embedFS,
@@ -106,7 +107,11 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 	// 3. 读 embed.FS
 	if s.embedFS != nil {
 		if f, err := s.embedFS.Open(name); err == nil {
-			data, _ := io.ReadAll(f)
+			data, err := io.ReadAll(f)
+			if err != nil {
+				f.Close()
+				return nil, fs.ErrNotExist
+			}
 			f.Close()
 			s.setCache(name, data)
 			return newMemFile(name, data), nil
@@ -117,10 +122,14 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 }
 
 func (s *TStaticStore) setCache(name string, data []byte) {
+	blockTTL := s.ttl
+	if blockTTL <= 0 {
+		blockTTL = -1 // cacher: -1 = never expire for this entry
+	}
 	s.cache.Set(&cacher.CacheBlock{
 		Key:        name,
 		Value:      data,
-		TTL:        s.ttl,
+		TTL:        blockTTL,
 		LastAccess: time.Now(),
 	})
 }
@@ -132,37 +141,45 @@ func (s *TStaticStore) Invalidate(name string) {
 
 // Watch 启动 fsnotify 监听 diskDir。
 // 文件创建/修改/删除时失效对应 cache entry。
-// 需在 diskDir 非空时调用。
+// 需在 diskDir 非空时调用。多次调用安全（幂等）。
 func (s *TStaticStore) Watch() error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
+	if s.diskDir == "" {
+		return nil // nothing to watch
 	}
-	if err := watcher.Add(s.diskDir); err != nil {
-		watcher.Close()
-		return err
-	}
-	go func() {
-		defer watcher.Close()
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
+	var watchErr error
+	s.watchOnce.Do(func() {
+		watcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			watchErr = err
+			return
+		}
+		if err := watcher.Add(s.diskDir); err != nil {
+			watcher.Close()
+			watchErr = err
+			return
+		}
+		go func() {
+			defer watcher.Close()
+			for {
+				select {
+				case event, ok := <-watcher.Events:
+					if !ok {
+						return
+					}
+					if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) {
+						if rel, err := filepath.Rel(s.diskDir, event.Name); err == nil {
+							s.Invalidate(filepath.ToSlash(rel))
+						}
+					}
+				case <-watcher.Errors:
+					// ignore watcher errors
+				case <-s.stop:
 					return
 				}
-				if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) {
-					if rel, err := filepath.Rel(s.diskDir, event.Name); err == nil {
-						s.Invalidate(filepath.ToSlash(rel))
-					}
-				}
-			case <-watcher.Errors:
-				// ignore watcher errors
-			case <-s.stop:
-				return
 			}
-		}
-	}()
-	return nil
+		}()
+	})
+	return watchErr
 }
 
 // Stop 关闭 watcher goroutine。可安全多次调用。

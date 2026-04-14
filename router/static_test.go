@@ -10,16 +10,11 @@ import (
 	"time"
 )
 
-// newTestStore 创建用于测试的 TStaticStore
-func newTestStore(ttl time.Duration, diskDir string, embedFS fs.FS) *TStaticStore {
-	return newStaticStore(ttl, diskDir, embedFS)
-}
-
 func TestStaticStore_EmbedOnly(t *testing.T) {
 	fsys := fstest.MapFS{
 		"hello.txt": &fstest.MapFile{Data: []byte("embed content")},
 	}
-	store := newTestStore(60*time.Second, "", fsys)
+	store := newStaticStore(60*time.Second, "", fsys)
 
 	f, err := store.Open("hello.txt")
 	if err != nil {
@@ -37,7 +32,7 @@ func TestStaticStore_DiskOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "disk.txt"), []byte("disk content"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	store := newTestStore(60*time.Second, dir, nil)
+	store := newStaticStore(60*time.Second, dir, nil)
 
 	f, err := store.Open("disk.txt")
 	if err != nil {
@@ -58,7 +53,7 @@ func TestStaticStore_DiskOverridesEmbed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("disk version"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	store := newTestStore(60*time.Second, dir, fsys)
+	store := newStaticStore(60*time.Second, dir, fsys)
 
 	f, err := store.Open("file.txt")
 	if err != nil {
@@ -76,10 +71,13 @@ func TestStaticStore_CacheHit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "cached.txt"), []byte("original"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	store := newTestStore(60*time.Second, dir, nil)
+	store := newStaticStore(60*time.Second, dir, nil)
 
 	// 第一次读（写入 cache）
-	f, _ := store.Open("cached.txt")
+	f, err := store.Open("cached.txt")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
 	io.ReadAll(f)
 	f.Close()
 
@@ -99,7 +97,7 @@ func TestStaticStore_CacheHit(t *testing.T) {
 }
 
 func TestStaticStore_Miss(t *testing.T) {
-	store := newTestStore(60*time.Second, "", nil)
+	store := newStaticStore(60*time.Second, "", nil)
 	_, err := store.Open("nonexistent.txt")
 	if err != fs.ErrNotExist {
 		t.Fatalf("expected fs.ErrNotExist, got %v", err)
