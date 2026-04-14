@@ -176,3 +176,19 @@ func TestStaticStore_StopIdempotent(t *testing.T) {
 	store.Stop()
 	store.Stop()
 }
+
+func TestSetStatic_WithEmbedFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"img/logo.png": &fstest.MapFile{Data: []byte("PNG_DATA")},
+	}
+
+	g := NewGroup()
+	g.config.EmbedFS = fsys
+	g.SetStatic("/static", t.TempDir()) // 磁盘目录为空的临时目录
+
+	// 验证路由已注册（只检查不 panic）
+	routes := g.GetRoutes()
+	if routes == nil {
+		t.Fatal("routes should not be nil")
+	}
+}

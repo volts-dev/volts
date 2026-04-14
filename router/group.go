@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -296,7 +297,13 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		absolutePath = _path.Join(self.config.PathPrefix, urlPattern) // the url path
 	}
 
-	handler := staticHandler(absolutePath, groupFilepath)
+	ttl := time.Duration(60) * time.Second // 默认 60s；后续可从 RouterConfig 读取
+	store := newStaticStore(ttl, groupFilepath, self.config.EmbedFS)
+	registerStaticStore(store)
+	if _, err := os.Stat(groupFilepath); err == nil {
+		store.Watch() // nolint: errcheck
+	}
+	handler := staticStoreHandler(absolutePath, store)
 	// 路由路径
 	fullRoutePattern := _path.Join(absolutePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
 	self.addRoute(Before, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: fullRoutePattern}, []any{handler})
