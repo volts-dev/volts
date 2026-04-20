@@ -73,6 +73,7 @@ func cachedLocalIPs() map[string]bool {
 	return m
 }
 
+// ISSUE: 在某些系统无法直接访问本地 IP，需要转换为 loopback 地址
 // LocalFormat 将单个地址中的本机 IP 转换为 loopback 地址以获得最低延迟
 // 高性能版本：使用缓存的 IP 查找，无 slice 分配
 func LocalFormat(address string) string {

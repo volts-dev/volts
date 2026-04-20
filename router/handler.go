@@ -68,9 +68,9 @@ type (
 	// 路由节点绑定的控制器 func(Handler)
 	handler struct {
 		sync.RWMutex
-		Config   *ControllerConfig
-		Services []*registry.Service // 该路由服务线路 提供网关等特殊服务用// Versions of this service
-
+		Config        *ControllerConfig
+		_services     []*registry.Service //todo remove 该路由服务线路 提供网关等特殊服务用// Versions of this service
+		service       string
 		Id            int           // 根据Name生成的UID用于缓存
 		Name          string        // handler名称
 		FuncName      string        // handler方法名称
@@ -183,29 +183,39 @@ func newHandlerManager() *handlerManager {
 	}
 }
 
+// 生成唯一标识用于缓存
+// 使用 Path、TransportType 和 HandlerType 等组合生成唯一 Id，避免同路径下的不同 TransportType (HTTP/RPC) 发生冲突
+func generateHandlerId(handlerType HandlerType, tt TransportType, handlers []any, url *TUrl, service string) int {
+	serviceName := "local"
+	if service != "" {
+		serviceName = service
+	}
+	idStr := fmt.Sprintf("%s:%s:%v:%v:%s", serviceName, url.Path, tt, handlerType, GetFuncName(handlers[0], filepath.Separator))
+	return int(crc32.ChecksumIEEE([]byte(idStr)))
+}
+
 /*
 @controller:本地服务会自行本地控制程序 其他代理远程服务为nil
 */
 // 生成handler原型
 // NOTE:不可用于实时环境
-func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, services []*registry.Service) *handler {
-	// 生成唯一标识用于缓存
-	// 使用 Path、TransportType 和 HandlerType 等组合生成唯一 Id，避免同路径下的不同 TransportType (HTTP/RPC) 发生冲突
-	serviceName := "local"
-	if services != nil {
-		srv := services[0]
-		serviceName = srv.Name + ":" + srv.Version
+func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, service string) *handler {
+	uid := generateHandlerId(handlerType, tt, handlers, url, service)
+
+	if h := defaultHandlerManager.Get(uid); h != nil {
+		//h.SetServices(services) // 更新服务列表
+		defaultHandlerManager.Store(h)
+		return h
 	}
-	idStr := fmt.Sprintf("%s:%s:%v:%v:%s", serviceName, url.Path, tt, handlerType, GetFuncName(handlers[0], filepath.Separator))
-	uid := int(crc32.ChecksumIEEE([]byte(idStr)))
 
 	h := &handler{
-		Id:       uid,
-		Name:     fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), uid),
-		Config:   &ControllerConfig{},
-		Type:     handlerType,
-		Services: services,
-		pos:      *atomic.NewInt32(-1), // 初始化位置为-1
+		Id:     uid,
+		Name:   fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), uid),
+		Config: &ControllerConfig{},
+		Type:   handlerType,
+		//services: services,
+		service: service,
+		pos:     *atomic.NewInt32(-1), // 初始化位置为-1
 	}
 	//h.pos.Store(-1)
 
@@ -327,7 +337,7 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 func (self *handlerManager) Store(h *handler) {
 	self.Lock()
 	defer self.Unlock()
-	log.Dbgf("%d", h.Id)
+	log.Dbgf("%d,%s", h.Id, h.Type.String())
 	self.handlerModel[h.Id] = h
 }
 
@@ -362,10 +372,20 @@ func (self *handlerManager) Put(id int, h *handler) {
 	c.Push(h)
 }
 
+func (self *handler) Services() []*registry.Service {
+	self.RLock()
+	defer self.RUnlock()
+	return self._services
+}
+
+func (self *handler) Service() string {
+	return self.service
+}
+
 func (self *handler) SetServices(services []*registry.Service) {
 	self.Lock()
 	defer self.Unlock()
-	self.Services = services
+	self._services = services
 }
 
 // 处理器名称
@@ -571,6 +591,7 @@ func (self *handler) clone() *handler {
 		ctrlType:      self.ctrlType,
 		ctrlValue:     self.ctrlValue,
 		ctrlModel:     self.ctrlModel,
+		service:       self.service,
 	}
 
 	if self.funcs != nil {
@@ -580,10 +601,11 @@ func (self *handler) clone() *handler {
 
 	h.pos.Store(self.pos.Load())
 
-	if self.Services != nil {
-		h.Services = make([]*registry.Service, len(self.Services))
-		copy(h.Services, self.Services)
-	}
+	/*
+		if self.services != nil {
+			h.services = make([]*registry.Service, len(self.services))
+			copy(h.services, self.services)
+		}*/
 
 	return h
 }

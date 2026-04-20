@@ -260,9 +260,7 @@ func (m *mdnsRegistry) Register(service *registry.Service, opts ...registry.Opti
 	}
 
 	if gerr == nil {
-		// save
 		m.services[service.Name] = entries
-		m.config.LocalServices = append(m.config.LocalServices, service)
 	}
 
 	return gerr
@@ -303,9 +301,6 @@ func (m *mdnsRegistry) Deregister(service *registry.Service, opts ...registry.Op
 	return nil
 }
 
-func (m *mdnsRegistry) LocalServices() []*registry.Service {
-	return m.config.LocalServices
-}
 
 func (m *mdnsRegistry) GetService(service string) ([]*registry.Service, error) {
 	serviceMap := make(map[string]*registry.Service)

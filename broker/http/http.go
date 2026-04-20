@@ -15,19 +15,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/volts-dev/volts/broker"
+	"github.com/volts-dev/volts/codec"
 	maddr "github.com/volts-dev/volts/internal/addr"
 	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	vnet "github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/logger"
+	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/transport"
-
-	"github.com/google/uuid"
-	"github.com/volts-dev/volts/codec"
-	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/cacher"
-
 	"golang.org/x/net/http2"
 )
 
@@ -118,10 +115,10 @@ func New(opts ...broker.Option) broker.IBroker {
 	}
 
 	b := &httpBroker{
-		id:          uuid.New().String(),
-		config:      cfg,
-		address:     addr,
-		registry:    cfg.Registry,
+		id:       uuid.New().String(),
+		config:   cfg,
+		address:  addr,
+		registry: cfg.Registry,
 		client: &http.Client{
 			Transport: newTransport(cfg.TLSConfig),
 			Timeout:   30 * time.Second,
@@ -371,7 +368,7 @@ func (self *httpBroker) Close() error {
 	defer self.Unlock()
 
 	// stop cache
-	rc, ok := self.registry.(cacher.ICacher)
+	rc, ok := self.registry.(registry.IRegistryCacher)
 	if ok {
 		rc.Stop()
 	}

@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	_path "path"
@@ -302,11 +303,19 @@ func (self *TGroup) SetStatic(relativePath string, root ...string) {
 		ttlSec = 60
 	}
 	ttl := time.Duration(ttlSec) * time.Second
-	store := newStaticStore(ttl, groupFilepath, self.config.EmbedFS)
+
+	/* 为模块注册资源文件路径 */
+	var sub fs.FS
+	if self.Config().EmbedFS != nil {
+		dir := filepath.Base(relativePath)
+		sub, _ = fs.Sub(self.Config().EmbedFS, dir)
+	}
+	store := newStaticStore(ttl, groupFilepath, sub)
 	registerStaticStore(store)
 	if _, err := os.Stat(groupFilepath); err == nil {
 		store.Watch() // nolint: errcheck
 	}
+
 	handler := staticStoreHandler(absolutePath, store)
 	// 路由路径
 	fullRoutePattern := _path.Join(absolutePath, fmt.Sprintf("/%s:filepath%s", string(LBracket), string(RBracket)))
@@ -446,19 +455,24 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 		panic("the route must binding a controller!")
 	}
 
+	serviceName := ""
+	if self.config.IsService {
+		serviceName = self.config.Name
+	}
+
 	var hd *handler
 	h := handlers[0]
 	switch v := h.(type) {
 	case func(*TRpcContext):
-		hd = generateHandler(hanadlerType, RpcHandler, handlers, mids, url, nil)
+		hd = generateHandler(hanadlerType, RpcHandler, handlers, mids, url, serviceName)
 	case func(*THttpContext):
-		hd = generateHandler(hanadlerType, HttpHandler, handlers, mids, url, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, handlers, mids, url, serviceName)
 	case func(http.ResponseWriter, *http.Request):
-		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, url, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, url, serviceName)
 	case http.HandlerFunc:
-		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, url, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapFn(v)}, mids, url, serviceName)
 	case http.Handler:
-		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapHd(v)}, mids, url, nil)
+		hd = generateHandler(hanadlerType, HttpHandler, []interface{}{WrapHd(v)}, mids, url, serviceName)
 	default:
 		// init Value and Type
 		ctrlValue, ok := h.(reflect.Value)
@@ -539,9 +553,9 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 					log.Fatalf("method %s must use context pointer as the first parameter", url.Action)
 					return nil
 				}
-				hd = generateHandler(hanadlerType, RpcHandler, []interface{}{ctrlValue}, mids, url, nil)
+				hd = generateHandler(hanadlerType, RpcHandler, []interface{}{ctrlValue}, mids, url, serviceName)
 			} else {
-				hd = generateHandler(hanadlerType, HttpHandler, []interface{}{ctrlValue}, mids, url, nil)
+				hd = generateHandler(hanadlerType, HttpHandler, []interface{}{ctrlValue}, mids, url, serviceName)
 			}
 
 		default:

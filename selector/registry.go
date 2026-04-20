@@ -4,24 +4,23 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/cacher"
 )
 
 type (
 	registrySelector struct {
 		config *Config
-		rc     cacher.ICacher
+		rc     registry.IRegistryCacher
 	}
 )
 
-func (self *registrySelector) newCache() cacher.ICacher {
+func (self *registrySelector) newCache() registry.IRegistryCacher {
 	opts := []registry.Option{registry.WithConfigPrefixName(self.config.String())}
 	if self.config.Context != nil {
 		if t, ok := self.config.Context.Value("selector_ttl").(time.Duration); ok {
 			opts = append(opts, registry.RegisterTTL(t))
 		}
 	}
-	return cacher.New(self.config.Registry, opts...)
+	return registry.NewCacher(self.config.Registry, opts...)
 }
 
 func (self *registrySelector) Init(opts ...Option) error {

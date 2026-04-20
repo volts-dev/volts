@@ -43,7 +43,7 @@ func FilterEndpoint(name string) Filter {
 
 // FilterLabel is a label based Select Filter which will
 // only return services with the label specified.
-func FilterLabel(key, val string) Filter {
+func FilterLabel(key string, vals ...string) Filter {
 	return func(old []*registry.Service) []*registry.Service {
 		var services []*registry.Service
 
@@ -56,8 +56,10 @@ func FilterLabel(key, val string) Filter {
 					continue
 				}
 
-				if node.Metadata[key] == val {
-					nodes = append(nodes, node)
+				for _, val := range vals {
+					if node.Metadata[key] == val {
+						nodes = append(nodes, node)
+					}
 				}
 			}
 

@@ -41,7 +41,6 @@ type (
 		PrefixName    string          `field:"-"` // config prefix name/path in config file
 		Logger        logger.ILogger  `field:"-"` // 实例
 		Context       context.Context `field:"-"`
-		LocalServices []*Service      `field:"-"` // current service information
 		Addrs         []string        `field:"-"`
 		TlsConfig     *tls.Config     `field:"-"`
 
@@ -145,7 +144,7 @@ func WithName(name string) Option {
 	}
 }
 
-// 修改Config.json的路径
+// WithConfigPrefixName changes the prefix name, unregisters the old and registers the new
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
 		cfg.Unregister(cfg)

@@ -1,3 +1,4 @@
+// Package router handles message serving and routing logic for both HTTP and RPC protocols.
 package router
 
 import (
@@ -21,41 +22,51 @@ import (
 var log = logger.New("router")
 
 type (
-	// Router handle serving messages
+	// IRouter defines the interface for serving messages and managing endpoints.
 	IRouter interface {
-		Config() *Config // Retrieve the options
+		// Config retrieves the current router configuration.
+		Config() *Config
+		// String returns the name/description of the router.
 		String() string
-		Handler() interface{} // 连接入口 serveHTTP 等接口实现
-		// Register endpoint in router
+		// Handler returns the underlying handler implementation (e.g., ServeHTTP).
+		Handler() interface{}
+		// Register adds an endpoint to the router's tree.
 		Register(ep *registry.Endpoint) error
-		// Deregister endpoint from router
+		// Deregister removes an endpoint from the router's tree.
 		Deregister(ep *registry.Endpoint) error
-		// list all endpiont from router
+		// Endpoints lists all endpoints registered in the router.
 		Endpoints() (services map[*TGroup][]*registry.Endpoint)
+		// RegisterMiddleware adds global middlewares to the router.
 		RegisterMiddleware(middlewares ...func(IRouter) IMiddleware)
+		// RegisterGroup combines one or more groups into the router.
 		RegisterGroup(groups ...IGroup)
+		// PrintRoutes outputs the current routing tree to the logger.
 		PrintRoutes()
 	}
 
-	// router represents an RPC router.
+	// TRouter is the default implementation of the IRouter interface.
 	TRouter struct {
 		sync.RWMutex
-		// router is a group set
+		// TGroup provides base group functionality for path management.
 		*TGroup
-		//
+		// config holds the router's runtime options.
 		config *Config
-		// 中间件
-		middleware  *TMiddlewareManager
-		template    *template.TTemplateSet
-		respPool    sync.Pool
-		httpCtxPool sync.Map // 根据Route缓存，使用sync.Map以支持并发和自动清理
-		rpcCtxPool  sync.Map // 使用sync.Map替代map[int]*sync.Pool
-		// compiled regexp for host and path
+		// middleware manages the router's middleware stack.
+		middleware *TMiddlewareManager
+		// template provides HTML template rendering capabilities.
+		template *template.TTemplateSet
+		// respPool caches THttpResponse objects for better performance.
+		respPool sync.Pool
+		// httpCtxPool stores sync.Pools for THttpContext per route ID.
+		httpCtxPool sync.Map
+		// rpcCtxPool stores sync.Pools for TRpcContext per route ID.
+		rpcCtxPool sync.Map
+		// exit channel signals background tasks to stop.
 		exit chan bool
 	}
 )
 
-// TODO Validate validates an endpoint to guarantee it won't blow up when being served
+// Validate checks if an endpoint is valid for being served.
 func Validate(e *registry.Endpoint) error {
 	/*	if e == nil {
 			return errors.New("endpoint is nil")
@@ -88,13 +99,13 @@ func Validate(e *registry.Endpoint) error {
 	return nil
 }
 
-// 新建路由
-// NOTE 路由不支持线程安全 不推荐多服务器调用！
+// New initializes and returns a new router instance.
+// NOTE: Router initialization is not fully thread-safe; multi-server calls are not recommended during startup.
 func New(opts ...Option) *TRouter {
 	cfg := newConfig(opts...)
 	router := &TRouter{
 		TGroup: NewGroup(
-			WithStatic(), /* 支持静态文件 */
+			WithStatic(), // Enable static file support by default.
 		),
 		config:     cfg,
 		middleware: newMiddlewareManager(),
@@ -102,12 +113,9 @@ func New(opts ...Option) *TRouter {
 	}
 	cfg.Router = router
 	router.TGroup.config.StaticCacheTTL = cfg.StaticCacheTTL
-	//~router.respPool.New = func() interface{} {
-	//	return &transport.THttpResponse{}
-	//}
 
-	go router.watch()   // 实时订阅
-	go router.refresh() // 定时刷新
+	go router.watch()   // Real-time registry subscription.
+	go router.refresh() // Periodic registry refreshing.
 	go func() {
 		<-router.exit
 		StopAllStaticStores()
@@ -122,19 +130,22 @@ func (self *TRouter) PrintRoutes() {
 	}
 }
 
+// Config implements IRouter.Config.
 func (self *TRouter) Config() *Config {
 	return self.config
 }
 
+// String implements IRouter.String.
 func (self *TRouter) String() string {
 	return "volts-router"
 }
 
+// Handler implements IRouter.Handler.
 func (self *TRouter) Handler() interface{} {
 	return self
 }
 
-// registry a endpoion to router
+// Register adds an endpoint to the router tree after validation.
 func (self *TRouter) Register(ep *registry.Endpoint) error {
 	if err := Validate(ep); err != nil {
 		return err
@@ -142,13 +153,14 @@ func (self *TRouter) Register(ep *registry.Endpoint) error {
 	return self.tree.AddRoute(EndpiontToRoute(ep))
 }
 
+// Deregister removes an endpoint and cleans up associated context pools.
 func (self *TRouter) Deregister(ep *registry.Endpoint) error {
 	path := ep.Metadata["path"]
 	r := EndpiontToRoute(ep)
 
-	// 在删除前，先从 tree 中查出已注册路由的真实 ID，用于清理 pool 条目
-	// route ID 是自增计数器，每次 EndpiontToRoute 产生不同 ID，
-	// 必须通过 tree.Match 获取实际存储的 route ID
+	// Clean up pool entries for the existing route before deletion.
+	// Route IDs are auto-incrementing; we must match the stored route
+	// in the tree to get the correct ID for pool cleanup.
 	for _, method := range ep.Method {
 		if existing, _ := self.tree.Match(method, path); existing != nil {
 			self.httpCtxPool.Delete(existing.Id())
@@ -159,16 +171,17 @@ func (self *TRouter) Deregister(ep *registry.Endpoint) error {
 	return self.tree.DelRoute(path, r)
 }
 
+// Endpoints returns a map of all registered endpoints grouped by their TGroup.
 func (self *TRouter) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
-	// 注册订阅列表
 	var subscriberList []ISubscriber
 
 	for e := range self.subscribers {
-		// Only advertise non internal subscribers
+		// Only advertise non-internal subscribers.
 		if !e.Config().Internal {
 			subscriberList = append(subscriberList, e)
 		}
 	}
+	// Sort subscribers by topic name for consistency.
 	sort.Slice(subscriberList, func(i, j int) bool {
 		return subscriberList[i].Topic() > subscriberList[j].Topic()
 	})
@@ -184,11 +197,11 @@ func (self *TRouter) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
 	return eps
 }
 
-// 注册中间件
+// RegisterMiddleware adds transformation functions that create middlewares.
 func (self *TRouter) RegisterMiddleware(middlewares ...func(IRouter) IMiddleware) {
 	for _, creator := range middlewares {
-		// 新建中间件
 		middleware := creator(self)
+		// Register by name if the middleware implements IMiddlewareName, otherwise use type string.
 		if mm, ok := middleware.(IMiddlewareName); ok {
 			self.middleware.Add(mm.Name(), creator)
 		} else {
@@ -234,15 +247,17 @@ func (self *TRouter) RegisterGroup(groups ...IGroup) {
 	}
 }
 
+// ServeHTTP implements the http.Handler interface, dispatching requests to HTTP or RPC handlers.
 func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest) {
-	// 使用defer保证错误也打印
+	// Log the request path if enabled.
 	if self.config.RequestPrinter {
 		defer func() {
 			log.Infof("[Path]%v", r.URL.Path)
 		}()
 	}
 
-	if r.Method == "CONNECT" { // serve as a raw network server
+	if r.Method == "CONNECT" {
+		// Serve as a raw network/TCP connection for RPC.
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			log.Errf("rpc hijacking: ResponseWriter does not implement http.Hijacker, addr=%s", r.RemoteAddr)
@@ -262,8 +277,8 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		req := transport.NewRpcRequest(r.Context(), msg, sock)
 		rsp := transport.NewRpcResponse(r.Context(), req, sock)
 		self.ServeRPC(rsp, req)
-	} else { // serve as a web server
-		// Pool 提供TResponseWriter
+	} else {
+		// Serve as a standard web/HTTP request.
 		var rsp *transport.THttpResponse
 		if v := self.respPool.Get(); v == nil {
 			rsp = transport.NewHttpResponse(r.Context(), r)
@@ -272,23 +287,21 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 		rsp.Connect(w)
 
-		//获得的地址
-		// # match route from tree
+		// Match route from the internal tree.
 		route, params := self.tree.Match(r.Method, r.URL.Path)
 		if route == nil {
 			rsp.WriteHeader(http.StatusNotFound)
 			return
 		}
 
-		// # get the new context from pool
+		// Retrieve or create a context pool for this route.
 		p, _ := self.httpCtxPool.LoadOrStore(route.Id(), &sync.Pool{New: func() interface{} {
 			return NewHttpContext(self)
 		}})
 
 		pool := p.(*sync.Pool)
-
 		ctx := pool.Get().(*THttpContext)
-		ctx.route = route // TODO 优化重复使用
+		ctx.route = route
 		if !ctx.inited {
 			ctx.router = self
 			ctx.inited = true
@@ -297,19 +310,21 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		ctx.reset(rsp, r)
 		ctx.setPathParams(params)
 
+		// Execute the routing chain.
 		self.route(route, ctx)
 
-		// 结束Route并返回内容
+		// Apply the context changes and return objects to pools.
 		ctx.Apply()
-		pool.Put(ctx) // Pool Handler
+		pool.Put(ctx)
 		rsp.ResponseWriter = nil
-		self.respPool.Put(rsp) // Pool 回收TResponseWriter
+		self.respPool.Put(rsp)
 	}
 }
 
+// ServeRPC handles RPC requests, including heartbeat packets and method dispatching.
 func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest) {
-	reqMessage := r.Message // return the packet struct
-	// 心跳包 直接返回
+	reqMessage := r.Message
+	// Handle heartbeat packets immediately.
 	if reqMessage.IsHeartbeat() {
 		reqMessage.SetMessageType(transport.MT_RESPONSE)
 		data := reqMessage.Encode()
@@ -336,13 +351,14 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		return
 	}
 
-	route, params := self.tree.Match("CONNECT", reqMessage.Path) // 匹配路由树
+	// Match the route for the RPC path.
+	route, params := self.tree.Match("CONNECT", reqMessage.Path)
 	if route == nil {
 		w.WriteHeader(transport.StatusNotFound)
 		w.Write([]byte{})
 		return
 	} else {
-		// 初始化Context
+		// Initialize or retrieve the RPC context pool.
 		p, _ := self.rpcCtxPool.LoadOrStore(route.Id(), &sync.Pool{New: func() interface{} {
 			return NewRpcHandler(self)
 		}})
@@ -357,7 +373,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		ctx.reset(w, r, self, route)
 		ctx.setPathParams(params)
 
-		// 执行控制器
+		// Execute the controller.
 		self.route(route, ctx)
 
 		pool.Put(ctx) // Pool 回收 Handler
@@ -436,43 +452,43 @@ func (self *TRouter) isClosed() bool {
 	}
 }
 
-// 过滤自己
-func (self *TRouter) filteSelf(service *registry.Service, localSet map[string]struct{}) *registry.Service {
-	// 如果 localSet 为 nil，说明触发了不同步的安全屏蔽条件
+// filteSelf filters out the nodes that belong to the current instance from a service.
+func (self *TRouter) filteSelf(srv *registry.Service, localSet map[string]struct{}) *registry.Service {
+	service := *srv // Shallow copy to avoid mutating the cached original service object
+
+	// If localSet is nil, it indicates a safety shield condition.
 	if localSet == nil {
 		service.Nodes = nil
-		return service
+		return &service
 	}
 
 	nodes := make([]*registry.Node, 0, len(service.Nodes))
 	for _, n := range service.Nodes {
-		// 校验节点 ID 或节点通信 Address 是否为本实例，是则过滤掉，防止出现请求转发的自循环
+		// Check if the node ID matches any local node ID to prevent infinite request loops during forwarding.
 		if _, hasId := localSet[n.Id]; hasId {
 			continue
 		}
-		//if _, hasAddr := localSet[n.Address]; hasAddr {
-		//	continue
-		//}
+
 		nodes = append(nodes, n)
 	}
 
 	service.Nodes = nodes
-	return service
+	return &service
 }
 
-// store local endpoint
+// store maps registry services to internal endpoints.
 func (self *TRouter) store(services []*registry.Service) {
 	if len(services) == 0 {
 		return
 	}
 
-	// 提取一次本地服务信息进行 O(1) 预计算，避免在 for 循环中发生 O(N*M) 的反复提取开销
+	// Pre-calculate the local node set to avoid O(N*M) lookups in the loop.
 	var localSet map[string]struct{}
-	localServices := self.config.Registry.LocalServices()
+	localServices := self.config.RegistryCacher.LocalServices()
 
-	// 解决监控拉取 Registry 服务器服务列表比 LocalServices 注册早的问题
+	// Handle the case where the monitoring fetch happens before local services are fully registered.
 	if len(localServices) == 0 && self.tree.Count.Load() > 0 {
-		localSet = nil // nil 表示进入暂置空节点状态
+		localSet = nil // Enter temporary empty node state.
 	} else {
 		localSet = make(map[string]struct{})
 		for _, curSrv := range localServices {
@@ -481,16 +497,14 @@ func (self *TRouter) store(services []*registry.Service) {
 			}
 			for _, node := range curSrv.Nodes {
 				localSet[node.Id] = struct{}{}
-				//localSet[node.Address] = struct{}{}
 			}
 		}
 	}
 
-	// create a new endpoint mapping
+	// Create a new endpoint mapping.
 	for _, service := range services {
 		service = self.filteSelf(service, localSet)
 		if len(service.Nodes) > 0 {
-			// map per endpoint
 			var handlerId int
 			for _, sep := range service.Endpoints {
 				url := &TUrl{
@@ -498,13 +512,13 @@ func (self *TRouter) store(services []*registry.Service) {
 				}
 				r := EndpiontToRoute(sep)
 
-				// 判定缓存，去除底层的多次 for
+				// Determine the handler type (HTTP or RPC/CONNECT).
 				isConnect := utils.IndexOf("CONNECT", sep.Method...) != -1
 				if isConnect {
-					handlerId = generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, []*registry.Service{service}).Id
+					handlerId = generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, service.Name).Id
 
 				} else {
-					handlerId = generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, []*registry.Service{service}).Id
+					handlerId = generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, service.Name).Id
 				}
 
 				r.handlers = append(r.handlers, handlerId)
@@ -516,11 +530,12 @@ func (self *TRouter) store(services []*registry.Service) {
 	}
 }
 
-// watch for endpoint changes
+// watch continuously monitors endpoint changes in the Registry.
+// It ensures real-time updates to the routing tree so requests reach the correct service instances.
 func (self *TRouter) watch() {
 	var attempts int
 
-	// 5秒后才启动监测
+	// Delay monitoring for 5 seconds to avoid initial system noise.
 	select {
 	case <-time.After(5 * time.Second):
 	case <-self.exit:
@@ -532,7 +547,7 @@ func (self *TRouter) watch() {
 			break
 		}
 
-		// watch for changes
+		// Obtain a watcher for registry changes.
 		w, err := self.config.Registry.Watcher()
 		if err != nil {
 			attempts++
@@ -544,7 +559,7 @@ func (self *TRouter) watch() {
 			continue
 		}
 
-		// 无监视者等待
+		// Wait if no watcher is available.
 		if w == nil {
 			select {
 			case <-time.After(60 * time.Second):
@@ -554,11 +569,9 @@ func (self *TRouter) watch() {
 			continue
 		}
 
-		//ch := make(chan bool)
-		// 创建带取消功能的 context
+		// Create a context with cancellation to manage the watcher goroutine.
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
-
 		igoroutine.Go(func() {
 			defer close(done)
 			select {
@@ -566,10 +579,10 @@ func (self *TRouter) watch() {
 				w.Stop()
 			case <-self.exit:
 				w.Stop()
-				cancel() // Cancel the context when exit signal is received
+				cancel()
 			}
 		}, func(err error) { log.Err(err.Error()) })
-		// reset if we get here
+
 		attempts = 0
 
 		for {
@@ -579,31 +592,29 @@ func (self *TRouter) watch() {
 				cancel()
 				break
 			}
-			// skip these things
 			if res == nil || res.Service == nil {
 				continue
 			}
 
-			// get entry from cache
+			// Fetch full service information from the cache after a change update.
 			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
 			if err != nil {
 				log.Errf("unable to get service: %v", err)
 				continue
 			}
 
-			// update our local endpoints
+			// Update local endpoints.
 			self.store(services)
 		}
 
-		// 确保 watcher goroutine 已经退出
 		cancel()
-		<-done // Wait for goroutine to finish properly
+		<-done // Wait for the goroutine to finish.
 	}
 }
 
-// refresh list of api services
+// refresh periodically pulls the full service list from the registry.
 func (self *TRouter) refresh() {
-	// 5秒后才启动监测
+	// Delay monitoring for 5 seconds to avoid initial system noise.
 	select {
 	case <-time.After(5 * time.Second):
 	case <-self.exit:
@@ -615,10 +626,10 @@ func (self *TRouter) refresh() {
 		services []*registry.Service
 		list     []*registry.Service
 		attempts int
-		maxRetry = 10 // 最大重试次数
+		maxRetry = 10
 	)
 
-	localServices := self.config.Registry.LocalServices()
+	localServices := self.config.RegistryCacher.LocalServices()
 
 	for {
 		list, err = self.config.Registry.ListServices()
@@ -627,7 +638,7 @@ func (self *TRouter) refresh() {
 			log.Warnf("registry unable to list services: %v", err)
 			if attempts > maxRetry {
 				log.Errf("max retry exceeded for listing services, giving up")
-				attempts = 0 // reset to prevent overflow
+				attempts = 0
 			}
 			select {
 			case <-time.After(time.Duration(attempts) * time.Second):
@@ -637,12 +648,11 @@ func (self *TRouter) refresh() {
 			continue
 		}
 
-		// 无监视者等待
 		if len(list) != 0 {
 			attempts = 0
 
-			// for each service, get service and store endpoints
 			for _, s := range list {
+				// Don't process services that are hosted locally.
 				if self.isLocalService(s, localServices) {
 					continue
 				}
@@ -656,8 +666,7 @@ func (self *TRouter) refresh() {
 			}
 		}
 
-		// refresh list in 10 minutes... cruft
-		// use registry watching
+		// Refresh interval specified in config.
 		select {
 		case <-time.After(time.Duration(self.config.RouterTreeRefreshInterval) * time.Second):
 		case <-self.exit:
@@ -666,7 +675,7 @@ func (self *TRouter) refresh() {
 	}
 }
 
-// isLocalService 判断服务是否是本地服务
+// isLocalService checks if a service instance is equivalent to any of the local services.
 func (self *TRouter) isLocalService(service *registry.Service, locals []*registry.Service) bool {
 	for _, local := range locals {
 		if local.Equal(service) {

@@ -55,13 +55,14 @@ type TStaticStore struct {
 	cache     *memory.TMemoryCache
 	ttl       time.Duration
 	diskDir   string // 磁盘目录（可为空）
+	diskPath  string // 磁盘路径
 	embedFS   fs.FS  // embed 来源（可为 nil）
 	stopOnce  sync.Once
 	watchOnce sync.Once
 	stop      chan struct{}
 }
 
-func newStaticStore(ttl time.Duration, diskDir string, embedFS fs.FS) *TStaticStore {
+func newStaticStore(ttl time.Duration, diskPath string, embedFS fs.FS) *TStaticStore {
 	expireSec := int(ttl.Seconds())
 	intervalSec := expireSec
 	if expireSec <= 0 {
@@ -70,11 +71,12 @@ func newStaticStore(ttl time.Duration, diskDir string, embedFS fs.FS) *TStaticSt
 	}
 
 	return &TStaticStore{
-		cache:   memory.New(memory.WithExpire(expireSec), memory.WithInterval(intervalSec)),
-		ttl:     ttl,
-		diskDir: diskDir,
-		embedFS: embedFS,
-		stop:    make(chan struct{}),
+		cache:    memory.New(memory.WithExpire(expireSec), memory.WithInterval(intervalSec)),
+		ttl:      ttl,
+		diskPath: diskPath,
+		diskDir:  filepath.Base(diskPath),
+		embedFS:  embedFS,
+		stop:     make(chan struct{}),
 	}
 }
 
@@ -86,6 +88,11 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 		return nil, fs.ErrNotExist
 	}
 
+	//fileName := filepath.Join(s.diskDir, filepath.FromSlash(name))
+
+	if strings.Contains(name, "img/res_company_logo") {
+		log.Dbgf("Static file not found: %s", name)
+	}
 	// 1. 查 cache
 	if s.cache.Exists(name) {
 		if val, err := s.cache.Get(name); err == nil {
@@ -96,8 +103,8 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 	}
 
 	// 2. 读磁盘（优先）
-	if s.diskDir != "" {
-		diskPath := filepath.Join(s.diskDir, filepath.FromSlash(name))
+	if s.diskPath != "" {
+		diskPath := filepath.Join(s.diskPath, filepath.FromSlash(name))
 		if data, err := os.ReadFile(diskPath); err == nil {
 			s.setCache(name, data)
 			return newMemFile(name, data), nil
@@ -139,11 +146,11 @@ func (s *TStaticStore) Invalidate(name string) {
 	s.cache.Delete(name)
 }
 
-// Watch 启动 fsnotify 监听 diskDir。
+// Watch 启动 fsnotify 监听 diskPath。
 // 文件创建/修改/删除时失效对应 cache entry。
-// 需在 diskDir 非空时调用。多次调用安全（幂等）。
+// 需在 diskPath 非空时调用。多次调用安全（幂等）。
 func (s *TStaticStore) Watch() error {
-	if s.diskDir == "" {
+	if s.diskPath == "" {
 		return nil // nothing to watch
 	}
 	var watchErr error
@@ -155,7 +162,7 @@ func (s *TStaticStore) Watch() error {
 		}
 		// Walk diskDir and add all subdirectories to watcher.
 		// NOTE: directories created after Watch() is called are not automatically watched.
-		if err := filepath.WalkDir(s.diskDir, func(walkPath string, d fs.DirEntry, err error) error {
+		if err := filepath.WalkDir(s.diskPath, func(walkPath string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil // skip inaccessible paths
 			}
@@ -177,7 +184,7 @@ func (s *TStaticStore) Watch() error {
 						return
 					}
 					if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) {
-						if rel, err := filepath.Rel(s.diskDir, event.Name); err == nil {
+						if rel, err := filepath.Rel(s.diskPath, event.Name); err == nil {
 							s.Invalidate(filepath.ToSlash(rel))
 						}
 					}

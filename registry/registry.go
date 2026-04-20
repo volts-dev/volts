@@ -27,7 +27,6 @@ type (
 		GetService(string) ([]*Service, error)
 		ListServices() ([]*Service, error)
 		Watcher(...WatchOptions) (Watcher, error)
-		LocalServices() []*Service
 		String() string
 	}
 

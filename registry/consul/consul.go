@@ -306,14 +306,10 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 		return nil
 	}
 
-	c.opts.LocalServices = append(c.opts.LocalServices, s)
 	// pass the healthcheck
 	return c.Client().Agent().PassTTL("service:"+node.Id, "")
 }
 
-func (m *consulRegistry) LocalServices() []*registry.Service {
-	return m.opts.LocalServices
-}
 
 func (c *consulRegistry) GetService(name string) ([]*registry.Service, error) {
 	var rsp []*consul.ServiceEntry

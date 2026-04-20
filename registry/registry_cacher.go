@@ -1,5 +1,5 @@
 // Package cache provides a registry cache
-package cacher
+package registry
 
 import (
 	"math"
@@ -8,34 +8,30 @@ import (
 	"time"
 
 	igoroutine "github.com/volts-dev/volts/internal/goroutine"
-	util "github.com/volts-dev/volts/internal/registry"
 	"github.com/volts-dev/volts/logger"
-	"github.com/volts-dev/volts/registry"
 	"golang.org/x/sync/singleflight"
 )
 
-var log = registry.Logger()
-
 // Cache is the registry cache interface
 type (
-	ICacher interface {
-		// embed the registry interface
-		registry.IRegistry
-		Match(endpoint string) ([]*registry.Service, error)
-		// stop the cache watcher
-		Stop()
+	IRegistryCacher interface {
+		IRegistry // embed the registry interface
+		Match(endpoint string) ([]*Service, error)
+		LocalServices() []*Service
+		Stop() // stop the cache watcher
 	}
 
-	cache struct {
-		registry.IRegistry
-		config *registry.Config
+	registryCacher struct {
+		IRegistry
+		config *Config
 
 		// registry cache
 		sync.RWMutex
-		cache       map[string][]*registry.Service
-		endpointMap map[string]string // 缓存ep
-		ttls        map[string]time.Time
-		watched     map[string]bool
+		cache         map[string][]*Service
+		endpointMap   map[string]string // 缓存ep
+		ttls          map[string]time.Time
+		watched       map[string]bool
+		localServices []*Service
 
 		// used to stop the cache
 		exit chan bool
@@ -56,19 +52,17 @@ var (
 )
 
 // New returns a new cache
-func New(r registry.IRegistry, opts ...registry.Option) ICacher {
-	rand.Seed(time.Now().UnixNano())
-
-	var defaultOpts []registry.Option
+func NewCacher(r IRegistry, opts ...Option) IRegistryCacher {
+	var defaultOpts []Option
 	defaultOpts = append(defaultOpts,
-		//registry.WithName(""),
-		registry.RegisterTTL(DefaultTTL))
+		//WithName(""),
+		RegisterTTL(DefaultTTL))
 
-	return &cache{
+	return &registryCacher{
 		IRegistry:   r,
-		config:      registry.NewConfig(append(defaultOpts, opts...)...),
+		config:      NewConfig(append(defaultOpts, opts...)...),
 		watched:     make(map[string]bool),
-		cache:       make(map[string][]*registry.Service),
+		cache:       make(map[string][]*Service),
 		endpointMap: make(map[string]string),
 		ttls:        make(map[string]time.Time),
 		exit:        make(chan bool),
@@ -82,20 +76,20 @@ func backoff(attempts int) time.Duration {
 	return time.Duration(math.Pow(10, float64(attempts))) * time.Millisecond
 }
 
-func (c *cache) getStatus() error {
+func (c *registryCacher) getStatus() error {
 	c.RLock()
 	defer c.RUnlock()
 	return c.status
 }
 
-func (c *cache) setStatus(err error) {
+func (c *registryCacher) setStatus(err error) {
 	c.Lock()
 	c.status = err
 	c.Unlock()
 }
 
 // isValid checks if the service is valid
-func (c *cache) isValid(services []*registry.Service, ttl time.Time) bool {
+func (c *registryCacher) isValid(services []*Service, ttl time.Time) bool {
 	// no services exist
 	if len(services) == 0 {
 		return false
@@ -115,7 +109,7 @@ func (c *cache) isValid(services []*registry.Service, ttl time.Time) bool {
 	return true
 }
 
-func (c *cache) quit() bool {
+func (c *registryCacher) quit() bool {
 	select {
 	case <-c.exit:
 		return true
@@ -124,7 +118,7 @@ func (c *cache) quit() bool {
 	}
 }
 
-func (c *cache) del(service string) {
+func (c *registryCacher) del(service string) {
 	// don't blow away cache in error state
 	if err := c.status; err != nil {
 		return
@@ -134,12 +128,12 @@ func (c *cache) del(service string) {
 	delete(c.ttls, service)
 }
 
-func (c *cache) Contain(service string) bool {
+func (c *registryCacher) Contain(service string) bool {
 	_, has := c.cache[service]
 	return has
 }
 
-func (c *cache) get(service string) ([]*registry.Service, error) {
+func (c *registryCacher) get(service string) ([]*Service, error) {
 	// read lock
 	c.RLock()
 
@@ -148,7 +142,7 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 	// get cache ttl
 	ttl := c.ttls[service]
 	// make a copy
-	cp := util.Copy(services)
+	cp := Copy(services)
 
 	// got services && within ttl so return cache
 	if c.isValid(cp, ttl) {
@@ -158,12 +152,12 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 	}
 
 	// get does the actual request for a service and cache it
-	get := func(service string, cached []*registry.Service) ([]*registry.Service, error) {
+	get := func(service string, cached []*Service) ([]*Service, error) {
 		// ask the registry
 		val, err, _ := c.sg.Do(service, func() (interface{}, error) {
 			return c.IRegistry.GetService(service)
 		})
-		services, _ := val.([]*registry.Service)
+		services, _ := val.([]*Service)
 		if err != nil {
 			// check the cache
 			if len(cached) > 0 {
@@ -184,7 +178,7 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 
 		// cache results
 		c.Lock()
-		c.set(service, util.Copy(services))
+		c.set(service, Copy(services))
 		c.Unlock()
 
 		return services, nil
@@ -215,12 +209,12 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 	return get(service, cp)
 }
 
-func (c *cache) set(service string, services []*registry.Service) {
+func (c *registryCacher) set(service string, services []*Service) {
 	c.cache[service] = services
 	c.ttls[service] = time.Now().Add(c.config.TTL)
 }
 
-func (c *cache) update(res *registry.Result) {
+func (c *registryCacher) update(res *Result) {
 	if res == nil || res.Service == nil {
 		return
 	}
@@ -249,7 +243,7 @@ func (c *cache) update(res *registry.Result) {
 	}
 
 	// existing service found
-	var service *registry.Service
+	var service *Service
 	var index int
 	for i, s := range services {
 		if s.Version == res.Service.Version {
@@ -286,7 +280,7 @@ func (c *cache) update(res *registry.Result) {
 			return
 		}
 
-		var nodes []*registry.Node
+		var nodes []*Node
 
 		// filter cur nodes to remove the dead one
 		for _, cur := range service.Nodes {
@@ -321,7 +315,7 @@ func (c *cache) update(res *registry.Result) {
 
 		// still have more than 1 service
 		// check the version and keep what we know
-		var srvs []*registry.Service
+		var srvs []*Service
 		for _, s := range services {
 			if s.Version != service.Version {
 				srvs = append(srvs, s)
@@ -341,7 +335,7 @@ func (c *cache) update(res *registry.Result) {
 
 // run starts the cache watcher loop
 // it creates a new watcher if there's a problem
-func (c *cache) run() {
+func (c *registryCacher) run() {
 	c.Lock()
 	c.running = true
 	c.Unlock()
@@ -425,7 +419,7 @@ func (c *cache) run() {
 
 // watch loops the next event and calls update
 // it returns if there's an error
-func (c *cache) watch(w registry.Watcher) error {
+func (c *registryCacher) watch(w Watcher) error {
 	// not need watch
 	if w == nil {
 		return nil
@@ -465,7 +459,7 @@ func (c *cache) watch(w registry.Watcher) error {
 	}
 }
 
-func (c *cache) match(endpoint string) ([]*registry.Service, error) {
+func (c *registryCacher) match(endpoint string) ([]*Service, error) {
 	c.RLock()
 	// check the cache first
 	service, has := c.endpointMap[endpoint]
@@ -477,7 +471,7 @@ func (c *cache) match(endpoint string) ([]*registry.Service, error) {
 			return nil, err
 		}
 
-		services, _ := val.([]*registry.Service)
+		services, _ := val.([]*Service)
 		// reset the status
 		if err := c.getStatus(); err != nil {
 			c.setStatus(nil)
@@ -506,7 +500,7 @@ func (c *cache) match(endpoint string) ([]*registry.Service, error) {
 	return c.get(service)
 }
 
-func (c *cache) Match(endpoint string) ([]*registry.Service, error) {
+func (c *registryCacher) Match(endpoint string) ([]*Service, error) {
 	services, err := c.match(endpoint)
 	if err != nil {
 		return nil, err
@@ -514,14 +508,14 @@ func (c *cache) Match(endpoint string) ([]*registry.Service, error) {
 
 	// if there's nothing return err
 	if len(services) == 0 {
-		return nil, registry.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	// return services
 	return services, nil
 }
 
-func (c *cache) GetService(service string) ([]*registry.Service, error) {
+func (c *registryCacher) GetService(service string) ([]*Service, error) {
 	// get the service
 	services, err := c.get(service)
 	if err != nil {
@@ -530,14 +524,53 @@ func (c *cache) GetService(service string) ([]*registry.Service, error) {
 
 	// if there's nothing return err
 	if len(services) == 0 {
-		return nil, registry.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	// return services
 	return services, nil
 }
 
-func (c *cache) Stop() {
+func (c *registryCacher) LocalServices() []*Service {
+	c.RLock()
+	defer c.RUnlock()
+	return c.localServices
+}
+
+func (c *registryCacher) Register(s *Service, opts ...Option) error {
+	c.Lock()
+	var updated bool
+	for i, ls := range c.localServices {
+		if ls.Name == s.Name && ls.Version == s.Version {
+			c.localServices[i] = s
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		c.localServices = append(c.localServices, s)
+	}
+	c.Unlock()
+
+	return c.IRegistry.Register(s, opts...)
+}
+
+func (c *registryCacher) Deregister(s *Service, opts ...Option) error {
+	c.Lock()
+	var services []*Service
+	for _, ls := range c.localServices {
+		if ls.Name == s.Name && ls.Version == s.Version {
+			continue
+		}
+		services = append(services, ls)
+	}
+	c.localServices = services
+	c.Unlock()
+
+	return c.IRegistry.Deregister(s, opts...)
+}
+
+func (c *registryCacher) Stop() {
 	c.Lock()
 	defer c.Unlock()
 
@@ -549,6 +582,6 @@ func (c *cache) Stop() {
 	}
 }
 
-func (c *cache) String() string {
+func (c *registryCacher) String() string {
 	return c.config.Name
 }

@@ -207,16 +207,6 @@ func (m *memRegistry) Register(s *registry.Service, opts ...registry.Option) err
 	}
 
 	// 避免重复添加本地服务
-	exists := false
-	for _, ls := range cfg.LocalServices {
-		if ls.Name == s.Name && ls.Version == s.Version {
-			exists = true
-			break
-		}
-	}
-	if !exists {
-		cfg.LocalServices = append(cfg.LocalServices, s)
-	}
 
 	if addedNodes {
 		log.Dbgf("Registry added new node to service: %s, version: %s", s.Name, s.Version)
@@ -278,9 +268,6 @@ func (m *memRegistry) GetService(name string) ([]*registry.Service, error) {
 	return services, nil
 }
 
-func (m *memRegistry) LocalServices() []*registry.Service {
-	return m.config.LocalServices
-}
 
 func (m *memRegistry) ListServices() ([]*registry.Service, error) {
 	m.RLock()

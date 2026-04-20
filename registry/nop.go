@@ -50,9 +50,6 @@ func (*nopRegistry) Watcher(...WatchOptions) (Watcher, error) {
 	return nil, nil
 }
 
-func (*nopRegistry) LocalServices() []*Service {
-	return nil
-}
 
 func (self *nopRegistry) String() string {
 	return "" // self.config.Name

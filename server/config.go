@@ -97,7 +97,7 @@ func newConfig(opts ...Option) *Config {
 	// 初始化 registry
 	if cfg.Registry == nil {
 		if reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost...)); reg != nil {
-			cfg.Init(WithRegistry(reg))
+			cfg.Init(WithRegistry(registry.NewCacher(reg)))
 		}
 	}
 
@@ -230,6 +230,9 @@ func WithBroker(bk broker.IBroker) Option {
 // Registry used for discovery
 func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
+		if _, ok := r.(registry.IRegistryCacher); !ok {
+			r = registry.NewCacher(r)
+		}
 		r.Init(registry.WithConfigPrefixName(cfg.String()))
 		cfg.Registry = r
 		cfg.RegistryType = r.Config().Name

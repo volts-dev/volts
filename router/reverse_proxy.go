@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/selector"
 )
 
@@ -125,20 +126,27 @@ func HttpReverseProxy(ctx *THttpContext) {
 // getService returns the service for this request from the selector
 func getService(ctx *THttpContext) (string, error) {
 	// create a random selector
-	next := selector.Random(ctx.Handler().Services)
+	next, err := ctx.Router().Config().Selector.Select(
+		ctx.Handler().Service(),
+		selector.WithFilter(selector.FilterLabel("protocol", "http", "https")),
+	)
+	if err != nil {
+		return "", err
+	}
 
 	// get the next service node
-	s, err := next()
+	node, err := next()
 	if err != nil {
 		return "", err
 	}
 
 	protocol := "http"
-	if s.Metadata != nil && s.Metadata["protocol"] == "https" {
+	if node.Metadata != nil && node.Metadata["protocol"] == "https" {
 		protocol = "https"
 	}
 
-	return fmt.Sprintf("%s://%s", protocol, s.Address), nil
+	host := addr.LocalFormat(node.Address) // TODO 考虑整个框架统一化
+	return fmt.Sprintf("%s://%s", protocol, host), nil
 }
 
 // serveWebSocket used to serve a web socket proxied connection

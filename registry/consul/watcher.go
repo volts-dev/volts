@@ -8,7 +8,6 @@ import (
 
 	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/consul/api/watch"
-	regutil "github.com/volts-dev/volts/internal/registry"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -164,7 +163,7 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 
 			// it's an update rather than creation
 			if len(nodes) > 0 {
-				delService := regutil.CopyService(oldService)
+				delService := registry.CopyService(oldService)
 				delService.Nodes = nodes
 				cw.next <- &registry.Result{Action: "delete", Service: delService}
 			}

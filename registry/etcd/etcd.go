@@ -321,16 +321,10 @@ func (e *etcdRegistry) Register(s *registry.Service, opts ...registry.Option) er
 			gerr = err
 		}
 	}
-	if gerr == nil {
-		e.config.LocalServices = append(e.config.LocalServices, s)
-	}
 
 	return gerr
 }
 
-func (m *etcdRegistry) LocalServices() []*registry.Service {
-	return m.config.LocalServices
-}
 
 func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)

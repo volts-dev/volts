@@ -8,7 +8,7 @@ import (
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
-	"github.com/volts-dev/volts/registry/cacher"
+	"github.com/volts-dev/volts/selector"
 )
 
 var (
@@ -24,14 +24,16 @@ type (
 	Option func(*Config)
 
 	Config struct {
-		config.Config  `field:"-"`
-		Name           string             `field:"-"` // config name/path in config file
-		PrefixName     string             `field:"-"` // config prefix name
-		Logger         logger.ILogger     `field:"-"` // 实例
-		Router         *TRouter           `field:"-"`
-		Registry       registry.IRegistry `field:"-"`
-		RegistryCacher cacher.ICacher     `field:"-"` // registry cache
-		RecoverHandler func(IContext)     `field:"-"`
+		config.Config    `field:"-"`
+		Name             string             `field:"-"` // config name/path in config file
+		PrefixName       string             `field:"-"` // config prefix name
+		Logger           logger.ILogger     `field:"-"` // 实例
+		Router           *TRouter           `field:"-"`
+		Selector         selector.ISelector `field:"-"`
+		SelectorStrategy string
+		Registry         registry.IRegistry       `field:"-"`
+		RegistryCacher   registry.IRegistryCacher `field:"-"` // registry cache
+		RecoverHandler   func(IContext)           `field:"-"`
 
 		// mapping to config file
 		Recover                   bool     `field:"recover"`
@@ -48,16 +50,17 @@ type (
 
 	GroupOption func(*GroupConfig)
 	GroupConfig struct {
-		Group         *TGroup
-		Name          string // 当前源代码文件夹名称
-		_PrefixPath   string
-		Path          string // URL 路径
-		FilePath      string // 当前源代码文件夹路径
-		IsService     bool   // 是否在registry注册为独立的服务
-		PathPrefix    string
+		Group          *TGroup
+		Name           string // 当前源代码文件夹名称
+		_PrefixPath    string
+		Path           string // URL 路径
+		FilePath       string // 当前源代码文件夹路径
+		IsService      bool   // 是否在registry注册为独立的服务
+		Service        *registry.Service
+		PathPrefix     string
 		StaticHandler  func(IContext) `field:"-"`
-		EmbedFS        fs.FS `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
-		StaticCacheTTL int   `field:"-"` // 0 = use default (60s); negative = never expire
+		EmbedFS        fs.FS          `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
+		StaticCacheTTL int            `field:"-"` // 0 = use default (60s); negative = never expire
 	}
 )
 
@@ -71,13 +74,26 @@ func newConfig(opts ...Option) *Config {
 		StaticCacheTTL:            60,
 		UseRootStatics:            true,
 		RouterTreeRefreshInterval: 60,
+		SelectorStrategy:          "random",
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.NewNopRegistry()
-		cfg.RegistryCacher = cacher.New(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
+		cfg.RegistryCacher = registry.NewCacher(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
+	} else if rc, ok := cfg.Registry.(registry.IRegistryCacher); ok {
+		cfg.RegistryCacher = rc
+	} else {
+		cfg.RegistryCacher = registry.NewCacher(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
+	}
+
+	if cfg.Selector == nil {
+		cfg.Selector = selector.New(
+			selector.WithConfigPrefixName(cfg.String()), // 配置路径
+			selector.Registry(cfg.Registry),
+			selector.WithStrategy(cfg.SelectorStrategy),
+		)
 	}
 
 	return cfg
@@ -177,7 +193,14 @@ func WithRecoverHandler(handler func(IContext)) Option {
 func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
-		cfg.RegistryCacher = cacher.New(r)
+		if rc, ok := r.(registry.IRegistryCacher); ok {
+			cfg.RegistryCacher = rc
+		} else {
+			cfg.RegistryCacher = registry.NewCacher(r)
+		}
+		if cfg.Selector != nil {
+			cfg.Selector.Init(selector.Registry(r))
+		}
 	}
 }
 
@@ -241,6 +264,12 @@ func WithAloneService(asService bool, servicsName string, prefix ...string) Grou
 		if len(prefix) > 0 {
 			cfg.PathPrefix = prefix[0]
 		}
+	}
+}
+
+func WithEmbedFS(fsys fs.FS) GroupOption {
+	return func(cfg *GroupConfig) {
+		cfg.EmbedFS = fsys
 	}
 }
 

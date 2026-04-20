@@ -15,6 +15,7 @@ import (
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/errors"
+	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/internal/pool"
@@ -365,10 +366,10 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 	bd := body.New(req.body.Codec)
 	bd.Data.Write(b) // NOTED 存入编码数据
 	rsp := &httpResponse{
-		response:   hrsp,
-		body:       bd,
-		Status:     hrsp.Status,
-		Code: hrsp.StatusCode,
+		response: hrsp,
+		body:     bd,
+		Status:   hrsp.Status,
+		Code:     hrsp.StatusCode,
 	}
 
 	if h.config.PrintRequest {
@@ -459,6 +460,7 @@ func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*ht
 		}
 
 		// make the call
+		node.Address = addr.LocalFormat(node.Address)
 		resp, err := hcall(ctx, node, request, callOpts)
 		if err != nil {
 			return err
