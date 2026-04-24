@@ -57,7 +57,7 @@ type (
 		registered atomic.Bool  // used for first registration
 		exit       chan chan error
 		wg         *sync.WaitGroup // graceful exit
-		//services   []*registry.Service
+		services   []*registry.Service
 		subscribers map[router.ISubscriber][]broker.ISubscriber
 	}
 )
@@ -110,10 +110,10 @@ func (s *TServer) HandleEvent(e broker.IEvent) error {
 
 // 注册到服务发现
 func (self *TServer) Register() error {
-	//self.Lock()
-	//regSrv := self.services
+	self.RLock()
+	regSrv := self.services
 	config := self.config
-	//self.Unlock()
+	self.RUnlock()
 
 	regFunc := func(service *registry.Service) error {
 		// create registry options
@@ -138,7 +138,6 @@ func (self *TServer) Register() error {
 		return regErr
 	}
 
-	regSrv := self.config.Router.Config().RegistryCacher.LocalServices()
 	// have we registered before?
 	if len(regSrv) > 0 {
 		for _, srv := range regSrv {
@@ -173,9 +172,10 @@ func (self *TServer) Register() error {
 		host = advt
 	}
 
-	/*if ip := net.ParseIP(host); ip != nil {
+	var cacheService bool
+	if ip := net.ParseIP(host); ip != nil {
 		cacheService = true
-	}*/
+	}
 
 	addr, err := addr.Extract(host)
 	if err != nil {
@@ -245,12 +245,11 @@ func (self *TServer) Register() error {
 	// set what we're advertising
 	self.config.Advertise = addr
 
-	/*
-		if cacheService {
-			self.Lock()
-			self.services = servics
-			self.Unlock()
-		}*/
+	if cacheService {
+		self.Lock()
+		self.services = servics
+		self.Unlock()
+	}
 
 	self.registered.Store(true)
 
@@ -349,9 +348,9 @@ func (self *TServer) Deregister() error {
 		return err
 	}
 
-	/*self.Lock()
+	self.Lock()
 	self.services = nil
-	self.Unlock()*/
+	self.Unlock()
 
 	if !self.registered.Load() {
 		return nil

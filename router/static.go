@@ -90,9 +90,6 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 
 	//fileName := filepath.Join(s.diskDir, filepath.FromSlash(name))
 
-	if strings.Contains(name, "img/res_company_logo") {
-		log.Dbgf("Static file not found: %s", name)
-	}
 	// 1. 查 cache
 	if s.cache.Exists(name) {
 		if val, err := s.cache.Get(name); err == nil {

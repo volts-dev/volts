@@ -1,4 +1,4 @@
-// Package cache provides a registry cache
+// Package registry provides a registry implementation with caching capabilities
 package registry
 
 import (
@@ -12,37 +12,44 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// Cache is the registry cache interface
+// IRegistryCacher is an interface that extends IRegistry with caching capabilities.
+// It provides methods for efficient service lookup and management of local services.
 type (
 	IRegistryCacher interface {
 		IRegistry // embed the registry interface
+
+		// Match finds services that match the given endpoint path.
 		Match(endpoint string) ([]*Service, error)
+
+		// LocalServices returns a list of services registered by the local instance.
 		LocalServices() []*Service
-		Stop() // stop the cache watcher
+
+		// Stop terminates the background registry watcher and cleans up resources.
+		Stop()
 	}
 
+	// registryCacher is the default implementation of IRegistryCacher.
 	registryCacher struct {
 		IRegistry
 		config *Config
 
-		// registry cache
+		// registry cache state
 		sync.RWMutex
 		cache         map[string][]*Service
-		endpointMap   map[string]string // 缓存ep
+		endpointMap   map[string]string // cached endpoint to service name mapping
 		ttls          map[string]time.Time
 		watched       map[string]bool
 		localServices []*Service
 
-		// used to stop the cache
+		// exit is used to stop the background watcher
 		exit chan bool
 
-		// indicate whether its running
+		// running indicates whether the background watcher is active
 		running bool
-		// status of the registry
-		// used to hold onto the cache
-		// in failure state
+		// status holds the last error encountered by the registry
+		// and is used to preserve the cache in failure state
 		status error
-		// used to prevent cache breakdwon
+		// sg is used to prevent cache breakdown (thundering herd effect)
 		sg singleflight.Group
 	}
 )
@@ -51,7 +58,7 @@ var (
 	DefaultTTL = time.Minute
 )
 
-// New returns a new cache
+// NewCacher returns a new registry cacher instance with the given registry and options.
 func NewCacher(r IRegistry, opts ...Option) IRegistryCacher {
 	var defaultOpts []Option
 	defaultOpts = append(defaultOpts,
@@ -538,21 +545,39 @@ func (c *registryCacher) LocalServices() []*Service {
 }
 
 func (c *registryCacher) Register(s *Service, opts ...Option) error {
+	if err := c.IRegistry.Register(s, opts...); err != nil {
+		return err
+	}
+
+	services, err := c.IRegistry.GetService(s.Name)
+	if err != nil {
+		return err
+	}
+
 	c.Lock()
+	defer c.Unlock()
+	var srv = s
+	for _, ss := range services {
+		if ss.Name == s.Name && ss.Version == s.Version {
+			srv = ss
+			break
+		}
+	}
+
 	var updated bool
 	for i, ls := range c.localServices {
-		if ls.Name == s.Name && ls.Version == s.Version {
-			c.localServices[i] = s
+		if ls.Name == srv.Name && ls.Version == srv.Version {
+			c.localServices[i] = srv
 			updated = true
 			break
 		}
 	}
-	if !updated {
-		c.localServices = append(c.localServices, s)
-	}
-	c.Unlock()
 
-	return c.IRegistry.Register(s, opts...)
+	if !updated {
+		c.localServices = append(c.localServices, srv)
+	}
+
+	return nil
 }
 
 func (c *registryCacher) Deregister(s *Service, opts ...Option) error {
