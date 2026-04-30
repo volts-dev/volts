@@ -24,6 +24,8 @@ type Conn interface {
 	Id() string
 	// time it was created
 	Created() time.Time
+	// pool key
+	Key() any
 }
 
 func NewPool(opts ...Option) Pool {

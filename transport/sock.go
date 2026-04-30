@@ -3,7 +3,6 @@ package transport
 
 import (
 	"io"
-
 )
 
 // Socket is our pseudo socket for transport.Socket

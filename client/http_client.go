@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/addr"
@@ -411,7 +410,10 @@ func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*ht
 	d, ok := ctx.Deadline()
 	if !ok {
 		// no deadline so we create a new one
-		callOpts.RequestTimeout = utils.Max(request.Options().RequestTimeout, callOpts.RequestTimeout)
+		// per-request timeout overrides config default when explicitly set (non-zero)
+		if t := request.Options().RequestTimeout; t > 0 {
+			callOpts.RequestTimeout = t
+		}
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, callOpts.RequestTimeout)
 		defer cancel()
