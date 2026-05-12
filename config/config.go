@@ -174,8 +174,7 @@ func (self *Config) Unregister(cfg IConfig) {
 	self.Core().models.Delete(cfgStr)
 
 	if self.InConfig(cfgStr) {
-		//self.Core().fmt.Unset(cfgStr)
-		self.Core().fmt.v.Set(cfgStr, nil)
+		self.Core().fmt.Delete(cfgStr)
 
 		// 保存配置到文件
 		err := self.SaveToFile()
@@ -209,7 +208,7 @@ func (self *Config) Reload() {
 
 // 检测配置路径是否在Config里出现了
 func (self *Config) InConfig(path string) bool {
-	return self.Core().fmt.v.InConfig(path)
+	return self.Core().fmt.InConfig(path)
 }
 
 // LoadFromFile 尝试从文件系统加载配置。
@@ -222,12 +221,12 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 		core.FileName = CONFIG_FILE_NAME
 	}
 	filePath := filepath.Join(AppPath, core.FileName)
-	core.fmt.v.SetConfigFile(filePath)
+	core.fmt.SetConfigFile(filePath)
 
 	// 如果文件存在，先载入文件所有内容
 	fileExists := utils.FileExists(filePath)
 	if fileExists {
-		if err := core.fmt.v.ReadInConfig(); err != nil {
+		if err := core.fmt.ReadInConfig(); err != nil {
 			return err
 		}
 	}
@@ -247,7 +246,7 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 	core.models.Range(func(key any, value any) bool {
 		if v, ok := value.(IConfig); ok {
 			// 如果没有文件提供原始配置，或者该节配置不在文件里
-			if !fileExists || !core.fmt.v.InConfig(v.String()) {
+			if !fileExists || !core.fmt.InConfig(v.String()) {
 				if err := v.Save(false); err != nil {
 					log.Fatalf("save %v config failed!", v.String())
 					return false
@@ -296,7 +295,7 @@ func (self *Config) LoadToModel(model IConfig) error {
 	core := self.Core()
 
 	// 若该模型不在配置树的范围内（初次使用或未注册）
-	if !core.fmt.v.InConfig(model.String()) {
+	if !core.fmt.InConfig(model.String()) {
 		err := model.Save() // 持久化其默认值到核里
 		if err != nil {
 			return err
@@ -328,10 +327,8 @@ func (self *Config) SaveToFile(opts ...Option) error {
 		core.FileName = CONFIG_FILE_NAME
 	}
 
-	core.fmt.RWMutex.Lock()
-	defer core.fmt.RWMutex.Unlock()
-	core.fmt.v.SetConfigFile(filepath.Join(AppPath, core.FileName))
-	return core.fmt.v.WriteConfig()
+	core.fmt.SetConfigFile(filepath.Join(AppPath, core.FileName))
+	return core.fmt.WriteConfig()
 }
 
 // SaveFromModel 提取模型对象的所有可见属性并转储至配置底层的 KV 缓存中。

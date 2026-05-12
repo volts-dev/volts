@@ -26,6 +26,8 @@ func newFormat() *format {
 }
 
 func (self *format) Unset(key string) {
+	self.Lock()
+	defer self.Unlock()
 	newViper := viper.New()
 	for k, v := range self.v.AllSettings() {
 		if k != key {
@@ -33,6 +35,30 @@ func (self *format) Unset(key string) {
 		}
 	}
 	self.v = newViper
+}
+
+func (self *format) InConfig(key string) bool {
+	self.RLock()
+	defer self.RUnlock()
+	return self.v.InConfig(key)
+}
+
+func (self *format) SetConfigFile(in string) {
+	self.Lock()
+	defer self.Unlock()
+	self.v.SetConfigFile(in)
+}
+
+func (self *format) ReadInConfig() error {
+	self.Lock()
+	defer self.Unlock()
+	return self.v.ReadInConfig()
+}
+
+func (self *format) WriteConfig() error {
+	self.Lock()
+	defer self.Unlock()
+	return self.v.WriteConfig()
 }
 
 func (self *format) GetBool(key string, defaultValue bool) bool {
