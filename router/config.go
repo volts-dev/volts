@@ -25,12 +25,12 @@ type (
 
 	Config struct {
 		config.Config    `field:"-"`
-		Name             string             `field:"-"` // config name/path in config file
-		PrefixName       string             `field:"-"` // config prefix name
-		Logger           logger.ILogger     `field:"-"` // 实例
-		Router           *TRouter           `field:"-"`
-		Selector         selector.ISelector `field:"-"`
-		SelectorStrategy string
+		Name             string                   `field:"-"` // config name/path in config file
+		PrefixName       string                   `field:"-"` // config prefix name
+		Logger           logger.ILogger           `field:"-"` // 实例
+		Router           *TRouter                 `field:"-"`
+		Selector         selector.ISelector       `field:"-"`
+		SelectorStrategy string                   //
 		Registry         registry.IRegistry       `field:"-"`
 		RegistryCacher   registry.IRegistryCacher `field:"-"` // registry cache
 		RecoverHandler   func(IContext)           `field:"-"`
