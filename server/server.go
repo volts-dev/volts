@@ -53,8 +53,8 @@ type (
 		config *Config
 
 		// server status
-		started    atomic.Value // marks the serve as started
-		registered atomic.Bool  // used for first registration
+		started    atomic.Bool // marks the serve as started
+		registered atomic.Bool // used for first registration
 		exit       chan chan error
 		wg         *sync.WaitGroup // graceful exit
 		services   []*registry.Service
@@ -69,7 +69,6 @@ func New(opts ...Option) *TServer {
 		exit:   make(chan chan error),
 		wg:     &sync.WaitGroup{},
 	}
-	srv.started.Store(false)
 	return srv
 }
 
@@ -379,7 +378,7 @@ func (self *TServer) Deregister() error {
 }
 
 func (self *TServer) Start() error {
-	if self.started.Load().(bool) {
+	if self.started.Load() {
 		return nil
 	}
 
@@ -534,20 +533,19 @@ func (self *TServer) Start() error {
 }
 
 func (self *TServer) Started() bool {
-	return self.started.Load().(bool)
+	return self.started.Load()
 }
 
 func (self *TServer) Stop() error {
-	if !self.started.Load().(bool) {
+	// CAS 保证只有一个调用真正执行 Stop —— 其余并发/重入调用立即返回 nil，
+	// 不会去抢只读一次的 self.exit 通道而死锁。
+	if !self.started.CompareAndSwap(true, false) {
 		return nil
 	}
 
 	ch := make(chan error)
 	self.exit <- ch
-
-	err := <-ch
-	self.started.Store(false)
-	return err
+	return <-ch
 }
 
 func (self *TServer) Name() string {
