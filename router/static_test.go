@@ -197,6 +197,32 @@ func TestStaticStore_PathTraversal(t *testing.T) {
 	}
 }
 
+// TestStaticStore_SymlinkEscape 验证：
+// 即使磁盘目录里存在指向外部敏感文件的 symlink，Open 也必须拒绝读取。
+// 修复前：os.ReadFile 跟随 symlink，可读取 diskPath 以外的任意文件。
+// 修复后：filepath.EvalSymlinks 解出真实路径，验证仍在 diskPath 之下。
+func TestStaticStore_SymlinkEscape(t *testing.T) {
+	// 在系统临时目录建一个"敏感"文件
+	secret := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP SECRET"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	// static disk dir，放一个 symlink 指向上面那个 secret
+	diskDir := t.TempDir()
+	link := filepath.Join(diskDir, "leak.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("os.Symlink not supported in this env: %v", err)
+	}
+
+	store := newStaticStore(60*time.Second, diskDir, nil)
+
+	if f, err := store.Open("leak.txt"); err == nil {
+		_ = f.Close()
+		t.Fatalf("static store should refuse symlink-escape read, but it succeeded")
+	}
+}
+
 func TestSetStatic_WithEmbedFS(t *testing.T) {
 	fsys := fstest.MapFS{
 		"img/logo.png": &fstest.MapFile{Data: []byte("PNG_DATA")},
