@@ -279,9 +279,10 @@ func TestDecode_TruncatedPathLength(t *testing.T) {
 func TestDecode_PathLengthOverflowsBody(t *testing.T) {
 	// 构造 body：path_len 字段声明 1<<20 字节，但实际 body 远小于此
 	body := make([]byte, 8)
-	binary.BigEndian.PutUint32(body[0:4], 1<<20) // 谎报 path 长度
+	binary.BigEndian.PutUint32(body[0:4], 1<<20) // 1 MiB —— 远大于 8 字节 body
 	wire := make([]byte, 16+len(body))
 	wire[0] = MagicNumber
+	// Bom 字节 1-11 留空：Decode 仅校验 magic（byte 0），其余字段不验签。
 	binary.BigEndian.PutUint32(wire[12:16], uint32(len(body)))
 	copy(wire[16:], body)
 
@@ -300,6 +301,7 @@ func TestDecode_TruncatedServicePath(t *testing.T) {
 	body = append(body, 0x00, 0x00) // 只剩 2 字节，凑不齐 servicePath 长度
 	wire := make([]byte, 16+len(body))
 	wire[0] = MagicNumber
+	// Bom 字节 1-11 留空：Decode 仅校验 magic，其余字段不验签。
 	binary.BigEndian.PutUint32(wire[12:16], uint32(len(body)))
 	copy(wire[16:], body)
 
@@ -311,7 +313,8 @@ func TestDecode_TruncatedServicePath(t *testing.T) {
 }
 
 func TestDecodeMetadata_LengthUnderflow(t *testing.T) {
-	// 触发原代码 `n+sl > l-4` 的 uint32 下溢：l=2 时 l-4 回绕成巨大值
+	// 触发畸形 metadata：l=2 时初始 data[n:n+4] 读取直接 slice OOB panic，
+	// 在到达 `n+sl > l-4` 之前就崩。加固后应改为返回 ErrMetaKVMissing。
 	meta := []byte{0x00, 0x00} // 仅 2 字节
 	_, err := decodeMetadata(2, meta)
 	if err == nil {
@@ -320,7 +323,9 @@ func TestDecodeMetadata_LengthUnderflow(t *testing.T) {
 }
 
 func TestDecodeMetadata_KeyLengthOverflowsData(t *testing.T) {
-	// 谎报 key 长度 = 1000，但只给 4 字节数据
+	// 谎报 key 长度 = 1000，但只给 4 字节数据。
+	// 注：当前代码已通过 `n+sl > l-4` 守卫返回 ErrMetaKVMissing —— 测试今天即绿，
+	// 保留作为加固后的回归覆盖。
 	meta := make([]byte, 4)
 	binary.BigEndian.PutUint32(meta, 1000)
 	_, err := decodeMetadata(uint32(len(meta)), meta)
