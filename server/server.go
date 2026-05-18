@@ -280,7 +280,13 @@ func (self *TServer) Register() error {
 		self.config.Subscriber = sub
 	}
 
-	// Subscribe for all of the subscribers
+	// Subscribe for all of the subscribers.
+	// 持写锁保护 subscribers map：Deregister 可能在心跳轮询中并发 range+delete 此 map，
+	// 没有锁的话 Go runtime 直接 panic（concurrent map iteration and write）。
+	// 锁的范围覆盖整个循环，期间外部 Broker.Subscribe IO 也持锁 —— 接受这点开销，
+	// 因为 Register 在生命周期内仅在 Start 和心跳 deregister-after-failure 路径触发。
+	self.Lock()
+	defer self.Unlock()
 	for sb := range self.subscribers {
 		var opts []broker.SubscribeOption
 		if queue := sb.Config().Queue; len(queue) > 0 {
@@ -378,6 +384,9 @@ func (self *TServer) Deregister() error {
 		self.config.Subscriber = nil
 	}
 
+	// 持写锁：与 Register 中的 subscribers map 写入序列化，避免 concurrent
+	// map iteration and write panic。
+	self.Lock()
 	for sb, subs := range self.subscribers {
 		for _, sub := range subs {
 			log.Infof("Unsubscribing %s from topic: %s", node.Id, sub.Topic())
@@ -387,6 +396,7 @@ func (self *TServer) Deregister() error {
 		}
 		delete(self.subscribers, sb)
 	}
+	self.Unlock()
 
 	return nil
 }

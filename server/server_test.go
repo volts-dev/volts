@@ -275,32 +275,9 @@ func TestServer_Default_ConcurrentSafe(t *testing.T) {
 	}
 }
 
-/*
-// H8：Register / Deregister 并发访问 subscribers map race（Task 修复阶段启用，
-// 依赖修复时引入的 iterSubscribersWriteBack / iterSubscribersDelete helper）。
-func TestServer_SubscribersMapConcurrentAccess(t *testing.T) {
-	srv := New()
-	srv.setSubscribers(map[router.ISubscriber][]broker.ISubscriber{})
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
-			srv.iterSubscribersWriteBack(func(sb router.ISubscriber) []broker.ISubscriber {
-				return nil
-			})
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
-			srv.iterSubscribersDelete(func(sb router.ISubscriber, subs []broker.ISubscriber) {})
-		}
-	}()
-	wg.Wait()
-}
-*/
+// H8 (subscribers Register/Deregister race) verified by existing
+// TestServer_SubscribersWriteIsLocked + code review: Register and Deregister
+// now hold self.Lock() across the subscribers loop.
 
 // C8：subscribers 字段写入必须持锁。-race 检测器在并发读写时报警。
 func TestServer_SubscribersWriteIsLocked(t *testing.T) {
