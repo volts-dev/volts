@@ -2,6 +2,8 @@ package transport
 
 import (
 	"fmt"
+	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -199,4 +201,57 @@ func TestTcpConcurrentConnections(t *testing.T) {
 	}
 
 	t.Log("Concurrent connections (5 conns x 10 reqs): PASS")
+}
+
+// TestTcpServer_SlowlorisProtection 验证：
+// 客户端建立 TCP 连接后不发送任何数据时，服务端必须在 ReadTimeout 内
+// 关闭连接，否则恶意客户端可通过保持大量空闲连接耗尽 fd / 内存。
+// 修复前：tcp_server.go:97 `SetReadDeadline(time.Time{})` 主动清除超时 → 连接永远挂着。
+// 修复后：每条消息读取前重设 ReadTimeout → 慢客户端在 ReadTimeout 内被踢。
+func TestTcpServer_SlowlorisProtection(t *testing.T) {
+	const readTimeout = 200 * time.Millisecond
+
+	tr := NewTCPTransport(
+		ReadTimeout(readTimeout),
+		WriteTimeout(5*time.Second),
+	)
+
+	ln, err := tr.Listen(":0")
+	if err != nil {
+		t.Fatal("Listen error:", err)
+	}
+	defer ln.Close()
+
+	handler := &testRpcHandler{}
+	go func() {
+		_ = ln.Serve(handler)
+	}()
+
+	// 用 raw net.Dial 而非 tr.Dial —— 后者会进 sock 层、带客户端 timeout，
+	// 我们要测的是服务端是否在客户端不发数据时主动关闭。
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// 不发任何数据，单纯阻塞读 —— 若服务端遵守 ReadTimeout 则会关闭，
+	// Read 返回 EOF；否则 Read 永远阻塞。
+	done := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1)
+		_, err := conn.Read(buf)
+		done <- err
+	}()
+
+	deadline := readTimeout + 500*time.Millisecond
+	select {
+	case err := <-done:
+		// 收到 EOF / closed by peer 即证明服务端踢了我们
+		if err != io.EOF {
+			t.Logf("server closed connection with: %v (acceptable)", err)
+		}
+	case <-time.After(deadline):
+		t.Fatalf("server did not close idle connection within %v — slowloris vulnerability", deadline)
+	}
 }
