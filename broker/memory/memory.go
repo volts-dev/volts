@@ -4,6 +4,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -138,24 +139,38 @@ func (m *memoryBroker) Publish(topic string, msg *broker.Message, opts ...broker
 		v = msg
 	}
 
-	p := &memoryEvent{
-		topic:   topic,
-		message: v,
-		config:  *m.config,
+	// dispatch 在子函数里调用，让 defer recover 捕获 handler panic
+	// 并转成 error 返回，避免一个坏订阅者拖垮整个 broker。
+	dispatch := func(sub *memorySubscriber, p *memoryEvent) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("broker/memory: handler panicked: %v", r)
+			}
+		}()
+		return sub.handler(p)
 	}
 
+	// fan-out 语义：单个订阅者的 err 或 panic 不能阻止后续派发。
+	// 错误通过 ErrorHandler（如有）或回退日志记录；Publish 返回最后一个 err。
+	var lastErr error
 	for _, sub := range subs {
-		if err := sub.handler(p); err != nil {
+		p := &memoryEvent{
+			topic:   topic,
+			message: v,
+			config:  *m.config,
+		}
+		if err := dispatch(sub, p); err != nil {
 			p.err = err
 			if eh := m.config.ErrorHandler; eh != nil {
 				eh(p)
-				continue
+			} else {
+				log.Errf("[memory] handler for topic=%q failed: %v", topic, err)
 			}
-			return err
+			lastErr = err
 		}
 	}
 
-	return nil
+	return lastErr
 }
 
 func (m *memoryBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.ISubscriber, error) {
