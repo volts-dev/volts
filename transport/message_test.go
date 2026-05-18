@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"encoding/binary"
 	"reflect"
 	"testing"
 
@@ -238,5 +239,92 @@ func TestDecodeMetadata_MissingKv(t *testing.T) {
 	_, err := decodeMetadata(uint32(len(meta)), meta)
 	if err != ErrMetaKVMissing {
 		t.Fatalf("Expected ErrMetaKVMissing, got %v", err)
+	}
+}
+
+// === Malformed message tests (C2 hardening) ===
+
+// helper: 构造一条合法消息后截断 body 到 n 字节，模拟畸形包。
+// 返回截断后的完整 wire bytes（含 Bom + totalLen + 截断 body）。
+func truncatedMessage(t *testing.T, bodyLen int) []byte {
+	t.Helper()
+	msg := newMessage()
+	msg.Path = "Test.Method"
+	msg.Header["ServicePath"] = "Test"
+	msg.Header["ServiceMethod"] = "Method"
+	msg.Payload = []byte("hello world")
+	data := msg.Encode()
+	// data: [12]Bom + [4]totalLen + body...
+	if bodyLen > len(data)-16 {
+		bodyLen = len(data) - 16
+	}
+	// 重写 totalLen 为截断后的长度，使 Decode 走到 body 解析阶段
+	out := make([]byte, 16+bodyLen)
+	copy(out, data[:16])
+	binary.BigEndian.PutUint32(out[12:16], uint32(bodyLen))
+	copy(out[16:], data[16:16+bodyLen])
+	return out
+}
+
+func TestDecode_TruncatedPathLength(t *testing.T) {
+	// body 只有 2 字节，连 path 长度字段（4 字节）都读不到
+	data := truncatedMessage(t, 2)
+	msg := newMessage()
+	err := msg.Decode(bytes.NewReader(data))
+	if err == nil {
+		t.Fatalf("expected error for truncated path length, got nil")
+	}
+}
+
+func TestDecode_PathLengthOverflowsBody(t *testing.T) {
+	// 构造 body：path_len 字段声明 1<<20 字节，但实际 body 远小于此
+	body := make([]byte, 8)
+	binary.BigEndian.PutUint32(body[0:4], 1<<20) // 谎报 path 长度
+	wire := make([]byte, 16+len(body))
+	wire[0] = MagicNumber
+	binary.BigEndian.PutUint32(wire[12:16], uint32(len(body)))
+	copy(wire[16:], body)
+
+	msg := newMessage()
+	err := msg.Decode(bytes.NewReader(wire))
+	if err == nil {
+		t.Fatalf("expected error for path length overflowing body, got nil")
+	}
+}
+
+func TestDecode_TruncatedServicePath(t *testing.T) {
+	// 合法 path 后，service path 长度字段不完整
+	body := make([]byte, 0, 32)
+	body = binary.BigEndian.AppendUint32(body, 4) // path_len = 4
+	body = append(body, "abcd"...)
+	body = append(body, 0x00, 0x00) // 只剩 2 字节，凑不齐 servicePath 长度
+	wire := make([]byte, 16+len(body))
+	wire[0] = MagicNumber
+	binary.BigEndian.PutUint32(wire[12:16], uint32(len(body)))
+	copy(wire[16:], body)
+
+	msg := newMessage()
+	err := msg.Decode(bytes.NewReader(wire))
+	if err == nil {
+		t.Fatalf("expected error for truncated servicePath length, got nil")
+	}
+}
+
+func TestDecodeMetadata_LengthUnderflow(t *testing.T) {
+	// 触发原代码 `n+sl > l-4` 的 uint32 下溢：l=2 时 l-4 回绕成巨大值
+	meta := []byte{0x00, 0x00} // 仅 2 字节
+	_, err := decodeMetadata(2, meta)
+	if err == nil {
+		t.Fatalf("expected error for metadata length=2 (underflow case), got nil")
+	}
+}
+
+func TestDecodeMetadata_KeyLengthOverflowsData(t *testing.T) {
+	// 谎报 key 长度 = 1000，但只给 4 字节数据
+	meta := make([]byte, 4)
+	binary.BigEndian.PutUint32(meta, 1000)
+	_, err := decodeMetadata(uint32(len(meta)), meta)
+	if err == nil {
+		t.Fatalf("expected error for key length overflowing data, got nil")
 	}
 }
