@@ -14,7 +14,10 @@ var (
 	localIPMu       sync.RWMutex
 	localIPStrings  map[string]bool // IP string -> true
 	localIPCacheAt  time.Time
-	localIPCacheTTL = 30 * time.Second
+	// 10s TTL：30s 在 VPN 切换 / 网络迁移场景下导致 LocalFormat 把已失效的旧本机 IP
+	// 仍判为 "本地"，路由到 loopback 后请求失败。10s 在 IPs() 系统调用开销
+	// （单数字毫秒）和网络变化响应之间取平衡。
+	localIPCacheTTL = 10 * time.Second
 )
 
 func init() {
