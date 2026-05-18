@@ -44,12 +44,16 @@ func (t *httpTransportListener) Accept() (net.Conn, error) {
 }
 
 func (h *httpTransportListener) Serve(handler Handler) error {
+	// 显式收紧 header 上限 —— 标准库默认 1MB，对 RPC/Web 都偏大；
+	// 8KiB 足以容纳常规 cookie+UA+自定义头，攻击者无法用大 header 耗内存。
+	const maxHeaderBytes = 8 << 10
+
 	if hd, ok := handler.Handler().(http.Handler); ok {
 		h.http = &http.Server{
-			Handler: hd,
-			// slowloris 攻击防护
-			ReadTimeout:  h.transport.config.ReadTimeout,
-			WriteTimeout: h.transport.config.WriteTimeout,
+			Handler:        hd,
+			ReadTimeout:    h.transport.config.ReadTimeout,
+			WriteTimeout:   h.transport.config.WriteTimeout,
+			MaxHeaderBytes: maxHeaderBytes,
 		}
 	}
 
@@ -58,9 +62,9 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 			Handler: &customxx{
 				hd: hd,
 			},
-			// slowloris 攻击防护
-			ReadTimeout:  h.transport.config.ReadTimeout,
-			WriteTimeout: h.transport.config.WriteTimeout,
+			ReadTimeout:    h.transport.config.ReadTimeout,
+			WriteTimeout:   h.transport.config.WriteTimeout,
+			MaxHeaderBytes: maxHeaderBytes,
 		}
 	}
 	// default http2 server
