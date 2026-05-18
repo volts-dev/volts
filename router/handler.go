@@ -539,7 +539,9 @@ func (self *handler) init(router *TRouter) {
 		hd := ctrl.MethodByName(self.FuncName)
 		if !hd.IsValid() {
 			log.Errf("Method %s not found in controller %s", self.FuncName, self.ctrlName)
-			//goto initMiddlewares
+			// 不能直接 fall through —— hd.Type().In(0) 在 invalid Value 上会 panic。
+			// 跳过 handler 切片填充，仅保留中间件初始化（下方循环）。
+			goto initMiddlewares
 		}
 
 		switch hd.Type().In(0) {
@@ -570,6 +572,7 @@ func (self *handler) init(router *TRouter) {
 		}
 	}
 
+initMiddlewares:
 	/* 初始化中间件 */
 	for _, handle := range self.funcs {
 		if handle.Middleware == nil && handle.MiddlewareCreator != nil {
