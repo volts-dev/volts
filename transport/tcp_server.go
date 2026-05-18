@@ -64,7 +64,10 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 	for {
 		conn, err := self.listener.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			// EMFILE / ENFILE / similar 临时性资源耗尽错误也走 backoff —— 否则
+			// fd 暂时耗尽就让 Serve 永久退出。Temporary() 在 Go 1.18 后被标记
+			// deprecated，但 net 包内部仍用它表达此类瞬态条件，目前没有更好替代。
+			if ne, ok := err.(net.Error); ok && (ne.Timeout() || ne.Temporary()) {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
 				} else {
