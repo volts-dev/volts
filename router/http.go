@@ -375,42 +375,40 @@ func (self *THttpContext) SetCookie(name string, value string, others ...interfa
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%s=%s", sanitizeCookieName(name), sanitizeCookieValue(value))
 
+	// 用 type switch + ok-check 防止错误类型 panic（调用方传 string 给 Max-Age 等）
 	if len(others) > 0 {
-		switch others[0].(type) {
+		var maxAge int64
+		switch v := others[0].(type) {
 		case int:
-			if others[0].(int) > 0 {
-				fmt.Fprintf(&b, "; Max-Age=%d", others[0].(int))
-			} else if others[0].(int) < 0 {
-				fmt.Fprintf(&b, "; Max-Age=0")
-			}
-		case int64:
-			if others[0].(int64) > 0 {
-				fmt.Fprintf(&b, "; Max-Age=%d", others[0].(int64))
-			} else if others[0].(int64) < 0 {
-				fmt.Fprintf(&b, "; Max-Age=0")
-			}
+			maxAge = int64(v)
 		case int32:
-			if others[0].(int32) > 0 {
-				fmt.Fprintf(&b, "; Max-Age=%d", others[0].(int32))
-			} else if others[0].(int32) < 0 {
-				fmt.Fprintf(&b, "; Max-Age=0")
-			}
+			maxAge = int64(v)
+		case int64:
+			maxAge = v
+		}
+		if maxAge > 0 {
+			fmt.Fprintf(&b, "; Max-Age=%d", maxAge)
+		} else if maxAge < 0 {
+			fmt.Fprintf(&b, "; Max-Age=0")
 		}
 	}
 	if len(others) > 1 {
-		fmt.Fprintf(&b, "; Path=%s", sanitizeCookieValue(others[1].(string)))
+		if s, ok := others[1].(string); ok {
+			fmt.Fprintf(&b, "; Path=%s", sanitizeCookieValue(s))
+		}
 	}
 	if len(others) > 2 {
-		fmt.Fprintf(&b, "; Domain=%s", sanitizeCookieValue(others[2].(string)))
+		if s, ok := others[2].(string); ok {
+			fmt.Fprintf(&b, "; Domain=%s", sanitizeCookieValue(s))
+		}
 	}
 	if len(others) > 3 {
-		if others[3].(bool) {
+		if v, ok := others[3].(bool); ok && v {
 			fmt.Fprintf(&b, "; Secure")
 		}
 	}
-
 	if len(others) > 4 {
-		if others[4].(bool) {
+		if v, ok := others[4].(bool); ok && v {
 			fmt.Fprintf(&b, "; HttpOnly")
 		}
 	}
