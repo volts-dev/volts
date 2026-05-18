@@ -93,8 +93,14 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 			for {
 				msg := GetMessageFromPool()
 
-				// 清除读取超时，避免空闲连接被超时断开
-				conn.SetReadDeadline(time.Time{})
+				// slowloris 防护：客户端必须在 ReadTimeout 内发起下一条消息
+				// （正常请求或心跳）。设为 0 可关闭此保护，但会让恶意 idle 连接
+				// 持有 fd 直到 OS 默认 keepalive 触发，不推荐。
+				if rt := self.transport.config.ReadTimeout; rt > 0 {
+					conn.SetReadDeadline(time.Now().Add(rt))
+				} else {
+					conn.SetReadDeadline(time.Time{})
+				}
 
 				// 等待读取客户端信号
 				err := msg.Decode(conn)
