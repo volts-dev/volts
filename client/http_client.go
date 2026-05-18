@@ -441,72 +441,54 @@ func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*ht
 	//	hcall = callOpts.CallWrappers[i-1](hcall)
 	//}
 
-	// return errors.New("http.client", "request timeout", 408)
-	call := func(i int, response *httpResponse) error {
-		// call backoff first. Someone may want an initial start delay
-		/*t, err := callOpts.Backoff(ctx, request, i)
-		if err != nil {
-			return errors.InternalServerError("http.client", err.Error())
-		}
-
-		// only sleep if greater than 0
-		if t.Seconds() > 0 {
-			time.Sleep(t)
-		}
-		*/
-		// select next node
+	// call 执行一次请求：选 node、发起 HTTP、返回 fresh response。
+	// 不再用外层 goroutine 包装 —— hcall 内部走 hreq.WithContext(ctx)，
+	// ctx.Done 会让 client.Do 立即返回 err，不需要外部 select 抢占。
+	call := func(i int) (*httpResponse, error) {
 		node, err := next()
 		if err != nil && err == selector.ErrNotFound {
-			return errors.NotFound("http.client", err.Error())
+			return nil, errors.NotFound("http.client", err.Error())
 		} else if err != nil {
-			return errors.InternalServerError("http.client", err.Error())
+			return nil, errors.InternalServerError("http.client", err.Error())
 		}
 
-		// make the call
 		node.Address = addr.LocalFormat(node.Address)
 		resp, err := hcall(ctx, node, request, callOpts)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		// 保留原逻辑：仅成功路径调用 Mark
 		if self.config.Selector != nil {
 			self.config.Selector.Mark(request.Service(), node, err)
 		}
-		*response = *resp
-		return err
+		return resp, nil
 	}
 
-	ch := make(chan error, callOpts.Retries)
 	var gerr error
-	response := &httpResponse{}
-	// 调用
 	for i := 0; i < callOpts.Retries; i++ {
-		go func(i int, response *httpResponse) {
-			ch <- call(i, response)
-		}(i, response)
-
+		// 每次重试前先看 ctx 是否已取消，避免做无效请求
 		select {
 		case <-ctx.Done():
 			return nil, errors.New("http.client", 408, fmt.Sprintf("%v", ctx.Err()))
-		case err := <-ch:
-			// if the call succeeded lets bail early
-			if err == nil {
-				return response, nil
-			}
-
-			retry, rerr := callOpts.Retry(ctx, request, i, err)
-			if rerr != nil {
-				return nil, rerr
-			}
-
-			if !retry {
-				return nil, err
-			}
-
-			gerr = err
+		default:
 		}
+
+		resp, err := call(i)
+		if err == nil {
+			return resp, nil
+		}
+
+		retry, rerr := callOpts.Retry(ctx, request, i, err)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if !retry {
+			return nil, err
+		}
+		gerr = err
 	}
 
-	return response, gerr
+	return nil, gerr
 }
 
 func (self *HttpClient) CookiesManager() http.CookieJar {
