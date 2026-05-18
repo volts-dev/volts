@@ -15,6 +15,7 @@ import (
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/addr"
+	"github.com/volts-dev/volts/internal/backoff"
 	"github.com/volts-dev/volts/internal/body"
 	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/internal/pool"
@@ -486,6 +487,14 @@ func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*ht
 			return nil, err
 		}
 		gerr = err
+
+		// Exponential-ish backoff between retries; respects ctx cancellation.
+		// 防止故障期 N 次紧密重试形成请求风暴 → 加重后端故障。
+		select {
+		case <-ctx.Done():
+			return nil, errors.New("http.client", 408, fmt.Sprintf("%v", ctx.Err()))
+		case <-time.After(backoff.Do(i + 1)):
+		}
 	}
 
 	return nil, gerr
