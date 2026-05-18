@@ -266,26 +266,28 @@ func decodeMetadata(l uint32, data []byte) (map[string]string, error) {
 
 	m := make(map[string]string, 10)
 	n := uint32(0)
+	// 用减法 (l-n) 而非加法 (n+x) 比较，避免恶意 sl 触发 uint32 回绕。
+	// 循环条件 n < l 保证 l-n > 0，每次递增前都先校验空间足够。
 	for n < l {
 		// key length
-		if n+4 > l {
+		if 4 > l-n {
 			return nil, ErrMetaKVMissing
 		}
 		sl := binary.BigEndian.Uint32(data[n : n+4])
 		n += 4
-		if n+sl > l { // 避免 l-4 下溢；同时保证 data 切片不越界
+		if sl > l-n {
 			return nil, ErrMetaKVMissing
 		}
 		k := utils.SliceByteToString(data[n : n+sl])
 		n += sl
 
 		// value length
-		if n+4 > l {
+		if 4 > l-n {
 			return nil, ErrMetaKVMissing
 		}
 		sl = binary.BigEndian.Uint32(data[n : n+4])
 		n += 4
-		if n+sl > l {
+		if sl > l-n {
 			return nil, ErrMetaKVMissing
 		}
 		v := utils.SliceByteToString(data[n : n+sl])
