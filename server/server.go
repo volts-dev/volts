@@ -410,6 +410,10 @@ func (self *TServer) Start() error {
 	// connect to the broker
 	if err := cfg.Broker.Start(); err != nil {
 		log.Errf("Broker [%s] connect error: %v", bname, err)
+		// 回滚：transport 已 Listen，broker 启动失败必须关闭它，否则资源泄漏
+		if cerr := ts.Close(); cerr != nil {
+			log.Errf("Transport [%s] close after broker failure: %v", cfg.Transport.String(), cerr)
+		}
 		return err
 	}
 
