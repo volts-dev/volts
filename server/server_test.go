@@ -2,9 +2,13 @@ package server
 
 import (
 	"errors"
+	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/volts-dev/volts/broker"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -117,3 +121,137 @@ func TestAddressOptionWithExplicitTransport(t *testing.T) {
 		t.Errorf("Transport.Addrs = %q, want %q", cfg.Transport.Config().Addrs, addr)
 	}
 }
+
+// === C6+C7+C8 生命周期加固测试 ===
+
+// fakeBroker：用于 C6 测试，Start() 可控制返回错误，并记录是否被 Close。
+type fakeBroker struct {
+	broker.IBroker
+	startErr   error
+	closeCount int32
+}
+
+func (f *fakeBroker) Start() error                                                   { return f.startErr }
+func (f *fakeBroker) Close() error                                                   { atomic.AddInt32(&f.closeCount, 1); return nil }
+func (f *fakeBroker) String() string                                                 { return "fake" }
+func (f *fakeBroker) Address() string                                                { return "fake://" }
+func (f *fakeBroker) Init(...broker.Option) error                                    { return nil }
+func (f *fakeBroker) Config() *broker.Config                                         { return &broker.Config{} }
+func (f *fakeBroker) Publish(string, *broker.Message, ...broker.PublishOption) error { return nil }
+func (f *fakeBroker) Subscribe(string, broker.Handler, ...broker.SubscribeOption) (broker.ISubscriber, error) {
+	return nil, nil
+}
+
+// fakeTransport：Listen 返回一个 fakeListener，可观察 Close 调用次数
+type fakeTransport struct {
+	transport.ITransport
+	listener *fakeListener
+}
+
+func (t *fakeTransport) Init(opts ...transport.Option) error { return nil }
+func (t *fakeTransport) Listen(addr string, opts ...transport.ListenOption) (transport.IListener, error) {
+	if t.listener == nil {
+		t.listener = &fakeListener{addr: addr}
+	}
+	return t.listener, nil
+}
+func (t *fakeTransport) Dial(addr string, opts ...transport.DialOption) (transport.IClient, error) {
+	return nil, nil
+}
+func (t *fakeTransport) String() string   { return "fake-transport" }
+func (t *fakeTransport) Protocol() string { return "fake" }
+func (t *fakeTransport) Config() *transport.Config {
+	return &transport.Config{Addrs: ""}
+}
+
+type fakeListener struct {
+	addr       string
+	closeCount int32
+}
+
+func (l *fakeListener) Addr() net.Addr {
+	a, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:65535")
+	return a
+}
+func (l *fakeListener) Close() error                           { atomic.AddInt32(&l.closeCount, 1); return nil }
+func (l *fakeListener) Accept() (net.Conn, error)              { select {} }
+func (l *fakeListener) Serve(h transport.Handler) error        { select {} }
+
+// C6：Broker.Start 失败时，Transport 必须被 Close 以释放底层连接。
+func TestServer_Start_RollsBackTransportOnBrokerFailure(t *testing.T) {
+	fb := &fakeBroker{startErr: errors.New("forced broker failure")}
+	ft := &fakeTransport{}
+	srv := New(
+		WithTransport(ft),
+		WithBroker(fb),
+	)
+
+	if err := srv.Start(); err == nil {
+		t.Fatalf("expected broker failure to bubble up, got nil")
+	}
+
+	if ft.listener == nil {
+		t.Fatalf("transport.Listen was never called")
+	}
+	if got := atomic.LoadInt32(&ft.listener.closeCount); got != 1 {
+		t.Fatalf("expected transport listener Close to be called once after broker failure, got %d", got)
+	}
+}
+
+// C7：并发 Stop() 必须不能死锁。
+func TestServer_Stop_IsReentrantSafe(t *testing.T) {
+	srv := New()
+	srv.started.Store(true)
+
+	done := make(chan struct{})
+	go func() {
+		ch := <-srv.exit
+		ch <- nil
+		close(done)
+	}()
+
+	const n = 5
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			srv.Stop()
+		}()
+	}
+
+	doneCh := make(chan struct{})
+	go func() { wg.Wait(); close(doneCh) }()
+
+	select {
+	case <-doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Stop() deadlocked under concurrent invocation")
+	}
+
+	<-done
+}
+
+/*
+// C8：subscribers 字段写入必须持锁（Task 4 启用）
+func TestServer_SubscribersWriteIsLocked(t *testing.T) {
+	srv := New()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			srv.setSubscribers(nil)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			srv.RLock()
+			_ = srv.subscribers
+			srv.RUnlock()
+		}
+	}()
+	wg.Wait()
+}
+*/
