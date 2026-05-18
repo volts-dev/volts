@@ -84,6 +84,7 @@ func newConfig(opts ...Option) *Config {
 		Logger:   log,
 		Metadata: map[string]string{},
 		//Address:          DefaultAddress,
+		Context:          context.Background(),
 		RegisterInterval: DefaultRegisterInterval,
 		RegisterTTL:      DefaultRegisterTTL,
 		RegisterCheck:    DefaultRegisterCheck,
