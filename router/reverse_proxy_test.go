@@ -79,3 +79,34 @@ func TestWebSocketBothGoroutinesComplete(t *testing.T) {
 		t.Errorf("possible goroutine leak: before=%d after=%d", goroutinesBefore, goroutinesAfter)
 	}
 }
+
+// TestProxyBidir_OneSideClosedUnblocksOther 验证：
+// proxyBidir 在一侧断开后必须主动 Close 两侧，让另一侧阻塞的 Copy 立即返回。
+// 修复前：bidir 等两次 errCh，但第二个 Copy 还在 Read 一个仍然活着的 pipe，永久死锁。
+// 修复后：首个 err 到达后立即 Close 双端，强制对方 Read 返回，bidir 在合理时间内退出。
+func TestProxyBidir_OneSideClosedUnblocksOther(t *testing.T) {
+	// 模拟"后端"：a <-> aPeer。aPeer 给 proxyBidir 用。
+	a, aPeer := net.Pipe()
+	// 模拟"浏览器"：b <-> bPeer。bPeer 给 proxyBidir 用。
+	b, bPeer := net.Pipe()
+
+	// 浏览器侧（b）：永远不发也不读
+	defer b.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		proxyBidir(aPeer, bPeer)
+	}()
+
+	// 关闭后端侧 a —— aPeer 收到 EOF，一侧 Copy 立即返回。
+	// 若 proxyBidir 没有 Close 对端，bPeer.Read 会永久阻塞。
+	a.Close()
+
+	select {
+	case <-done:
+		// 修复后：另一侧也被 Close，Copy 解除阻塞
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxyBidir deadlocked: closed one side but other Copy still blocked")
+	}
+}

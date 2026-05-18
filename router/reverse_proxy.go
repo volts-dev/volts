@@ -193,6 +193,17 @@ func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	proxyBidir(conn, nc)
+}
+
+// proxyBidir copies bytes between a and b in both directions. It returns once
+// both copy goroutines have finished.
+//
+// NOTE: this is the pre-fix shape preserved for the red test. Bug: if one
+// direction finishes but the other Copy is still blocked on Read of a
+// still-alive peer (e.g. backend died, browser idle), the second <-errCh
+// deadlocks forever. Task 2 of the C3 fix patches this.
+func proxyBidir(a, b net.Conn) {
 	errCh := make(chan error, 2)
 
 	cp := func(dst io.Writer, src io.Reader) {
@@ -200,8 +211,8 @@ func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
 		errCh <- err
 	}
 
-	go cp(conn, nc)
-	go cp(nc, conn)
+	go cp(a, b)
+	go cp(b, a)
 
 	<-errCh // Wait for first goroutine
 	<-errCh // Wait for second goroutine to complete
