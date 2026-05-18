@@ -3,6 +3,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"reflect"
@@ -67,35 +68,18 @@ type (
 )
 
 // Validate checks if an endpoint is valid for being served.
+// 仅校验基础字段；早期注释掉的 POSIX 正则路径校验未保留，因为当前路由
+// 使用 radix tree 而非 POSIX 正则，path 形如 "/foo/:bar" 而非 "^/foo/(\w+)$"。
 func Validate(e *registry.Endpoint) error {
-	/*	if e == nil {
-			return errors.New("endpoint is nil")
-		}
-
-		if len(e.Name) == 0 {
-			return errors.New("name required")
-		}
-
-		for _, p := range e.Path {
-			ps := p[0]
-			pe := p[len(p)-1]
-
-			if ps == '^' && pe == '$' {
-				_, err := regexp.CompilePOSIX(p)
-				if err != nil {
-					return err
-				}
-			} else if ps == '^' && pe != '$' {
-				return errors.New("invalid path")
-			} else if ps != '^' && pe == '$' {
-				return errors.New("invalid path")
-			}
-		}
-
-		if len(e.Handler) == 0 {
-			return errors.New("invalid handler")
-		}
-	*/
+	if e == nil {
+		return errors.New("endpoint is nil")
+	}
+	if e.Name == "" {
+		return errors.New("endpoint name required")
+	}
+	if e.Path == "" {
+		return errors.New("endpoint path required")
+	}
 	return nil
 }
 
