@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -231,6 +232,75 @@ func TestServer_Stop_IsReentrantSafe(t *testing.T) {
 
 	<-done
 }
+
+// H6：Config.Context 必须有默认值，否则用户提供的 RegisterCheck 调 ctx.Done() 会 nil panic。
+func TestServer_Config_HasDefaultContext(t *testing.T) {
+	srv := New()
+	ctx := srv.Config().Context
+	if ctx == nil {
+		t.Fatal("Config.Context must be initialized to context.Background() by default")
+	}
+	// 验证可用：调用任意 context 方法不能 panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Config.Context method panicked: %v", r)
+		}
+	}()
+	_ = ctx.Done()
+	_ = ctx.Err()
+}
+
+// H7：并发调用 Default(opts...) 不能 race 也不能创建多个 server 实例。
+func TestServer_Default_ConcurrentSafe(t *testing.T) {
+	// 测试需要重置 default —— 但 sync.Once 不可重置，所以测试只覆盖 race-detector 路径。
+	// 这里改用与 Default 同款的内部锁逻辑：N 个 goroutine 同时调 Default，
+	// 修复后必须无 -race 警告。
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	results := make([]*TServer, n)
+	for i := 0; i < n; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = Default(Context(context.Background()))
+		}(i)
+	}
+	wg.Wait()
+
+	// 所有 goroutine 拿到同一个实例
+	for i := 1; i < n; i++ {
+		if results[i] != results[0] {
+			t.Fatalf("Default returned %d-th distinct instance: %p vs %p", i, results[i], results[0])
+		}
+	}
+}
+
+/*
+// H8：Register / Deregister 并发访问 subscribers map race（Task 修复阶段启用，
+// 依赖修复时引入的 iterSubscribersWriteBack / iterSubscribersDelete helper）。
+func TestServer_SubscribersMapConcurrentAccess(t *testing.T) {
+	srv := New()
+	srv.setSubscribers(map[router.ISubscriber][]broker.ISubscriber{})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			srv.iterSubscribersWriteBack(func(sb router.ISubscriber) []broker.ISubscriber {
+				return nil
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			srv.iterSubscribersDelete(func(sb router.ISubscriber, subs []broker.ISubscriber) {})
+		}
+	}()
+	wg.Wait()
+}
+*/
 
 // C8：subscribers 字段写入必须持锁。-race 检测器在并发读写时报警。
 func TestServer_SubscribersWriteIsLocked(t *testing.T) {
