@@ -355,6 +355,7 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 	if err != nil {
 		return nil, errors.InternalServerError("http.client", err.Error())
 	}
+	defer hrsp.Body.Close()
 
 	// NOTE 提前读取避免Ctx被取消而出错
 	b, err := io.ReadAll(hrsp.Body)
