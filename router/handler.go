@@ -670,7 +670,9 @@ func (self *handler) Invoke(ctx IContext) {
 	self.pos.Inc()
 
 	if err := self.invokeHandlers(ctx, self.TransportType); err != nil {
-		log.Panic(err)
+		// 不能 panic：invokeHandlers 在 context 类型错配等运行时场景会返回错误，
+		// 让 panic 逃出去会拉崩整个 server goroutine。改为记录日志、丢弃本次请求。
+		log.Errf("handler %s invoke error: %v", self.Name, err)
 	}
 }
 
