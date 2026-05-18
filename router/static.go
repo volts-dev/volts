@@ -102,9 +102,21 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 	// 2. 读磁盘（优先）
 	if s.diskPath != "" {
 		diskPath := filepath.Join(s.diskPath, filepath.FromSlash(name))
-		if data, err := os.ReadFile(diskPath); err == nil {
-			s.setCache(name, data)
-			return newMemFile(name, data), nil
+		// symlink 防护：EvalSymlinks 解出真实路径，确保仍在 diskPath 之下。
+		// 阻止恶意 / 误植的 symlink 指向 diskPath 之外的敏感文件。
+		if real, err := filepath.EvalSymlinks(diskPath); err == nil {
+			rootReal, rerr := filepath.EvalSymlinks(s.diskPath)
+			if rerr != nil {
+				return nil, fs.ErrNotExist
+			}
+			rel, rerr := filepath.Rel(rootReal, real)
+			if rerr != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+				return nil, fs.ErrNotExist
+			}
+			if data, err := os.ReadFile(real); err == nil {
+				s.setCache(name, data)
+				return newMemFile(name, data), nil
+			}
 		}
 	}
 
