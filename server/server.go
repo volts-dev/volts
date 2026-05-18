@@ -25,9 +25,9 @@ import (
 )
 
 var (
-	defaultServer     *TServer
-	defaultServerOnce sync.Once
-	log               = logger.New("Server")
+	defaultServer   *TServer
+	defaultServerMu sync.Mutex
+	log             = logger.New("Server")
 )
 
 type (
@@ -75,14 +75,19 @@ func New(opts ...Option) *TServer {
 // 默认server实例
 // NOTE 引入server时defaultServer必须是nil，防止某些场景不需要server实例
 func Default(opts ...Option) *TServer {
-	defaultServerOnce.Do(func() {
+	// 用互斥锁保护 lazy-init 与后续 opts 注入。原先 sync.Once 只保护首次创建，
+	// 后续的 Config().Init(opts...) 与并发 Default() 调用之间无同步 → 数据竞态。
+	defaultServerMu.Lock()
+	defer defaultServerMu.Unlock()
+
+	if defaultServer == nil {
 		defaultServer = New(opts...)
-	})
+		return defaultServer
+	}
 
 	if len(opts) > 0 {
 		defaultServer.Config().Init(opts...)
 	}
-
 	return defaultServer
 }
 
