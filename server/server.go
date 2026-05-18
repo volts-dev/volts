@@ -86,6 +86,15 @@ func Default(opts ...Option) *TServer {
 	return defaultServer
 }
 
+// setSubscribers 在写锁保护下替换 subscribers map。
+// 必须用此 helper —— 直接赋值与 HandleEvent 的 RLock 读会形成
+// Go memory model 数据竞态。
+func (s *TServer) setSubscribers(m map[router.ISubscriber][]broker.ISubscriber) {
+	s.Lock()
+	s.subscribers = m
+	s.Unlock()
+}
+
 func (s *TServer) HandleEvent(e broker.IEvent) error {
 	s.RLock()
 	subs := s.subscribers
@@ -395,7 +404,7 @@ func (self *TServer) Start() error {
 	// 打印
 	cfg.Router.PrintRoutes()
 
-	self.subscribers = self.config.Router.Config().Router.GetSubscribers()
+	self.setSubscribers(self.config.Router.Config().Router.GetSubscribers())
 
 	// start listening on the transport
 	ts, err := cfg.Transport.Listen(cfg.Address) // TODO Transport 无需地址

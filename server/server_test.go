@@ -232,8 +232,7 @@ func TestServer_Stop_IsReentrantSafe(t *testing.T) {
 	<-done
 }
 
-/*
-// C8：subscribers 字段写入必须持锁（Task 4 启用）
+// C8：subscribers 字段写入必须持锁。-race 检测器在并发读写时报警。
 func TestServer_SubscribersWriteIsLocked(t *testing.T) {
 	srv := New()
 	var wg sync.WaitGroup
@@ -254,4 +253,3 @@ func TestServer_SubscribersWriteIsLocked(t *testing.T) {
 	}()
 	wg.Wait()
 }
-*/
