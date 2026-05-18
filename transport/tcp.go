@@ -41,9 +41,9 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 	if self.config.Secure || self.config.TlsConfig != nil {
 		config := self.config.TlsConfig
 		if config == nil {
-			config = &tls.Config{
-				InsecureSkipVerify: true,
-			}
+			// 默认开启证书校验。需要跳过校验（自签名等测试场景）必须显式：
+			// TLSConfig(&tls.Config{InsecureSkipVerify: true})
+			config = &tls.Config{}
 		}
 		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
 	} else {

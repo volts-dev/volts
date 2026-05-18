@@ -214,8 +214,10 @@ func ACMEProvider(p acme.Provider) Option {
 	}
 }
 
-// Use secure communication. If TLSConfig is not specified we
-// use InsecureSkipVerify and generate a self signed cert
+// Use secure communication. If TLSConfig is not specified the default
+// tls.Config{} is used (peer certificate verification enabled). To skip
+// verification (self-signed test certs, etc.), pass an explicit
+// TLSConfig(&tls.Config{InsecureSkipVerify: true}).
 func Secure(b bool) Option {
 	return func(cfg *Config) {
 		cfg.Secure = b

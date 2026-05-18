@@ -127,9 +127,8 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 	if dialCfg.Secure || self.config.TlsConfig != nil {
 		config := self.config.TlsConfig
 		if config == nil {
-			config = &tls.Config{
-				InsecureSkipVerify: true, // 跳过认证证书
-			}
+			// 默认开启证书校验。跳过校验须显式：TLSConfig(&tls.Config{InsecureSkipVerify: true})
+			config = &tls.Config{}
 		}
 
 		if dialCfg.Ja3.Ja3 != "" {
