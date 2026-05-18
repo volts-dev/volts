@@ -44,14 +44,21 @@ const (
 	Gzip
 )
 
+// DefaultMaxMessageLength is the safe default cap applied to incoming messages
+// when callers do not override MaxMessageLength. 64 MiB matches common RPC framing
+// upper bounds and prevents trivial OOM via a forged length prefix.
+const DefaultMaxMessageLength = 64 << 20
+
 var ( // MaxMessageLength is the max length of a message.
-	// Default is 0 that means does not limit length of messages.
+	// Default is DefaultMaxMessageLength (64 MiB). Set to 0 to disable the cap.
 	// It is used to validate when read messages from io.Reader.
-	MaxMessageLength = 0
+	MaxMessageLength = DefaultMaxMessageLength
 	// ErrMetaKVMissing some keys or values are mssing.
 	ErrMetaKVMissing = errors.New("wrong metadata lines. some keys or values are missing")
 	// ErrMessageToLong message is too long
 	ErrMessageToLong = errors.New("message is too long")
+	// ErrMessageMalformed indicates a length prefix that doesn't fit the body.
+	ErrMessageMalformed = errors.New("malformed message: length prefix exceeds body")
 )
 
 type (
@@ -358,7 +365,7 @@ func (m *Message) Decode(r io.Reader) error {
 		return err
 	}
 
-	//total
+	// total length
 	lenData := poolUint32Data.Get().(*[]byte)
 	_, err = io.ReadFull(r, *lenData)
 	if err != nil {
@@ -379,35 +386,51 @@ func (m *Message) Decode(r io.Reader) error {
 	}
 	m.Body = data
 
+	// readField 从 data[n:] 解析一段 length-prefixed 字节，返回字段 bytes 与新偏移；
+	// 任何边界越界都返回 ErrMessageMalformed，避免触发 panic。
+	// 用减法 (len(data)-n) 比较以避免 n+x 在恶意输入下整型回绕。
+	readField := func(n int) ([]byte, int, error) {
+		if 4 > len(data)-n {
+			return nil, 0, ErrMessageMalformed
+		}
+		fl := int(binary.BigEndian.Uint32(data[n : n+4]))
+		n += 4
+		if fl < 0 || fl > len(data)-n {
+			return nil, 0, ErrMessageMalformed
+		}
+		return data[n : n+fl], n + fl, nil
+	}
+
 	n := 0
+
 	// parse Path
-	l = binary.BigEndian.Uint32(data[n:4])
-	n = n + 4
-	nEnd := n + int(l)
-	m.Path = utils.SliceByteToString(data[n:nEnd])
-	n = nEnd
+	field, n, err := readField(n)
+	if err != nil {
+		return err
+	}
+	m.Path = utils.SliceByteToString(field)
 
 	// parse servicePath
-	l = binary.BigEndian.Uint32(data[n : n+4])
-	n = n + 4
-	nEnd = n + int(l)
-	m.Header["ServicePath"] = utils.SliceByteToString(data[n:nEnd])
-	n = nEnd
+	field, n, err = readField(n)
+	if err != nil {
+		return err
+	}
+	m.Header["ServicePath"] = utils.SliceByteToString(field)
 
 	// parse serviceMethod
-	l = binary.BigEndian.Uint32(data[n : n+4])
-	n = n + 4
-	nEnd = n + int(l)
-	m.Header["ServiceMethod"] = utils.SliceByteToString(data[n:nEnd])
-	n = nEnd
+	field, n, err = readField(n)
+	if err != nil {
+		return err
+	}
+	m.Header["ServiceMethod"] = utils.SliceByteToString(field)
 
 	// parse meta
-	l = binary.BigEndian.Uint32(data[n : n+4])
-	n = n + 4
-	nEnd = n + int(l)
-
-	if l > 0 {
-		metadata, err := decodeMetadata(l, data[n:nEnd])
+	field, n, err = readField(n)
+	if err != nil {
+		return err
+	}
+	if len(field) > 0 {
+		metadata, err := decodeMetadata(uint32(len(field)), field)
 		if err != nil {
 			return err
 		}
@@ -415,15 +438,15 @@ func (m *Message) Decode(r io.Reader) error {
 			m.Header[k] = v
 		}
 	}
-	n = nEnd
 
 	// parse payload
-	l = binary.BigEndian.Uint32(data[n : n+4])
-	_ = l
-	n = n + 4
-	m.Payload = data[n:]
+	field, _, err = readField(n)
+	if err != nil {
+		return err
+	}
+	m.Payload = field
 
-	return err
+	return nil
 }
 
 // Clone clones from an message.

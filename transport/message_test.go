@@ -212,7 +212,7 @@ func TestDecodeMessage_TooLong(t *testing.T) {
 
 	MaxMessageLength = 512
 	defer func() {
-		MaxMessageLength = 0
+		MaxMessageLength = DefaultMaxMessageLength
 	}()
 
 	msg2 := newMessage()
@@ -331,5 +331,18 @@ func TestDecodeMetadata_KeyLengthOverflowsData(t *testing.T) {
 	_, err := decodeMetadata(uint32(len(meta)), meta)
 	if err == nil {
 		t.Fatalf("expected error for key length overflowing data, got nil")
+	}
+}
+
+func TestDecode_OversizedByDefaultLimit(t *testing.T) {
+	// 不显式设置 MaxMessageLength，默认就该拒绝 >64MiB 的消息
+	wire := make([]byte, 16)
+	wire[0] = MagicNumber
+	binary.BigEndian.PutUint32(wire[12:16], 100<<20) // 谎报 100 MiB
+
+	msg := newMessage()
+	err := msg.Decode(bytes.NewReader(wire))
+	if err != ErrMessageToLong {
+		t.Fatalf("expected ErrMessageToLong with default limit, got %v", err)
 	}
 }
