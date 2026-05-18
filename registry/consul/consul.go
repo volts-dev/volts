@@ -414,6 +414,11 @@ func (c *consulRegistry) Config() *registry.Config {
 }
 
 func (c *consulRegistry) Client() *consul.Client {
+	// 持锁串行化首次创建。原代码并发调用会创建多个 client 并随意覆盖 c.client，
+	// 上一个 client 持有的连接不会被关闭 → 连接泄漏。
+	c.Lock()
+	defer c.Unlock()
+
 	if c.client != nil {
 		return c.client
 	}
