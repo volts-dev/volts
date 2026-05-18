@@ -130,6 +130,12 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			// 默认开启证书校验。跳过校验须显式：TLSConfig(&tls.Config{InsecureSkipVerify: true})
 			config = &tls.Config{}
 		}
+		// 强制 MinVersion >= TLS 1.2 —— TLS 1.0/1.1 已被 RFC 8996 弃用，存在降级风险。
+		// 用户若显式设置了更高的 MinVersion 不覆盖；只兜底未设置或更低的情况。
+		if config.MinVersion < tls.VersionTLS12 {
+			config = config.Clone()
+			config.MinVersion = tls.VersionTLS12
+		}
 
 		if dialCfg.Ja3.Ja3 != "" {
 			rawConn, err := dialCfg.dialer.Dial(dialCfg.Network, addr)

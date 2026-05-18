@@ -45,6 +45,11 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 			// TLSConfig(&tls.Config{InsecureSkipVerify: true})
 			config = &tls.Config{}
 		}
+		// 强制 MinVersion >= TLS 1.2（RFC 8996 弃用 1.0/1.1）
+		if config.MinVersion < tls.VersionTLS12 {
+			config = config.Clone()
+			config.MinVersion = tls.VersionTLS12
+		}
 		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
 	} else {
 		conn, err = net.DialTimeout("tcp", addr, dialCfg.DialTimeout)
