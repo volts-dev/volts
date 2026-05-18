@@ -43,6 +43,8 @@ type (
 
 		// exit is used to stop the background watcher
 		exit chan bool
+		// wg waits for run() + every watch() goroutine to fully exit on Stop()
+		wg sync.WaitGroup
 
 		// running indicates whether the background watcher is active
 		running bool
@@ -206,6 +208,7 @@ func (c *registryCacher) get(service string) ([]*Service, error) {
 
 		// only kick it off if not running
 		if !c.running {
+			c.wg.Add(1)
 			go c.run()
 		}
 
@@ -343,6 +346,8 @@ func (c *registryCacher) update(res *Result) {
 // run starts the cache watcher loop
 // it creates a new watcher if there's a problem
 func (c *registryCacher) run() {
+	defer c.wg.Done()
+
 	c.Lock()
 	c.running = true
 	c.Unlock()
@@ -435,8 +440,10 @@ func (c *registryCacher) watch(w Watcher) error {
 	// used to stop the watch
 	stop := make(chan bool)
 
-	// manage this loop
+	// manage this loop —— wg.Add 必须在 go 启动前完成，确保 Stop().Wait() 能正确同步
+	c.wg.Add(1)
 	igoroutine.Go(func() {
+		defer c.wg.Done()
 		defer w.Stop()
 
 		select {
@@ -597,14 +604,17 @@ func (c *registryCacher) Deregister(s *Service, opts ...Option) error {
 
 func (c *registryCacher) Stop() {
 	c.Lock()
-	defer c.Unlock()
-
 	select {
 	case <-c.exit:
+		c.Unlock()
 		return
 	default:
 		close(c.exit)
 	}
+	c.Unlock()
+
+	// 持锁阶段已结束，wg.Wait 必须在锁外 —— 否则 run() 的 defer 想取写锁会死锁。
+	c.wg.Wait()
 }
 
 func (c *registryCacher) String() string {
