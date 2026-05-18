@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -246,3 +247,74 @@ func TestMemoryBrokerConcurrentPublish(t *testing.T) {
 
 // Gosched 让 unsubscribe 的 goroutine 有机会执行
 func runtime_Gosched() { var wg sync.WaitGroup; wg.Add(1); go func() { wg.Done() }(); wg.Wait() }
+
+// === C14: handler panic recover + fan-out 健壮性 ===
+
+// handler panic 必须不能让 Publish 逃出去或拉崩 broker
+func TestMemoryBroker_HandlerPanicDoesNotCrash(t *testing.T) {
+	b := New()
+	if err := b.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer b.Close()
+
+	_, err := b.Subscribe("topic.panic", func(broker.IEvent) error {
+		panic("boom")
+	})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Publish must not propagate handler panic, got: %v", r)
+		}
+	}()
+
+	if err := b.Publish("topic.panic", &broker.Message{Body: []byte("x")}); err == nil {
+		t.Fatalf("expected non-nil err when handler panics, got nil")
+	}
+}
+
+// 单订阅者返回 err 不能阻止后续订阅者收到消息（pub/sub fan-out 语义）
+func TestMemoryBroker_OneHandlerErrorDoesNotBlockOthers(t *testing.T) {
+	b := New()
+	if err := b.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer b.Close()
+
+	var second, third int64
+	_, err := b.Subscribe("topic.fanout", func(broker.IEvent) error {
+		return errors.New("intentional failure")
+	})
+	if err != nil {
+		t.Fatalf("Subscribe 1: %v", err)
+	}
+	_, err = b.Subscribe("topic.fanout", func(broker.IEvent) error {
+		atomic.AddInt64(&second, 1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe 2: %v", err)
+	}
+	_, err = b.Subscribe("topic.fanout", func(broker.IEvent) error {
+		atomic.AddInt64(&third, 1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe 3: %v", err)
+	}
+
+	// 不配 ErrorHandler —— 旧实现会在第一个 err 处 return，后续 handler 收不到
+	err = b.Publish("topic.fanout", &broker.Message{Body: []byte("y")})
+	if err == nil {
+		t.Fatalf("expected non-nil err to surface from failing handler")
+	}
+	if atomic.LoadInt64(&second) != 1 {
+		t.Fatalf("expected second handler to run despite first handler error, got count=0")
+	}
+	if atomic.LoadInt64(&third) != 1 {
+		t.Fatalf("expected third handler to run despite first handler error, got count=0")
+	}
+}
