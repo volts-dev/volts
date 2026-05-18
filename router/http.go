@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -326,29 +327,41 @@ func (self *THttpContext) IP() (res []string) {
 }
 
 // RemoteAddr returns the most likely real IP address of the visitor.
-// NOTE: This trusts headers like X-Real-IP and X-Forwarded-For.
-// In a production environment, ensure this is only used behind a trusted proxy.
+//
+// 信任策略：只有当直接 TCP peer（self.request.RemoteAddr）是 loopback 或 RFC1918
+// 私网地址时，才信任 X-Real-IP / X-Forwarded-For / X-ProxyUser-Ip —— 假定前面
+// 是受控的本地代理（nginx / envoy / sidecar）。
+// 公网客户端直连时拒绝任何 XFF 类 header，避免攻击者伪造 IP 绕过日志 / 限流 / IP 鉴权。
 func (self *THttpContext) RemoteAddr() string {
-	// Try common proxy headers first
-	for _, hdr := range []string{"X-Real-IP", "X-Forwarded-For", "X-ProxyUser-Ip"} {
-		if addr := self.request.Header().Get(hdr); addr != "" {
-			if hdr == "X-Forwarded-For" {
-				// X-Forwarded-For can contain a comma-separated list of IPs.
-				// The first one is usually the original client.
-				if i := strings.IndexByte(addr, ','); i > -1 {
-					return strings.TrimSpace(addr[:i])
+	peer := self.request.RemoteAddr
+	peerHost := peer
+	if i := strings.LastIndex(peer, ":"); i > -1 {
+		peerHost = peer[:i]
+	}
+
+	if isTrustedProxyPeer(peerHost) {
+		for _, hdr := range []string{"X-Real-IP", "X-Forwarded-For", "X-ProxyUser-Ip"} {
+			if addr := self.request.Header().Get(hdr); addr != "" {
+				if hdr == "X-Forwarded-For" {
+					if i := strings.IndexByte(addr, ','); i > -1 {
+						return strings.TrimSpace(addr[:i])
+					}
 				}
+				return strings.TrimSpace(addr)
 			}
-			return strings.TrimSpace(addr)
 		}
 	}
 
-	// Fallback to RemoteAddr from the network connection
-	addr := self.request.RemoteAddr
-	if i := strings.LastIndex(addr, ":"); i > -1 {
-		return addr[:i]
+	return peerHost
+}
+
+// isTrustedProxyPeer 判断直接 TCP peer 是否属于"可信代理"位置（loopback / 私网）。
+func isTrustedProxyPeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
 	}
-	return addr
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // SetCookie Sets the header entries associated with key to the single element value. It replaces any existing values associated with key.
