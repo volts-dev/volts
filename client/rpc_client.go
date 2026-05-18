@@ -117,7 +117,9 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 	// get the retries
 	retries := callOpts.Retries
 
-	for i := 0; i <= retries; i++ {
+	// i < retries (NOT <=) —— 与 HTTP client 对齐：Retries=N 表示总尝试 N 次。
+	// 原 i <= retries 多跑一次（N+1 次）；调用方若依赖旧 N+1 行为，需把 Retries 加 1。
+	for i := 0; i < retries; i++ {
 		// 检查 context 是否已超时
 		select {
 		case <-ctx.Done():
