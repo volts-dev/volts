@@ -1,6 +1,7 @@
 package selector
 
 import (
+	"sync"
 	"time"
 
 	"github.com/volts-dev/volts/registry"
@@ -9,7 +10,10 @@ import (
 type (
 	registrySelector struct {
 		config *Config
-		rc     registry.IRegistryCacher
+		// mu 保护 rc：Init 会 Stop 旧 cacher 然后替换为 newCache()。
+		// 并发的 Match / Select / Close 必须看到一致的 rc，否则会调到已 Stop 的旧实例或 nil。
+		mu sync.RWMutex
+		rc registry.IRegistryCacher
 	}
 )
 
@@ -28,8 +32,14 @@ func (self *registrySelector) Init(opts ...Option) error {
 		o(self.config)
 	}
 
-	self.rc.Stop()
+	self.mu.Lock()
+	old := self.rc
 	self.rc = self.newCache()
+	self.mu.Unlock()
+	// 在锁外 Stop 旧实例，避免 Stop().WaitGroup 与持有 mu 的并发 Match 形成依赖环
+	if old != nil {
+		old.Stop()
+	}
 	return nil
 }
 
@@ -41,7 +51,10 @@ func (self *registrySelector) Match(endpoint string, opts ...SelectOption) (Next
 	sopts := &SelectConfig{
 		Strategy: self.config.Strategy,
 	}
-	services, err := self.rc.Match(endpoint)
+	self.mu.RLock()
+	rc := self.rc
+	self.mu.RUnlock()
+	services, err := rc.Match(endpoint)
 	if err != nil {
 		if err == registry.ErrNotFound {
 			return nil, ErrNotFound
@@ -68,7 +81,10 @@ func (self *registrySelector) Select(service string, opts ...SelectOption) (Next
 	// get the service
 	// try the cache first
 	// if that fails go directly to the registry
-	services, err := self.rc.GetService(service)
+	self.mu.RLock()
+	rc := self.rc
+	self.mu.RUnlock()
+	services, err := rc.GetService(service)
 	if err != nil {
 		if err == registry.ErrNotFound {
 			return nil, ErrNotFound
@@ -98,7 +114,13 @@ func (self *registrySelector) Reset(service string) {
 
 // Close stops the watcher and destroys the cache
 func (self *registrySelector) Close() error {
-	self.rc.Stop()
+	self.mu.Lock()
+	rc := self.rc
+	self.rc = nil
+	self.mu.Unlock()
+	if rc != nil {
+		rc.Stop()
+	}
 	return nil
 }
 
