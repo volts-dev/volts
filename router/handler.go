@@ -343,8 +343,14 @@ func (self *handlerManager) Store(h *handler) {
 
 func (self *handlerManager) Get(id int) *handler {
 	if v, ok := self.handlerPool.Load(id); ok {
-		if h := v.(memory.StackCache).Pop(); h != nil {
-			return h.(*handler)
+		// 守卫：handlerPool 仅本包写入 StackCache，但若 sync.Map 被外部污染
+		// 也不应直接 panic 拖崩 router；miss-typed entry 走 fallback 路径。
+		if c, ok := v.(memory.StackCache); ok {
+			if h := c.Pop(); h != nil {
+				if hd, ok := h.(*handler); ok {
+					return hd
+				}
+			}
 		}
 	}
 
@@ -360,8 +366,11 @@ func (self *handlerManager) Put(id int, h *handler) {
 	var c memory.StackCache
 
 	if v, ok := self.handlerPool.Load(id); ok {
-		c = v.(memory.StackCache)
-	} else {
+		if cached, typeOk := v.(memory.StackCache); typeOk {
+			c = cached
+		}
+	}
+	if c == nil {
 		c = memory.NewStack(
 			memory.WithInterval(60),
 			memory.WithExpire(3600),

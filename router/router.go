@@ -299,7 +299,14 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			return NewHttpContext(self)
 		}})
 
-		pool := p.(*sync.Pool)
+		pool, ok := p.(*sync.Pool)
+		if !ok {
+			// 不可能发生：本包内 httpCtxPool 只存 *sync.Pool。防御性守卫，避免
+			// 未来若有人误存其他类型时直接 panic 拉崩整个 HTTP server。
+			log.Errf("httpCtxPool corruption: unexpected type %T for route %v", p, route.Id())
+			rsp.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		ctx := pool.Get().(*THttpContext)
 		ctx.route = route
 		if !ctx.inited {
@@ -363,7 +370,13 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 			return NewRpcHandler(self)
 		}})
 
-		pool := p.(*sync.Pool)
+		pool, ok := p.(*sync.Pool)
+		if !ok {
+			log.Errf("rpcCtxPool corruption: unexpected type %T for route %v", p, route.Id())
+			w.WriteHeader(transport.StatusInternalError)
+			w.Write([]byte{})
+			return
+		}
 		ctx := pool.Get().(*TRpcContext)
 		if !ctx.inited {
 			ctx.router = self
