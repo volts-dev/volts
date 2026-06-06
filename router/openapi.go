@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/volts-dev/dataset"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -117,4 +118,123 @@ func applyTags(sf reflect.StructField, fv *registry.Value) {
 	if e := sf.Tag.Get("enum"); e != "" {
 		fv.Enum = strings.Split(e, ",")
 	}
+}
+
+// TypedHandler 是 OpenAPI 友好的处理器签名。
+type TypedHandler[I, O any] func(ctx IContext, in *I) (*O, error)
+
+// Handle 以泛型注册一个 typed handler，注册期反射出 schema、运行期零 reflect.Call。
+// method 为 "CONNECT" 时按 RPC 包装，否则按 HTTP。
+func Handle[I, O any](g *TGroup, method, path string, h TypedHandler[I, O], opts ...OpOption) *route {
+	op := buildOp[I, O](opts...)
+
+	core := func(ctx IContext) {
+		var in I
+		if b := ctx.Body(); b != nil {
+			_ = b.Decode(&in)
+		}
+		bindPathQuery(ctx, &in)
+		out, err := h(ctx, &in)
+		if err != nil {
+			writeError(ctx, err)
+			return
+		}
+		ctx.RespondByJson(out)
+	}
+
+	var hd any
+	if strings.ToUpper(method) == "CONNECT" {
+		hd = WrapRpc(core)
+	} else {
+		hd = WrapHttp(core)
+	}
+
+	r := g.Url(method, path, hd)
+	r.meta = op
+	return r
+}
+
+// bindPathQuery 用 path 参数（HTTP/RPC 皆有）和 query/form（仅 HTTP）填充 in 的字段。
+// body 已由 Body().Decode 处理。为避免覆盖 body 解码出的值：
+//   - in:"query"/"header" 字段只从 MethodParams 取；
+//   - in:"path" 或未标注字段只从 PathParams 取，且仅当该参数确实存在（IsValid）时才赋值。
+//
+// 未标注且无同名 path 参数的字段（即纯 body 字段）保持 Decode 的结果不被触碰。
+func bindPathQuery(ctx IContext, ptr any) {
+	rv := reflect.ValueOf(ptr).Elem()
+	rt := rv.Type()
+	if rt.Kind() != reflect.Struct {
+		return
+	}
+	pp := ctx.PathParams()
+	var mp *TParamsSet
+	if hc, ok := ctx.(*THttpContext); ok {
+		mp = hc.MethodParams()
+	}
+	for i := 0; i < rt.NumField(); i++ {
+		sf := rt.Field(i)
+		fv := rv.Field(i)
+		if !fv.CanSet() {
+			continue
+		}
+		name := sf.Tag.Get("json")
+		if idx := strings.IndexByte(name, ','); idx >= 0 {
+			name = name[:idx]
+		}
+		if name == "" || name == "-" {
+			name = sf.Name
+		}
+		var src *TParamsSet
+		switch sf.Tag.Get("in") {
+		case "query", "header":
+			src = mp
+		default: // path 或未标注
+			src = pp
+		}
+		fs := presentField(src, name)
+		if fs == nil {
+			continue
+		}
+		setField(fv, fs)
+	}
+}
+
+// presentField 返回参数集中确实存在的字段，否则 nil（防止用空值覆盖 body 字段）。
+func presentField(ps *TParamsSet, name string) *dataset.TFieldSet {
+	if ps == nil {
+		return nil
+	}
+	fs := ps.FieldByName(name)
+	if fs == nil || !fs.IsValid {
+		return nil
+	}
+	return fs
+}
+
+func setField(fv reflect.Value, fs *dataset.TFieldSet) {
+	switch fv.Kind() {
+	case reflect.String:
+		fv.SetString(fs.AsString())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		fv.SetInt(fs.AsInteger())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		fv.SetUint(uint64(fs.AsInteger()))
+	case reflect.Float32, reflect.Float64:
+		fv.SetFloat(fs.AsFloat())
+	case reflect.Bool:
+		fv.SetBool(fs.AsBoolean())
+	}
+}
+
+// writeError 把 handler 返回的 error 映射成响应。实现了 StatusCode() 的错误用其状态码，否则 500。
+func writeError(ctx IContext, err error) {
+	code := 500
+	if sc, ok := err.(interface{ StatusCode() int }); ok {
+		code = sc.StatusCode()
+	}
+	if hc, ok := ctx.(*THttpContext); ok {
+		hc.Abort(err.Error(), code)
+		return
+	}
+	ctx.RespondByJson(map[string]string{"error": err.Error()})
 }
