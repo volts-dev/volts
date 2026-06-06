@@ -51,17 +51,82 @@ func BuildSpec(info Info, eps []*registry.Endpoint) []byte {
 		op := openapi3.NewOperation()
 		op.Summary = ep.Description
 
-		// 从路径中提取路径参数并声明到 operation.Parameters
+		// Collect the set of path-param names from the converted URL (e.g. {id}).
+		urlPathParams := map[string]bool{}
 		for _, match := range openAPIParamRe.FindAllStringSubmatch(oapiPath, -1) {
-			paramName := match[1]
-			op.Parameters = append(op.Parameters, &openapi3.ParameterRef{
-				Value: &openapi3.Parameter{
-					Name:     paramName,
-					In:       "path",
-					Required: true,
-					Schema:   openapi3.NewStringSchema().NewRef(),
-				},
-			})
+			urlPathParams[match[1]] = true
+		}
+
+		// coveredPathParams tracks which URL path-param names were provided by a
+		// request field with in:"path", so we don't double-declare them.
+		coveredPathParams := map[string]bool{}
+
+		if ep.Request != nil && len(ep.Request.Values) > 0 {
+			// Object-style request: classify each field by its In tag.
+			var bodyFields []*registry.Value
+			for _, f := range ep.Request.Values {
+				switch f.In {
+				case "path":
+					op.Parameters = append(op.Parameters, &openapi3.ParameterRef{
+						Value: &openapi3.Parameter{
+							Name:     f.Name,
+							In:       "path",
+							Required: true, // path params are always required
+							Schema:   valueToSchema(f, comps),
+						},
+					})
+					coveredPathParams[f.Name] = true
+				case "query", "header":
+					op.Parameters = append(op.Parameters, &openapi3.ParameterRef{
+						Value: &openapi3.Parameter{
+							Name:     f.Name,
+							In:       f.In,
+							Required: f.Required,
+							Schema:   valueToSchema(f, comps),
+						},
+					})
+				default:
+					// No in tag, or explicit "body" — goes into requestBody.
+					bodyFields = append(bodyFields, f)
+				}
+			}
+
+			// Any URL path param not covered by a request field gets a default string param.
+			for name := range urlPathParams {
+				if !coveredPathParams[name] {
+					op.Parameters = append(op.Parameters, &openapi3.ParameterRef{
+						Value: &openapi3.Parameter{
+							Name:     name,
+							In:       "path",
+							Required: true,
+							Schema:   openapi3.NewStringSchema().NewRef(),
+						},
+					})
+				}
+			}
+
+			if len(bodyFields) > 0 {
+				bodyVal := &registry.Value{Name: "Body", Type: "Body", Values: bodyFields}
+				body := openapi3.NewRequestBody().WithJSONSchemaRef(valueToSchema(bodyVal, comps))
+				op.RequestBody = &openapi3.RequestBodyRef{Value: body}
+			}
+		} else {
+			// No request, or scalar request (no Values): declare URL path params as
+			// default string params and (if scalar request) set it as requestBody.
+			for name := range urlPathParams {
+				op.Parameters = append(op.Parameters, &openapi3.ParameterRef{
+					Value: &openapi3.Parameter{
+						Name:     name,
+						In:       "path",
+						Required: true,
+						Schema:   openapi3.NewStringSchema().NewRef(),
+					},
+				})
+			}
+			if ep.Request != nil {
+				body := openapi3.NewRequestBody().WithJSONSchemaRef(valueToSchema(ep.Request, comps))
+				op.RequestBody = &openapi3.RequestBodyRef{Value: body}
+			}
 		}
 
 		op.Responses = openapi3.NewResponses()
@@ -70,11 +135,6 @@ func BuildSpec(info Info, eps []*registry.Endpoint) []byte {
 			resp.WithJSONSchemaRef(valueToSchema(ep.Response, comps))
 		}
 		op.Responses.Set("200", &openapi3.ResponseRef{Value: resp})
-
-		if ep.Request != nil {
-			body := openapi3.NewRequestBody().WithJSONSchemaRef(valueToSchema(ep.Request, comps))
-			op.RequestBody = &openapi3.RequestBodyRef{Value: body}
-		}
 
 		methods := ep.Method
 		if len(methods) == 0 {

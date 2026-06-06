@@ -40,3 +40,51 @@ func TestBuildSpec_ParsableAndHasPath(t *testing.T) {
 		t.Fatal("missing openapi version field")
 	}
 }
+
+func TestBuildSpec_ClassifiesParamsByInTag(t *testing.T) {
+	eps := []*registry.Endpoint{{
+		Name: "/items/:id", Path: "/items/:id", Method: []string{"POST"},
+		Request: &registry.Value{Name: "Req", Type: "Req", Values: []*registry.Value{
+			{Name: "id", Type: "string", In: "path", Required: true},
+			{Name: "q", Type: "string", In: "query"},
+			{Name: "body1", Type: "string"}, // no in tag => body
+		}},
+	}}
+	b := BuildSpec(Info{Title: "T", Version: "1.0.0"}, eps)
+
+	loader := openapi3.NewLoader()
+	doc, err := loader.LoadFromData(b)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := doc.Validate(loader.Context); err != nil {
+		t.Fatalf("validate: %v\n%s", err, b)
+	}
+	item := doc.Paths.Find("/items/{id}")
+	if item == nil || item.Post == nil {
+		t.Fatalf("operation missing: %s", b)
+	}
+	op := item.Post
+	var hasPath, hasQuery bool
+	for _, pr := range op.Parameters {
+		if pr.Value.In == "path" && pr.Value.Name == "id" {
+			hasPath = true
+		}
+		if pr.Value.In == "query" && pr.Value.Name == "q" {
+			hasQuery = true
+		}
+	}
+	if !hasPath || !hasQuery {
+		t.Fatalf("params not classified: path=%v query=%v\n%s", hasPath, hasQuery, b)
+	}
+	if op.RequestBody == nil {
+		t.Fatalf("requestBody missing for body1\n%s", b)
+	}
+	bodySchema := op.RequestBody.Value.Content["application/json"].Schema.Value
+	if bodySchema.Properties["body1"] == nil {
+		t.Fatalf("body1 not in requestBody")
+	}
+	if bodySchema.Properties["q"] != nil || bodySchema.Properties["id"] != nil {
+		t.Fatalf("param leaked into requestBody: %+v", bodySchema.Properties)
+	}
+}
