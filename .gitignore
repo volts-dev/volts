@@ -6,6 +6,7 @@
 !.gitignore
 
 # compiled binaries (demo outputs)
+/docs/superpowers/*
 /pubsub
 /pubsub_web
 demo/**/cmd/*
