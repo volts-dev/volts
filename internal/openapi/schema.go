@@ -9,12 +9,19 @@ import (
 
 // valueToSchema 把 registry.Value 树转成 openapi3 schema 引用。
 // comps 记录已展开的具名结构体类型（预留 $ref 去重；本期内联展开）。
+//
+// 布局约定：本函数假定输入由 router.reflectValue 生成——即对 []Struct，
+// v.Values 直接是元素结构体的「扁平字段」列表（reflectValue 设 v.Values =
+// inner.Values）。注意 router/subscriber.go 的旧 extractValue 用的是「包一层」
+// 布局（v.Values=[{元素结构体}]），与此不兼容；当前 OpenAPI builder 只消费
+// reflectValue 经 route.meta 产出的契约，不走 subscriber 路径，故无冲突。
+// 若未来要把 subscriber 的 Value 也喂进来，需先归一化两种布局。
 func valueToSchema(v *registry.Value, comps map[string]bool) *openapi3.SchemaRef {
 	if v == nil {
 		return openapi3.NewStringSchema().NewRef()
 	}
 
-	// slice: "[]xxx"
+	// slice: "[]xxx"（v.Values 为元素结构体的扁平字段，见上方布局约定）
 	if strings.HasPrefix(v.Type, "[]") {
 		items := &registry.Value{Type: strings.TrimPrefix(v.Type, "[]"), Values: v.Values}
 		arr := openapi3.NewArraySchema()
