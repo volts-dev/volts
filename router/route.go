@@ -53,6 +53,7 @@ type (
 		host            []string      // 允许的主机名列表，用于限制路由仅对特定主机生效
 		url             *TUrl         // URL对象，提供更复杂的URL匹配和参数提取功能
 		action          string        // 动作名称，包含模块名和动作名，用于标识要执行的具体操作
+		meta            any           // *Operation，由 router.Handle 注册时写入，供 OpenAPI builder 读取
 	}
 )
 
@@ -60,16 +61,18 @@ var idQueue int32 = 0 //id 自动递增值
 
 func RouteToEndpiont(r *route) *registry.Endpoint {
 	ep := &registry.Endpoint{
-		//Name: r.
 		Method: r.Methods(),
 		Path:   r.Path(),
 		Host:   r.Host(),
-		//Metadata: make(map[string]string),
 	}
-	//ep.Metadata["Path"] = r.Path()
-	//ep.Metadata["FilePath"] = r.FilePath()
-	//ep.Metadata["Type"] = r.Type.String()
-
+	if op, ok := r.meta.(*Operation); ok && op != nil {
+		ep.Description = op.Summary
+		ep.Request = op.Request
+		ep.Response = op.Response
+	}
+	if ep.Name == "" {
+		ep.Name = r.Path()
+	}
 	return ep
 }
 
@@ -158,6 +161,7 @@ func (self *route) Clone() IRoute {
 		position:        self.position,
 		action:          self.action,
 		url:             self.url,
+		meta:            self.meta,
 	}
 
 	// 拷贝切片
