@@ -68,6 +68,36 @@ func reflectValueVisited(t reflect.Type, seen map[reflect.Type]bool) *registry.V
 	return v
 }
 
+// Operation 是一个接口的 OpenAPI 元信息，挂在 route.meta 上。
+type Operation struct {
+	Summary     string
+	Description string
+	Tags        []string
+	Request     *registry.Value
+	Response    *registry.Value
+}
+
+// OpOption 配置 Operation。
+type OpOption func(*Operation)
+
+func OpSummary(s string) OpOption     { return func(o *Operation) { o.Summary = s } }
+func OpDescription(s string) OpOption { return func(o *Operation) { o.Description = s } }
+func OpTags(tags ...string) OpOption  { return func(o *Operation) { o.Tags = append(o.Tags, tags...) } }
+
+// buildOp 反射 I/O 类型并应用选项（注册期一次）。
+func buildOp[I, O any](opts ...OpOption) *Operation {
+	var i I
+	var o O
+	op := &Operation{
+		Request:  reflectValue(reflect.TypeOf(i)),
+		Response: reflectValue(reflect.TypeOf(o)),
+	}
+	for _, fn := range opts {
+		fn(op)
+	}
+	return op
+}
+
 // applyTags 把结构体字段的 tag 写进字段级 Value。
 func applyTags(sf reflect.StructField, fv *registry.Value) {
 	if j := sf.Tag.Get("json"); j != "" {
