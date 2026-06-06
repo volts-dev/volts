@@ -197,6 +197,33 @@ func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
 	return services
 }
 
+// AllEndpoints 走查整棵树，返回所有路由的 Endpoint（不限 IsService）。
+// 供 OpenAPI builder 使用；去重按 method+path。
+func (self *TTree) AllEndpoints() []*registry.Endpoint {
+	self.RLock()
+	defer self.RUnlock()
+
+	var eps []*registry.Endpoint
+	seen := make(map[string]bool)
+	var walk func(node *treeNode)
+	walk = func(node *treeNode) {
+		if node.Route != nil {
+			key := strings.Join(node.Route.methods, ",") + " " + node.Route.path
+			if !seen[key] {
+				seen[key] = true
+				eps = append(eps, RouteToEndpiont(node.Route))
+			}
+		}
+		for _, c := range node.Children {
+			walk(c)
+		}
+	}
+	for _, node := range self.root {
+		walk(node)
+	}
+	return eps
+}
+
 // 添加路由到Tree
 func (self *TTree) AddRoute(route *route) error {
 	if route == nil {
