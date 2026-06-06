@@ -77,6 +77,13 @@ type (
 		Name   string   `json:"name"`
 		Type   string   `json:"type"`
 		Values []*Value `json:"values"`
+
+		// OpenAPI 扩展字段（向后兼容：omitempty）
+		Required    bool     `json:"required,omitempty"`
+		Format      string   `json:"format,omitempty"`
+		Enum        []string `json:"enum,omitempty"`
+		Description string   `json:"description,omitempty"`
+		In          string   `json:"in,omitempty"` // path|query|header|body
 	}
 )
 
