@@ -57,3 +57,31 @@ func TestHandle_HTTPRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
 }
+
+type hQueryReq struct {
+	Name string `json:"name" in:"query"`
+	Note string `json:"note"`
+}
+
+func TestHandle_QueryFieldDoesNotClobberBody(t *testing.T) {
+	r := New()
+	defer close(r.exit)
+	grp := NewGroup()
+	Handle(grp, "POST", "/q", func(ctx IContext, in *hQueryReq) (*hRsp, error) {
+		return &hRsp{Msg: in.Name + "|" + in.Note}, nil
+	})
+	r.RegisterGroup(grp)
+
+	httpReq := httptest.NewRequest("POST", "/q", strings.NewReader(`{"name":"bob","note":"hi"}`))
+	httpReq.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, transport.NewHttpRequest(httpReq))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	// Name (in:"query", absent in query) must NOT be clobbered to "" — body value "bob" must survive.
+	if !strings.Contains(w.Body.String(), "bob|hi") {
+		t.Fatalf("body field clobbered: got %s", w.Body.String())
+	}
+}

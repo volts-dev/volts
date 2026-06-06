@@ -201,7 +201,9 @@ func bindPathQuery(ctx IContext, ptr any) {
 
 // presentField 返回参数集中确实存在的字段，否则 nil（防止用空值覆盖 body 字段）。
 func presentField(ps *TParamsSet, name string) *dataset.TFieldSet {
-	if ps == nil {
+	// 空参数集（fieldsIndex 未初始化）时 FieldByName 会误报 IsValid=true，
+	// 会用零值覆盖 body 解码出的字段；先用 IsEmpty 挡住。
+	if ps == nil || ps.IsEmpty() {
 		return nil
 	}
 	fs := ps.FieldByName(name)
