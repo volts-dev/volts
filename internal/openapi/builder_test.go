@@ -41,6 +41,37 @@ func TestBuildSpec_ParsableAndHasPath(t *testing.T) {
 	}
 }
 
+func TestBuildSpec_TagsAndDescription(t *testing.T) {
+	eps := []*registry.Endpoint{{
+		Name:        "/p",
+		Path:        "/p",
+		Method:      []string{"GET"},
+		Description: "short summary",
+		Tags:        []string{"pets"},
+		Metadata:    map[string]string{"description": "the long description"},
+	}}
+	b := BuildSpec(Info{Title: "T", Version: "1.0.0"}, eps)
+
+	loader := openapi3.NewLoader()
+	doc, err := loader.LoadFromData(b)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := doc.Validate(loader.Context); err != nil {
+		t.Fatalf("validate: %v\n%s", err, b)
+	}
+	op := doc.Paths.Find("/p").Get
+	if op.Summary != "short summary" {
+		t.Fatalf("summary wrong: %q", op.Summary)
+	}
+	if op.Description != "the long description" {
+		t.Fatalf("description not forwarded: %q", op.Description)
+	}
+	if len(op.Tags) != 1 || op.Tags[0] != "pets" {
+		t.Fatalf("tags not forwarded: %v", op.Tags)
+	}
+}
+
 func TestBuildSpec_ClassifiesParamsByInTag(t *testing.T) {
 	eps := []*registry.Endpoint{{
 		Name: "/items/:id", Path: "/items/:id", Method: []string{"POST"},

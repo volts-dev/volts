@@ -50,6 +50,10 @@ func BuildSpec(info Info, eps []*registry.Endpoint) []byte {
 
 		op := openapi3.NewOperation()
 		op.Summary = ep.Description
+		op.Tags = ep.Tags
+		if ep.Metadata != nil {
+			op.Description = ep.Metadata["description"]
+		}
 
 		// Collect the set of path-param names from the converted URL (e.g. {id}).
 		urlPathParams := map[string]bool{}

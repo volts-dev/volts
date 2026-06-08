@@ -57,6 +57,8 @@ type (
 		Path string `json:"path"`
 		// Description e.g what's this endpoint for
 		Description string `json:"description"`
+		// Tags 用于 OpenAPI 分组（omitempty 保持向后兼容）
+		Tags []string `json:"tags,omitempty"`
 		// Stream flag
 		Stream bool `json:"stream"`
 
