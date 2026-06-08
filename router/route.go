@@ -66,7 +66,15 @@ func RouteToEndpiont(r *route) *registry.Endpoint {
 		Host:   r.Host(),
 	}
 	if op, ok := r.meta.(*Operation); ok && op != nil {
-		ep.Description = op.Summary
+		ep.Description = op.Summary // 作为 OpenAPI operation 的 summary
+		ep.Tags = op.Tags
+		if op.Description != "" {
+			// 长描述经 Metadata 透传（Endpoint 无独立字段），builder 映射到 operation.description
+			if ep.Metadata == nil {
+				ep.Metadata = map[string]string{}
+			}
+			ep.Metadata["description"] = op.Description
+		}
 		ep.Request = op.Request
 		ep.Response = op.Response
 	}
