@@ -26,8 +26,6 @@ type (
 		Context context.Context
 		Signal  bool
 		Debug   bool
-
-		openAPI *openAPIConfig
 	}
 )
 

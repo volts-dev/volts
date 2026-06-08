@@ -43,7 +43,11 @@ type (
 		StaticDir                 []string `field:"static_dir"` // the static dir allow to visit
 		StaticExt                 []string `field:"static_ext"` // the static file format allow to visit
 		UsePprof                  bool
-		UploadBuf                 int `field:"upload_buf"` // 上传文件大小MB
+		UseOpenAPI                bool   `field:"use_openapi"`     // 配置开关：开启后挂载 /openapi.json 与 /docs
+		OpenAPITitle              string `field:"openapi_title"`   // 文档标题（空则默认 "Volts API"）
+		OpenAPIVersion            string `field:"openapi_version"` // 文档版本（空则默认 "1.0.0"）
+		OpenAPIGateway            bool   `field:"openapi_gateway"` // 是否聚合 registry 中的远程服务端点
+		UploadBuf                 int    `field:"upload_buf"`      // 上传文件大小MB
 		UseRootStatics            bool
 		StaticCacheTTL            int `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
 	}
@@ -159,6 +163,13 @@ func WithPprof() Option {
 	return func(cfg *Config) {
 		cfg.UsePprof = true
 		//cfg.Router.RegisterGroup(pprofGroup())
+	}
+}
+
+// WithOpenAPI 以编程方式开启 OpenAPI 文档（等价于配置文件里 use_openapi: true）。
+func WithOpenAPI() Option {
+	return func(cfg *Config) {
+		cfg.UseOpenAPI = true
 	}
 }
 

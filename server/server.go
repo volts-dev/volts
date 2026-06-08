@@ -416,6 +416,9 @@ func (self *TServer) Start() error {
 	if cfg.Router.Config().UsePprof {
 		cfg.Router.RegisterGroup(router.PprofGroup())
 	}
+	if cfg.Router.Config().UseOpenAPI {
+		cfg.Router.RegisterGroup(router.OpenAPIGroup(cfg.Router))
+	}
 	// 打印
 	cfg.Router.PrintRoutes()
 
