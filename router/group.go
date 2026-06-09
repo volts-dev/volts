@@ -409,16 +409,19 @@ func (g *TGroup) Api[C IContext, I, O any](method, path string, h func(C, *I) (*
 			writeError(ctx, errors.New("api: context type mismatch (check C vs method http/rpc)"))
 			return
 		}
+
 		var in I
 		if b := ctx.Body(); b != nil {
 			_ = b.Decode(&in)
 		}
 		bindPathQuery(ctx, &in)
+
 		out, err := h(c, &in)
 		if err != nil {
 			writeError(ctx, err)
 			return
 		}
+
 		ctx.RespondByJson(out)
 	}
 

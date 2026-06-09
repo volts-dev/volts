@@ -300,15 +300,17 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 				log.Panicf("the handler %s must have Context as the second argument!", h.Name)
 			}
 
-			// 第二个参数：必须是指针
-			if handlerT.In(2) != nil && handlerT.In(2).Kind() != reflect.Ptr {
-				log.Panicf("the handler %s must have Context as the second argument!", h.Name)
-			}
+			/*
+				// 第二个参数：必须是指针
+				if handlerT.In(2) != nil && handlerT.In(2).Kind() != reflect.Ptr {
+					log.Panicf("the handler %s must have Context as the second argument!", h.Name)
+				}
 
-			// 第一个返回值：必须是指针
-			if handlerT.Out(0) != nil && handlerT.Out(0).Kind() != reflect.Ptr {
-				log.Panicf("the handler %s must have Context as the second argument!", h.Name)
-			}
+				// 第一个返回值：必须是指针
+				if handlerT.Out(0) != nil && handlerT.Out(0).Kind() != reflect.Ptr {
+					log.Panicf("the handler %s must have Context as the second argument!", h.Name)
+				}
+			*/
 		}
 
 		// 解析控制器结构和名称
