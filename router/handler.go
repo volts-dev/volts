@@ -86,6 +86,8 @@ type (
 		ctrlType  reflect.Type  // 供生成新的控制器
 		ctrlValue reflect.Value // 每个handler的控制器必须是唯一的
 		ctrlModel interface{}   // 提供Ctx特殊调用
+		input     any
+		output    any
 		inited    bool
 	}
 
@@ -106,6 +108,24 @@ func WrapHttp(fn func(IContext)) func(*THttpContext) {
 func WrapRpc(fn func(IContext)) func(*TRpcContext) {
 	return func(ctx *TRpcContext) {
 		fn(ctx)
+	}
+}
+
+// HandleRpc 以泛型注册一个使用 *TRpcContext 的 typed RPC handler。
+// 运行期零 reflect.Call，比 Url() 自动识别的反射版更高效。
+func WrapRpcX[I, O any](fn func(IContext, *I) (*O, error)) func(*TRpcContext) {
+	return func(ctx *TRpcContext) {
+		var in I
+		if b := ctx.Body(); b != nil {
+			_ = b.Decode(&in)
+		}
+		bindPathQuery(ctx, &in)
+		out, err := fn(ctx, &in)
+		if err != nil {
+			writeError(ctx, err)
+			return
+		}
+		ctx.RespondByJson(out)
 	}
 }
 
@@ -274,7 +294,19 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 			if recvType.Kind() != reflect.Struct && recvType.Kind() != reflect.Ptr {
 				log.Panicf("the handler %s receiver must be a struct or pointer!", h.Name)
 			}
+
+			// 第一个参数：context 类型
 			if handlerT.In(1) != ContextType && handlerT.In(1) != HttpContextType && handlerT.In(1) != RpcContextType {
+				log.Panicf("the handler %s must have Context as the second argument!", h.Name)
+			}
+
+			// 第二个参数：必须是指针
+			if handlerT.In(2) != nil && handlerT.In(2).Kind() != reflect.Ptr {
+				log.Panicf("the handler %s must have Context as the second argument!", h.Name)
+			}
+
+			// 第一个返回值：必须是指针
+			if handlerT.Out(0) != nil && handlerT.Out(0).Kind() != reflect.Ptr {
 				log.Panicf("the handler %s must have Context as the second argument!", h.Name)
 			}
 		}
@@ -544,22 +576,36 @@ func (self *handler) init(router *TRouter) {
 			goto initMiddlewares
 		}
 
+		var h *handle
 		switch hd.Type().In(0) {
 		case ContextType:
 			if fn, ok := hd.Interface().(func(IContext)); ok {
 				if self.TransportType != HttpHandler {
-					self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(fn)})
+					h = &handle{IsFunc: true, RpcFunc: WrapRpc(fn)}
 				} else {
-					self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(fn)})
+					h = &handle{IsFunc: true, HttpFunc: WrapHttp(fn)}
 				}
 			}
+
+			// func(CtxType, *In) (*Out)
+			if hd.Type().NumIn() > 3 && hd.Type().NumOut() == 1 {
+				h = &handle{IsFunc: true}
+				if self.TransportType != HttpHandler {
+					h.RpcFunc = hd.Interface().(func(*TRpcContext))
+				} else {
+					h.HttpFunc = hd.Interface().(func(*THttpContext))
+				}
+			}
+
 		case RpcContextType:
-			self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))})
+			h = &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))}
 		case HttpContextType:
-			self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))})
+			h = &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))}
 		default:
 			log.Errf("the handler %v is not supportable!", hd)
 		}
+
+		self.funcs = append(self.funcs, h)
 
 		// 所有的指针准备就绪后生成Interface
 		// NOTE:必须初始化结构指针才能生成完整的Model,之后修改CtrlValue将不会有效果
