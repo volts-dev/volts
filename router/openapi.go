@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 
@@ -120,21 +121,31 @@ func applyTags(sf reflect.StructField, fv *registry.Value) {
 	}
 }
 
-// TypedHandler 是 OpenAPI 友好的处理器签名。
+// TypedHandler 是 OpenAPI 友好的处理器签名（context 为 IContext）。
 type TypedHandler[I, O any] func(ctx IContext, in *I) (*O, error)
 
-// Handle 以泛型注册一个 typed handler，注册期反射出 schema、运行期零 reflect.Call。
-// method 为 "CONNECT" 时按 RPC 包装，否则按 HTTP。
-func Handle[I, O any](g *TGroup, method, path string, h TypedHandler[I, O], opts ...OpOption) *route {
+// Api 以泛型注册一个 typed handler，并把 context 类型参数化为具体的 C
+// （约束为 IContext，可用 *THttpContext / *TRpcContext / IContext）。
+//
+// Go 不允许泛型方法（method must have no type parameters），所以这是一个以
+// *TGroup 为首参的泛型“函数”，而非 g 上的方法。注册期反射出 I/O schema 挂到
+// route.meta；运行期零 reflect.Call：闭包内把框架持有的 IContext 断言回 C 再静态调用。
+// method 为 "CONNECT" 走 RPC 包装（C 应为 *TRpcContext），否则走 HTTP（C 应为 *THttpContext）。
+func Api[C IContext, I, O any](g *TGroup, method, path string, h func(C, *I) (*O, error), opts ...OpOption) *route {
 	op := buildOp[I, O](opts...)
 
 	core := func(ctx IContext) {
+		c, ok := ctx.(C)
+		if !ok {
+			writeError(ctx, errors.New("api: context type mismatch (check C vs method http/rpc)"))
+			return
+		}
 		var in I
 		if b := ctx.Body(); b != nil {
 			_ = b.Decode(&in)
 		}
 		bindPathQuery(ctx, &in)
-		out, err := h(ctx, &in)
+		out, err := h(c, &in)
 		if err != nil {
 			writeError(ctx, err)
 			return
@@ -152,6 +163,11 @@ func Handle[I, O any](g *TGroup, method, path string, h TypedHandler[I, O], opts
 	r := g.Url(method, path, hd)
 	r.meta = op
 	return r
+}
+
+// Handle 是 Api 的便捷形态：context 固定为 IContext。等价于 Api[IContext, I, O]。
+func Handle[I, O any](g *TGroup, method, path string, h TypedHandler[I, O], opts ...OpOption) *route {
+	return Api[IContext, I, O](g, method, path, h, opts...)
 }
 
 // bindPathQuery 用 path 参数（HTTP/RPC 皆有）和 query/form（仅 HTTP）填充 in 的字段。

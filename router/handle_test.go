@@ -16,6 +16,29 @@ type hRsp struct {
 	Msg string `json:"msg"`
 }
 
+// TestApi_ConcreteHTTPContext 验证 Api 把 context 参数化为具体 *THttpContext：
+// handler 直接拿到具体类型，运行期由 ctx.(C) 还原。
+func TestApi_ConcreteHTTPContext(t *testing.T) {
+	r := New()
+	defer close(r.exit)
+
+	grp := NewGroup()
+	Api[*THttpContext, hReq, hRsp](grp, "POST", "/api-hi", func(c *THttpContext, in *hReq) (*hRsp, error) {
+		// c 是具体的 *THttpContext，可用其完整方法
+		_ = c.Response()
+		return &hRsp{Msg: "hi " + in.Name}, nil
+	}, OpSummary("api hello"))
+	r.RegisterGroup(grp)
+
+	req := httptest.NewRequest("POST", "/api-hi", strings.NewReader(`{"name":"bob"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, transport.NewHttpRequest(req))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "hi bob") {
+		t.Fatalf("api round-trip bad: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandle_RegistersRouteWithMeta(t *testing.T) {
 	r := New()
 	defer close(r.exit)
