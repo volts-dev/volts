@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/volts-dev/volts/internal/openapi"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -110,22 +109,27 @@ func TestApiDemo_HTTPRoundTrip(t *testing.T) {
 	}
 }
 
-// TestApiDemo_OpenAPISpecCorrect 验证由 demo 路由生成的 OpenAPI 文档正确：
+// TestApiDemo_OpenAPISpecCorrect 验证由 demo 路由生成的 /openapi.json 文档正确：
 // 可被 openapi3 解析并通过校验，路径已转换，参数 / requestBody / response 各归其位。
-//
-// 这里直接走文档生成管线（AllEndpoints → BuildSpec），而非注册 OpenAPIGroup 再经
-// ServeHTTP 取回——后者服务 /openapi.json 的匿名闭包会被全局 handler 缓存按
-// (path+funcName) 去重，导致同进程内多个 router 的 OpenAPIGroup 共用第一个的冻结
-// spec（见 handler.go generateHandlerId）。OpenAPIGroup 的 HTTP 服务路径已由
-// TestOpenAPIGroup_ServesSpecAndDocs 覆盖；本测试聚焦文档内容正确性。
+// 走真实公共路径：挂 OpenAPIGroup → 经 ServeHTTP 取回 spec 字节。
 func TestApiDemo_OpenAPISpecCorrect(t *testing.T) {
 	r := New()
 	defer close(r.exit)
+	r.Config().OpenAPITitle = "Demo API"
+	r.Config().OpenAPIVersion = "2.1.0"
 	registerDemoUserAPI(r)
 
-	// 与 OpenAPIGroup 相同的构建管线：枚举已注册端点 → 组装 OpenAPI 文档。
-	eps := r.GetRoutes().AllEndpoints()
-	specBytes := openapi.BuildSpec(openapi.Info{Title: "Demo API", Version: "2.1.0"}, eps)
+	// 业务路由注册完毕后再挂 OpenAPI 组（server 在 UseOpenAPI 为真时的动作）。
+	r.RegisterGroup(OpenAPIGroup(r))
+
+	// 通过真实的 ServeHTTP 取回 spec 字节。
+	req := httptest.NewRequest("GET", DefaultOpenAPISpecPath, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, transport.NewHttpRequest(req))
+	if w.Code != http.StatusOK {
+		t.Fatalf("openapi.json status = %d", w.Code)
+	}
+	specBytes := w.Body.Bytes()
 
 	// 文档必须可被 openapi3 加载并通过校验。
 	loader := openapi3.NewLoader()
@@ -205,5 +209,51 @@ func TestApiDemo_OpenAPISpecCorrect(t *testing.T) {
 	}
 	if respSchema.Properties["user"] == nil {
 		t.Fatalf("response schema missing nested user object: %+v", respSchema.Properties)
+	}
+}
+
+// TestOpenAPIGroup_PerRouterIsolation 回归测试：同进程内两个 router 各自挂 OpenAPIGroup
+// 时，各自的 /openapi.json 必须返回各自的 spec，互不串扰。
+//
+// 修复前：OpenAPIGroup 服务 /openapi.json 的匿名闭包被全局 handler 缓存按内容派生 id
+// 去重（两个同源闭包 PC 相同 → id 相同），第二个 router 复用了第一个的冻结 spec，
+// 导致两个 /openapi.json 返回同一份文档。修复后本地 handler 分发唯一 id，彻底隔离。
+func TestOpenAPIGroup_PerRouterIsolation(t *testing.T) {
+	build := func(title, path string) []byte {
+		r := New()
+		defer close(r.exit)
+		r.Config().OpenAPITitle = title
+
+		grp := NewGroup()
+		Handle(grp, "GET", path, func(ctx IContext, in *hReq) (*hRsp, error) {
+			return &hRsp{}, nil
+		})
+		r.RegisterGroup(grp)
+		r.RegisterGroup(OpenAPIGroup(r))
+
+		req := httptest.NewRequest("GET", DefaultOpenAPISpecPath, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, transport.NewHttpRequest(req))
+		if w.Code != http.StatusOK {
+			t.Fatalf("openapi.json status = %d", w.Code)
+		}
+		return w.Body.Bytes()
+	}
+
+	specA := build("Router A", "/only-in-a")
+	specB := build("Router B", "/only-in-b")
+
+	// 各自的标题与独有路由必须只出现在自己的 spec 里。
+	if !strings.Contains(string(specA), "Router A") || !strings.Contains(string(specA), "/only-in-a") {
+		t.Fatalf("spec A missing its own content:\n%s", specA)
+	}
+	if strings.Contains(string(specA), "Router B") || strings.Contains(string(specA), "/only-in-b") {
+		t.Fatalf("spec A leaked router B content (cross-router contamination):\n%s", specA)
+	}
+	if !strings.Contains(string(specB), "Router B") || !strings.Contains(string(specB), "/only-in-b") {
+		t.Fatalf("spec B missing its own content:\n%s", specB)
+	}
+	if strings.Contains(string(specB), "Router A") || strings.Contains(string(specB), "/only-in-a") {
+		t.Fatalf("spec B leaked router A content (cross-router contamination):\n%s", specB)
 	}
 }

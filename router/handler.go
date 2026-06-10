@@ -20,6 +20,16 @@ import (
 
 var defaultHandlerManager = newHandlerManager()
 
+// localHandlerSeq 为本地（非 Proxy）handler 分发进程内唯一 id。
+var localHandlerSeq atomic.Int64
+
+// nextLocalHandlerId 返回一个唯一的负 id。取负是为了与 Proxy handler 用的
+// 非负 crc32 id（见 generateHandlerId）分处两个区间，永不在全局 handlerModel
+// 里相互覆盖。
+func nextLocalHandlerId() int {
+	return -int(localHandlerSeq.Add(1))
+}
+
 type HandlerType byte
 type TransportType byte
 
@@ -129,6 +139,28 @@ func WrapRpcX[I, O any](fn func(IContext, *I) (*O, error)) func(*TRpcContext) {
 	}
 }
 
+// Typed handler 的可插拔编解码钩子。
+//
+// 默认走纯 JSON（Body().Decode / RespondByJson），上层（如 vectors 的 JSON-RPC
+// 信封）可在 init 时覆盖，从而在不让 router 依赖上层 codec 的前提下保留信封协议。
+//   - TypedRequestDecoder：把请求体填入 *I（指针）。
+//   - TypedResponseEncoder：写出成功结果 *O。
+//   - TypedErrorEncoder：写出 error。
+var (
+	TypedRequestDecoder = func(ctx IContext, ptr any) error {
+		if b := ctx.Body(); b != nil {
+			return b.Decode(ptr)
+		}
+		return nil
+	}
+	TypedResponseEncoder = func(ctx IContext, v any) {
+		ctx.RespondByJson(v)
+	}
+	TypedErrorEncoder = func(ctx IContext, err error) {
+		writeError(ctx, err)
+	}
+)
+
 // WrapFn is a helper function for wrapping http.HandlerFunc and returns a HttpContext.
 func WrapFn(fn http.HandlerFunc) func(*THttpContext) {
 	return func(ctx *THttpContext) {
@@ -220,12 +252,23 @@ func generateHandlerId(handlerType HandlerType, tt TransportType, handlers []any
 // 生成handler原型
 // NOTE:不可用于实时环境
 func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, middlewares []any, url *TUrl, service string) *handler {
-	uid := generateHandlerId(handlerType, tt, handlers, url, service)
-
-	if h := defaultHandlerManager.Get(uid); h != nil {
-		//h.SetServices(services) // 更新服务列表
-		defaultHandlerManager.Store(h)
-		return h
+	var uid int
+	if handlerType == ProxyHandler {
+		// Proxy handler 包裹的是共享、无状态的反向代理函数（HttpReverseProxy /
+		// RpcReverseProxy），按 (service, path) 内容派生 id 并 dedup：让每 60s 的
+		// registry 刷新复用同一实例、保持路由 handler id 稳定。
+		uid = generateHandlerId(handlerType, tt, handlers, url, service)
+		if h := defaultHandlerManager.Get(uid); h != nil {
+			//h.SetServices(services) // 更新服务列表
+			defaultHandlerManager.Store(h)
+			return h
+		}
+	} else {
+		// Local/Subscribe handler 往往是捕获了 per-router 状态的闭包（如 OpenAPIGroup
+		// 冻结的 spec）。内容派生 id 会让同进程内多个 router 的同源闭包（PC 相同 →
+		// 哈希相同）算出同一个 id，从而在全局 handlerModel 里共用一个实例、相互串扰。
+		// 这里改为每次生成分发唯一 id，彻底隔离。
+		uid = nextLocalHandlerId()
 	}
 
 	h := &handler{
