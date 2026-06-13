@@ -15,11 +15,11 @@ import (
 
 func TestBase(t *testing.T) {
 	r := router.New()
-	r.Url("GET", "/", func(ctx *router.THttpContext) {
+	r.Url([]string{"GET"}, "/", func(ctx *router.THttpContext) {
 		ctx.Write([]byte("Hello World!"))
 	})
-	r.Url("GET", "/1", test.CtrlWithMiddleware.HelloWorld)
-	r.Url("GET", "/WithoutMiddlware", test.CtrlWithMiddleware.WithoutMiddlware)
+	r.Url([]string{"GET"}, "/1", test.CtrlWithMiddleware.HelloWorld)
+	r.Url([]string{"GET"}, "/WithoutMiddlware", test.CtrlWithMiddleware.WithoutMiddlware)
 
 	r.RegisterMiddleware(event.NewEvent)
 	r.RegisterMiddleware(test.NewTestSession)
@@ -73,7 +73,7 @@ func TestBase(t *testing.T) {
 
 func TestProxy(t *testing.T) {
 	r := router.New()
-	r.Url("GET", "/", router.HttpReverseProxy)
+	r.Url([]string{"GET"}, "/", router.HttpReverseProxy)
 
 	srv := server.New(
 		server.WithRouter(r),
@@ -90,7 +90,7 @@ func TestProxy(t *testing.T) {
 }
 func TestRecover(t *testing.T) {
 	r := router.New()
-	r.Url("GET", "/", func(ctx *router.THttpContext) {
+	r.Url([]string{"GET"}, "/", func(ctx *router.THttpContext) {
 		p := ctx.PathParams()
 		p.FieldByName("query").AsString()
 	})

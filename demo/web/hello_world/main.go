@@ -27,17 +27,17 @@ func (self ctrls) MacthAll(hd *router.THttpContext) {
 
 func main() {
 	r := router.New()
-	r.Url("GET", "/", func(hd *router.THttpContext) {
+	r.Url([]string{"GET"}, "/", func(hd *router.THttpContext) {
 		hd.Respond([]byte("Hello World"))
 	})
-	r.Url("GET", "/1", ctrls.HelloWorld)
-	r.Url("GET", "/<:all>", ctrls.MacthAll)
-	r.Url("GET", "/<:all>/<:all2>/1", ctrls.MacthAll)
+	r.Url([]string{"GET"}, "/1", ctrls.HelloWorld)
+	r.Url([]string{"GET"}, "/<:all>", ctrls.MacthAll)
+	r.Url([]string{"GET"}, "/<:all>/<:all2>/1", ctrls.MacthAll)
 
 	g1 := router.NewGroup(router.WithGroupPathPrefix("/<:lang>"))
 	{
-		g1.Url("GET", "/", ctrls.HelloWorld)
-		g1.Url("GET", "/<:all>", ctrls.MacthAll)
+		g1.Url([]string{"GET"}, "/", ctrls.HelloWorld)
+		g1.Url([]string{"GET"}, "/<:all>", ctrls.MacthAll)
 	}
 
 	r.RegisterGroup(g1)

@@ -16,7 +16,7 @@ import (
 
 func TestHelloworld(t *testing.T) {
 	r := router.New()
-	r.Url("CONNECT", "Arith", new(test.ArithCtrl))
+	r.Url([]string{"CONNECT"}, "Arith", new(test.ArithCtrl))
 
 	srv := server.New(
 		server.WithRouter(r),

@@ -39,20 +39,6 @@ const (
 	RBracket = '}'
 )
 
-var (
-	nodeType = map[NodeType]string{
-		StaticNode:  "Static", // static, should equal
-		VariantNode: "Var",    // named node, match a non-/ is ok
-		AnyNode:     "Any",    // catch-all node, match any
-		RegexpNode:  "Reg",    // regex node, should match
-	}
-
-	contentType = map[ContentType]string{
-		AllType:    "all",
-		NumberType: "int",
-		CharType:   "string",
-	}
-)
 
 type NodeType byte // 节点类型
 func (self NodeType) String() string {
@@ -330,14 +316,21 @@ func (self *TTree) Conbine(from *TTree) *TTree {
 
 func (self *TTree) PrintTrees() {
 	buf := &bytes.Buffer{}
-	buf.WriteString("Print routes tree:\n")
+	buf.WriteString(fmt.Sprintf("Routes tree (%d routes):\n", self.Count.Load()))
+
+	// 按方法名排序输出，使每次打印顺序稳定（map 遍历是随机的）。
+	methods := make([]string, 0, len(self.root))
 	for method, node := range self.root {
 		if len(node.Children) > 0 {
-			buf.WriteString(method)
-			buf.WriteByte('\n')
-			printNode(buf, 1, node, "")
-			buf.WriteByte('\n')
+			methods = append(methods, method)
 		}
+	}
+	sort.Strings(methods)
+
+	for _, method := range methods {
+		buf.WriteString("● " + method + "\n")
+		printNode(buf, self.root[method], "")
+		buf.WriteByte('\n')
 	}
 	log.Info(buf.String())
 }
@@ -872,37 +865,49 @@ func validNodes(nodes []*treeNode) bool {
 	return true
 }
 
-func printNode(buf *bytes.Buffer, lv int, node *treeNode, path string) {
+// printNode 以盒线（├──/└──/│）缩进打印路由树。节点文本已自带变量/通配语法
+// （如 <int:id>、*），故不再附类型标记。带 Route 的节点在 “→” 之后附上完整路径、
+// HTTP 方法、处理器数、所属模块与 OpenAPI 摘要，便于直接查阅已注册路由。
+func printNode(buf *bytes.Buffer, node *treeNode, prefix string) {
 	cnt := len(node.Children)
-	isLast := false
-	subPath := ""
 	for idx, c := range node.Children {
-		isLast = idx == cnt-1
+		isLast := idx == cnt-1
 
-		// 计算子路径打印方式
-		if isLast { // 如果是最后一个
-			subPath = path + "     " // 空格距离
-		} else {
-			subPath = path + " |   "
+		branch, childPrefix := "├── ", prefix+"│   "
+		if isLast {
+			branch, childPrefix = "└── ", prefix+"    "
 		}
 
-		buf.WriteString(path + " |-- ")
-		buf.WriteString(fmt.Sprintf(`%s ==> Lv:%d  Type:%v  VarType:%v `, c.Text, c.Level, nodeType[c.Type], contentType[c.ContentType]))
-		if c.Route != nil {
-			if c.Route.group != nil {
-				buf.WriteString(fmt.Sprintf(" (*%d Mod:%s)", len(c.Route.handlers), c.Route.group.String()))
-			} else {
-				buf.WriteString(fmt.Sprintf(" (*%d)", len(c.Route.handlers)))
+		buf.WriteString(prefix)
+		buf.WriteString(branch)
+
+		// 节点文本（空文本以 "/" 占位）
+		text := c.Text
+		if text == "" {
+			text = "/"
+		}
+		buf.WriteString(text)
+
+		// 路由信息：→ <完整路径> <方法> <处理器数> @模块 "摘要"
+		if r := c.Route; r != nil {
+			buf.WriteString("  →")
+			if r.path != "" {
+				buf.WriteString(" " + r.path)
+			}
+			if len(r.methods) > 0 {
+				buf.WriteString(" [" + strings.Join(r.methods, ",") + "]")
+			}
+			buf.WriteString(fmt.Sprintf(" (%dh)", len(r.handlers)))
+			if r.group != nil && r.group.String() != "" {
+				buf.WriteString(" @" + r.group.String())
+			}
+			if op, ok := r.meta.(*Operation); ok && op != nil && op.Summary != "" {
+				buf.WriteString(` "` + op.Summary + `"`)
 			}
 		}
 
-		//if !reflect.DeepEqual(c.Route, route{}) {
-		if c.Route != nil {
-			//fmt.Print("  ", c.Route.HandleType.String())
-			//fmt.Printf("  %p", c.handle.method.Interface())
-		}
-		buf.WriteString("\n")
-		printNode(buf, lv+1, c, subPath)
+		buf.WriteByte('\n')
+		printNode(buf, c, childPrefix)
 	}
 }
 

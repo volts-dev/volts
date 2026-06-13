@@ -19,6 +19,7 @@ import (
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/broker"
 	"github.com/volts-dev/volts/config"
+	"go.uber.org/atomic"
 )
 
 type (
@@ -335,7 +336,7 @@ func (self *TGroup) StaticFile(relativePath, filepath string) {
 		c.ServeFile(filepath)
 	}
 
-	self.Url("GET", relativePath, handler)
+	self.Url([]string{"GET"}, relativePath, handler)
 }
 
 // !NOTE! RPC 或者 HTTP 不适用同一Module注册路由
@@ -368,45 +369,41 @@ for details please read tree.go
 // @method:
 //			API:会映射所有对象符合要求的控制器作为API发布
 //			REST:会映射所有对象符合要求的create, read, update, and delete控制器作为Restful发布
-func (self *TGroup) Url(method string, path string, handlers ...any) *route {
-	if self.config.PathPrefix != "" && path == "//" {
-		// 生成"/abc/"而非"/abc"
-		path = _path.Join(self.config.PathPrefix, "") + "/"
-	} else {
-		path = _path.Join(self.config.PathPrefix, path)
-	}
-
-	method = strings.ToUpper(method)
-	switch method {
-	case "GET":
-		return self.addRoute(Normal, LocalHandler, []string{"GET", "HEAD"}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
-	case "POST", "PUT", "HEAD", "OPTIONS", "TRACE", "PATCH", "DELETE":
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
-	case "CONNECT": // RPC or WS
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
-	case "REST", "RPC":
-		return self.addRoute(Normal, LocalHandler, []string{method}, &TUrl{Path: path}, handlers[0:1], handlers[1:]...)
-	default:
-		log.Fatalf("the params in Module.Url() %v:%v is invaild", method, path)
-	}
-
-	return nil
+func (self *TGroup) Url(methods []string, path string, handlers ...any) *route {
+	return self.addRoute(Normal, LocalHandler, normalizeMethods(methods), &TUrl{Path: self.joinPathPrefix(path)}, handlers[0:1], handlers[1:]...)
 }
 
 // Api 以泛型注册一个 typed handler，并把 context 类型参数化为具体的 C
 // （约束为 IContext，可用 *THttpContext / *TRpcContext / IContext）。
 //
 // 这是一个泛型方法（Go 1.27+ 起允许 method 携带类型参数），故 go.mod 需 go >= 1.27。
-// 注册期反射出 I/O schema 挂到 route.meta；运行期零 reflect.Call：闭包内把框架持有的
-// IContext 断言回 C 再静态调用。method 为 "CONNECT" 走 RPC 包装（C 应为 *TRpcContext），
-// 否则走 HTTP（C 应为 *THttpContext）。
-func (g *TGroup) Api[C IContext, I, O any](method, path string, h func(C, *I) (*O, error), opts ...OpOption) *route {
-	op := buildOp[I, O](opts...)
-
+// Api 不经 Url：在此内联建好带控制器信息（ctrlType/ctrlName/FuncName）的 typed *handler，
+// 再直接交给 addRoute 建路由尾部，使 typed handler 与反射控制器一致地享受中间件字段注入 +
+// Init/Ready（见 handler.init）。注册期反射出 I/O schema 挂到 route.meta；运行期零 reflect.Call：
+// core 闭包把框架持有的 IContext 断言回 C，并从 init 构建的控制器（ctx.Handler().Controller()）
+// 取回 receiver，再静态调用 h。methods 含 "CONNECT"/"RPC" 走 RPC（C 应为 *TRpcContext），否则 HTTP。
+func (self *TGroup) Api[Ctrl any, C IContext, I, O any](
+	methods []string,
+	path string,
+	h func(Ctrl, C, *I) (*O, error), // 方法表达式：第 1 个形参就是 receiver
+	opts ...OpOption,
+) *route {
 	core := func(ctx IContext) {
 		c, ok := ctx.(C)
 		if !ok {
-			TypedErrorEncoder(ctx, errors.New("api: context type mismatch (check C vs method http/rpc)"))
+			TypedErrorEncoder(ctx, errors.New("api: context type mismatch"))
+			return
+		}
+
+		// receiver 取自 init 构建并注入了中间件字段的控制器实例（非注册期空壳）。
+		var recv Ctrl
+		ctrl := ctx.Handler().Controller()
+		if r, ok := ctrl.(Ctrl); ok { // 指针接收器：Ctrl 即 *T
+			recv = r
+		} else if p, ok := ctrl.(*Ctrl); ok { // 值接收器：Ctrl 为 T，*ctrlType == *Ctrl
+			recv = *p
+		} else {
+			TypedErrorEncoder(ctx, errors.New("api: controller type mismatch"))
 			return
 		}
 
@@ -417,24 +414,61 @@ func (g *TGroup) Api[C IContext, I, O any](method, path string, h func(C, *I) (*
 		}
 		bindPathQuery(ctx, &in)
 
-		out, err := h(c, &in)
+		out, err := h(recv, c, &in) // 静态调用，零 reflect.Call
 		if err != nil {
 			TypedErrorEncoder(ctx, err)
 			return
 		}
-
+		if out == nil {
+			// 处理器返回 nil *O 表示已自行写响应（如网关 raw 透传：ctx.Write + return nil,nil），
+			// 不再二次编码，避免在已写出的响应后追加多余的 {"result":null} 信封。
+			return
+		}
 		TypedResponseEncoder(ctx, out)
 	}
 
-	var hd any
-	if strings.ToUpper(method) == "CONNECT" {
-		hd = WrapRpc(core)
-	} else {
-		hd = WrapHttp(core)
-	}
+	methods = normalizeMethods(methods)
 
-	r := g.Url(method, path, hd)
-	r.meta = op
+	// —— 内联建 typed handler：core 已在注册期构建，保留控制器信息供 handler.init 注入中间件 ——
+	ctrlType := reflect.TypeFor[Ctrl]()
+	if ctrlType.Kind() == reflect.Ptr {
+		ctrlType = ctrlType.Elem()
+	}
+	funcName := GetFuncName(h, '.')
+	tt := HttpHandler
+	if utils.IndexOf("CONNECT", methods...) > -1 || utils.IndexOf("RPC", methods...) > -1 {
+		tt = RpcHandler
+	}
+	serviceName := ""
+	if self.config.IsService {
+		serviceName = self.config.Name
+	}
+	uid := nextLocalHandlerId()
+	hd := &handler{
+		Id:            uid,
+		Name:          fmt.Sprintf("%s-%d", funcName, uid),
+		Config:        &ControllerConfig{},
+		Type:          LocalHandler,
+		TransportType: tt,
+		service:       serviceName,
+		ctrlType:      ctrlType,
+		ctrlName:      ctrlType.Name(),
+		FuncName:      funcName,
+		isTyped:       true,
+		pos:           *atomic.NewInt32(-1),
+	}
+	if tt == HttpHandler {
+		hd.typedFunc = &handle{IsFunc: true, HttpFunc: WrapHttp(core)}
+	} else {
+		hd.typedFunc = &handle{IsFunc: true, RpcFunc: WrapRpc(core)}
+	}
+	defaultHandlerManager.Store(hd)
+
+	// 直接调用 addRoute，传预建 handler；addRoute 仅负责建路由尾部。
+	r := self.addRoute(Normal, LocalHandler, methods, &TUrl{Path: self.joinPathPrefix(path), Action: funcName}, []any{hd})
+	if r != nil {
+		r.meta = buildOp[I, O](opts...)
+	}
 	return r
 }
 
@@ -509,6 +543,9 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	var hd *handler
 	h := handlers[0]
 	switch v := h.(type) {
+	case *handler:
+		// Api 预建的 typed handler：已含 core/控制器信息，直接使用，仅走建路由尾部。
+		hd = v
 	case func(*TRpcContext):
 		hd = generateHandler(hanadlerType, RpcHandler, handlers, mids, url, serviceName)
 	case func(*THttpContext):
@@ -620,4 +657,33 @@ func (self *TGroup) addRoute(position RoutePosition, hanadlerType HandlerType, m
 	// register route
 	self.tree.AddRoute(route)
 	return route
+}
+
+// joinPathPrefix 把 Group.PathPrefix 拼到 path 前（"//" 保留尾部斜杠的特例）。
+func (self *TGroup) joinPathPrefix(path string) string {
+	if self.config.PathPrefix != "" && path == "//" {
+		// 生成"/abc/"而非"/abc"
+		return _path.Join(self.config.PathPrefix, "") + "/"
+	}
+	return _path.Join(self.config.PathPrefix, path)
+}
+
+// normalizeMethods 大写化方法名；含 GET 而无 HEAD 时补 HEAD（保留原 Url 对 GET 的展开行为）。
+func normalizeMethods(methods []string) []string {
+	out := make([]string, 0, len(methods)+1)
+	hasGet, hasHead := false, false
+	for _, m := range methods {
+		m = strings.ToUpper(m)
+		out = append(out, m)
+		switch m {
+		case "GET":
+			hasGet = true
+		case "HEAD":
+			hasHead = true
+		}
+	}
+	if hasGet && !hasHead {
+		out = append(out, "HEAD")
+	}
+	return out
 }

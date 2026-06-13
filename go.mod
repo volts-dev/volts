@@ -23,7 +23,6 @@ require (
 	github.com/volts-dev/dataset v0.0.0-20260327150141-d193079889ee
 	github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479
 	github.com/volts-dev/utils v0.0.0-20241206111447-ee54d4e2c42c
-	github.com/volts-dev/volts-middleware v0.0.0-20200507152620-e9ec0853eaee
 	go.etcd.io/etcd/api/v3 v3.5.21
 	go.etcd.io/etcd/client/v3 v3.5.21
 	go.uber.org/atomic v1.11.0

@@ -16,7 +16,7 @@ func TestHttpCtxPoolLoadOrStoreIsRaceFree(t *testing.T) {
 
 	// 注册一条静态路由
 	grp := NewGroup()
-	grp.Url("GET", "/race-test", func(ctx *THttpContext) {
+	grp.Url([]string{"GET"}, "/race-test", func(ctx *THttpContext) {
 		ctx.RespondByJson(map[string]string{"ok": "1"})
 	})
 	r.RegisterGroup(grp)

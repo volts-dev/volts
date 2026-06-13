@@ -30,7 +30,7 @@ func (action ctrls) delete(hd *router.THttpContext) {
 func main() {
 	r := router.New()
 	//r.RegisterMiddleware(event.NewEvent())
-	r.Url("REST", "/ctrls", new(ctrls))
+	r.Url([]string{"REST"}, "/ctrls", new(ctrls))
 
 	srv := server.New()
 

@@ -46,11 +46,11 @@ func OpenAPIGroup(r IRouter) *TGroup {
 	html := openapi.ScalarHTML(DefaultOpenAPISpecPath)
 
 	group := NewGroup()
-	group.Url("GET", DefaultOpenAPISpecPath, func(ctx *THttpContext) {
+	group.Url([]string{"GET"}, DefaultOpenAPISpecPath, func(ctx *THttpContext) {
 		ctx.SetHeader(true, "Content-Type", "application/json")
 		ctx.Respond(spec)
 	})
-	group.Url("GET", DefaultOpenAPIDocsPath, func(ctx *THttpContext) {
+	group.Url([]string{"GET"}, DefaultOpenAPIDocsPath, func(ctx *THttpContext) {
 		ctx.SetHeader(true, "Content-Type", "text/html; charset=utf-8")
 		ctx.Respond([]byte(html))
 	})

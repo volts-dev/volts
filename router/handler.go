@@ -99,6 +99,11 @@ type (
 		input     any
 		output    any
 		inited    bool
+
+		// typed Api handler：func 已在注册期构建，init 跳过 MethodByName 重绑，
+		// 仅做控制器构建/中间件注入/Init/Ready，再追加 typedFunc 作主处理器。
+		isTyped   bool
+		typedFunc *handle // 注册期构建的 typed core（WrapHttp/WrapRpc 包装后）
 	}
 
 	handlerManager struct {
@@ -285,37 +290,15 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 	// store the handler model
 	defaultHandlerManager.Store(h)
 
-	// 添加中间件的闭包
-	addMiddlewares := func() {
-		for _, mid := range middlewares {
-			switch v := mid.(type) {
-			case func(IContext):
-				if tt == HttpHandler {
-					h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
-				} else {
-					h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
-				}
-			case func(*THttpContext):
-				h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: v})
-			case func(*TRpcContext):
-				h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: v})
-			case func(IRouter) IMiddleware:
-				h.funcs = append(h.funcs, &handle{IsFunc: true, MiddlewareCreator: v})
-			default:
-				log.Errf("unknow middleware %v", v)
-			}
-		}
-	}
-
 	h.TransportType = tt
 
 	switch val := handlers[0].(type) {
 	case func(*THttpContext):
-		addMiddlewares()
+		h.addMiddlewares(middlewares)
 		h.funcs = append(h.funcs, &handle{IsFunc: true, HttpFunc: val})
 
 	case func(*TRpcContext):
-		addMiddlewares()
+		h.addMiddlewares(middlewares)
 		h.funcs = append(h.funcs, &handle{IsFunc: true, RpcFunc: val})
 
 	case reflect.Value:
@@ -382,12 +365,34 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 			log.Panicf("the middleware.handler %v is not supportable!", hd)
 		}
 
-		addMiddlewares()
+		h.addMiddlewares(middlewares)
 
 	default:
 		log.Panicf("can not generate handler by this type")
 	}
 	return h
+}
+
+// addMiddlewares 把 middlewares 追加到 self.funcs（按 self.TransportType 选择 Http/Rpc 包装）。
+func (self *handler) addMiddlewares(middlewares []any) {
+	for _, mid := range middlewares {
+		switch v := mid.(type) {
+		case func(IContext):
+			if self.TransportType == HttpHandler {
+				self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
+			} else {
+				self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
+			}
+		case func(*THttpContext):
+			self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: v})
+		case func(*TRpcContext):
+			self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: v})
+		case func(IRouter) IMiddleware:
+			self.funcs = append(self.funcs, &handle{IsFunc: true, MiddlewareCreator: v})
+		default:
+			log.Errf("unknow middleware %v", v)
+		}
+	}
 }
 
 // add which middleware name blocked handler name
@@ -611,46 +616,50 @@ func (self *handler) init(router *TRouter) {
 			}
 		}
 
-		// 写入handler
-		// MethodByName特性取到的值receiver默认为v
-		hd := ctrl.MethodByName(self.FuncName)
-		if !hd.IsValid() {
-			log.Errf("Method %s not found in controller %s", self.FuncName, self.ctrlName)
-			// 不能直接 fall through —— hd.Type().In(0) 在 invalid Value 上会 panic。
-			// 跳过 handler 切片填充，仅保留中间件初始化（下方循环）。
-			goto initMiddlewares
-		}
-
-		var h *handle
-		switch hd.Type().In(0) {
-		case ContextType:
-			if fn, ok := hd.Interface().(func(IContext)); ok {
-				if self.TransportType != HttpHandler {
-					h = &handle{IsFunc: true, RpcFunc: WrapRpc(fn)}
-				} else {
-					h = &handle{IsFunc: true, HttpFunc: WrapHttp(fn)}
-				}
+		// typed handler 的主 func 已在注册期构建（typedFunc），跳过 MethodByName 反射重绑；
+		// 它在控制器/中间件注入完成后于下方统一追加。
+		if !self.isTyped {
+			// 写入handler
+			// MethodByName特性取到的值receiver默认为v
+			hd := ctrl.MethodByName(self.FuncName)
+			if !hd.IsValid() {
+				log.Errf("Method %s not found in controller %s", self.FuncName, self.ctrlName)
+				// 不能直接 fall through —— hd.Type().In(0) 在 invalid Value 上会 panic。
+				// 跳过 handler 切片填充，仅保留中间件初始化（下方循环）。
+				goto initMiddlewares
 			}
 
-			// func(CtxType, *In) (*Out)
-			if hd.Type().NumIn() > 3 && hd.Type().NumOut() == 1 {
-				h = &handle{IsFunc: true}
-				if self.TransportType != HttpHandler {
-					h.RpcFunc = hd.Interface().(func(*TRpcContext))
-				} else {
-					h.HttpFunc = hd.Interface().(func(*THttpContext))
+			var h *handle
+			switch hd.Type().In(0) {
+			case ContextType:
+				if fn, ok := hd.Interface().(func(IContext)); ok {
+					if self.TransportType != HttpHandler {
+						h = &handle{IsFunc: true, RpcFunc: WrapRpc(fn)}
+					} else {
+						h = &handle{IsFunc: true, HttpFunc: WrapHttp(fn)}
+					}
 				}
+
+				// func(CtxType, *In) (*Out)
+				if hd.Type().NumIn() > 3 && hd.Type().NumOut() == 1 {
+					h = &handle{IsFunc: true}
+					if self.TransportType != HttpHandler {
+						h.RpcFunc = hd.Interface().(func(*TRpcContext))
+					} else {
+						h.HttpFunc = hd.Interface().(func(*THttpContext))
+					}
+				}
+
+			case RpcContextType:
+				h = &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))}
+			case HttpContextType:
+				h = &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))}
+			default:
+				log.Errf("the handler %v is not supportable!", hd)
 			}
 
-		case RpcContextType:
-			h = &handle{IsFunc: true, RpcFunc: hd.Interface().(func(*TRpcContext))}
-		case HttpContextType:
-			h = &handle{IsFunc: true, HttpFunc: hd.Interface().(func(*THttpContext))}
-		default:
-			log.Errf("the handler %v is not supportable!", hd)
+			self.funcs = append(self.funcs, h)
 		}
-
-		self.funcs = append(self.funcs, h)
 
 		// 所有的指针准备就绪后生成Interface
 		// NOTE:必须初始化结构指针才能生成完整的Model,之后修改CtrlValue将不会有效果
@@ -661,6 +670,11 @@ func (self *handler) init(router *TRouter) {
 		if c, ok := self.ctrlModel.(controllerReady); ok {
 			c.Ready(self.Config)
 		}
+	}
+
+	// typed 主 func 排在 explicit mids + 注入的 ctrl mids 之后，作为最后的处理器。
+	if self.isTyped && self.typedFunc != nil {
+		self.funcs = append(self.funcs, self.typedFunc)
 	}
 
 initMiddlewares:
@@ -695,6 +709,8 @@ func (self *handler) clone() *handler {
 		ctrlValue:     self.ctrlValue,
 		ctrlModel:     self.ctrlModel,
 		service:       self.service,
+		isTyped:       self.isTyped,
+		typedFunc:     self.typedFunc,
 	}
 
 	if self.funcs != nil {

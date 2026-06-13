@@ -8,5 +8,5 @@ var Base *router.TGroup
 
 func init() {
 	Base = router.NewGroup(router.WithGroupPathPrefix("/base"))
-	Base.Url("GET", "/", ctrl.index)
+	Base.Url([]string{"GET"}, "/", ctrl.index)
 }

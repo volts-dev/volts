@@ -2,14 +2,12 @@ package main
 
 import (
 	"github.com/volts-dev/volts"
-	"github.com/volts-dev/volts-middleware/event"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
 )
 
 type (
 	ctrls struct {
-		event.TEvent
 		//这里写中间件
 	}
 )
@@ -41,7 +39,7 @@ func (action ctrls) Panic(hd *router.THttpContext) {
 func main() {
 	r := router.New()
 	//r.RegisterMiddleware(event.NewEvent())
-	r.Url("GET", "/", ctrls.index)
+	r.Url([]string{"GET"}, "/", ctrls.index)
 
 	srv := server.New(
 		server.WithRouter(r),

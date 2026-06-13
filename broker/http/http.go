@@ -141,7 +141,7 @@ func New(opts ...broker.Option) broker.IBroker {
 		b.router = router.New(router.WithConfigPrefixName(cfg.String()))
 
 		// 注册路由
-		b.router.Url("POST", DefaultSubPath, b.Handler)
+		b.router.Url([]string{"POST"}, DefaultSubPath, b.Handler)
 	}
 
 	// specify the message handler
@@ -152,7 +152,7 @@ func New(opts ...broker.Option) broker.IBroker {
 		handlers, ok := b.config.Context.Value("http_handlers").(map[string]http.Handler)
 		if ok {
 			for pattern, handler := range handlers {
-				b.router.Url("POST", pattern, handler)
+				b.router.Url([]string{"POST"}, pattern, handler)
 			}
 		}
 	}

@@ -292,8 +292,8 @@ func Main() {
 	}
 
 	// HTTP 路由
-	r.Url("GET", "/", indexHandler)
-	r.Url("GET", "/events", sseHandler)
+	r.Url([]string{"GET"}, "/", indexHandler)
+	r.Url([]string{"GET"}, "/events", sseHandler)
 
 	// 启动 server
 	srv := server.New(

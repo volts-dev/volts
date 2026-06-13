@@ -46,9 +46,9 @@ type demoCreateUserRsp struct {
 // registerDemoUserAPI 注册 demo 路由，供两个测试复用。
 func registerDemoUserAPI(r *TRouter) {
 	grp := NewGroup()
-	grp.Api[*THttpContext, demoCreateUserReq, demoCreateUserRsp](
-		"POST", "/teams/{team_id}/users",
-		func(c *THttpContext, in *demoCreateUserReq) (*demoCreateUserRsp, error) {
+	grp.Api[noCtrl, *THttpContext, demoCreateUserReq, demoCreateUserRsp](
+		[]string{"POST"}, "/teams/{team_id}/users",
+		func(_ noCtrl, c *THttpContext, in *demoCreateUserReq) (*demoCreateUserRsp, error) {
 			// c 为具体 *THttpContext，可用其完整方法（此处仅演示可达）
 			_ = c.Response()
 			return &demoCreateUserRsp{

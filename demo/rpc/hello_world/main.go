@@ -31,7 +31,7 @@ func (t arith) Mul(hd *router.TRpcContext, args *test.Args, reply *test.Reply) e
 
 func main() {
 	r := router.New()
-	r.Url("CONNECT", "Arith", new(arith))
+	r.Url([]string{"CONNECT"}, "Arith", new(arith))
 
 	srv := server.New(
 		server.WithRouter(r),

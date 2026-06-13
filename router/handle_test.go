@@ -23,7 +23,7 @@ func TestApi_ConcreteHTTPContext(t *testing.T) {
 	defer close(r.exit)
 
 	grp := NewGroup()
-	grp.Api[*THttpContext, hReq, hRsp]("POST", "/api-hi", func(c *THttpContext, in *hReq) (*hRsp, error) {
+	grp.Api[noCtrl, *THttpContext, hReq, hRsp]([]string{"POST"}, "/api-hi", func(_ noCtrl, c *THttpContext, in *hReq) (*hRsp, error) {
 		// c 是具体的 *THttpContext，可用其完整方法
 		_ = c.Response()
 		return &hRsp{Msg: "hi " + in.Name}, nil

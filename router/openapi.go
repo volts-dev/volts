@@ -101,14 +101,16 @@ func buildOp[I, O any](opts ...OpOption) *Operation {
 
 // applyTags 把结构体字段的 tag 写进字段级 Value。
 func applyTags(sf reflect.StructField, fv *registry.Value) {
+	// 字段名始终由结构体字段决定（json tag 优先，否则 Go 字段名），覆盖 reflectValue
+	// 对标量字段用类型名（"string"/"int"…）设的默认 Name——否则无 json tag 的字段会
+	// 全部塌缩成同名属性、并被 valueToSchema 误判为 object。
+	name := sf.Name
 	if j := sf.Tag.Get("json"); j != "" {
-		if name := strings.Split(j, ",")[0]; name != "" && name != "-" {
-			fv.Name = name
+		if n := strings.Split(j, ",")[0]; n != "" && n != "-" {
+			name = n
 		}
 	}
-	if fv.Name == "" {
-		fv.Name = sf.Name
-	}
+	fv.Name = name
 	if sf.Tag.Get("required") == "true" {
 		fv.Required = true
 	}
@@ -123,9 +125,16 @@ func applyTags(sf reflect.StructField, fv *registry.Value) {
 // TypedHandler 是 OpenAPI 友好的处理器签名（context 为 IContext）。
 type TypedHandler[I, O any] func(ctx IContext, in *I) (*O, error)
 
-// Handle 是 Api 的便捷形态：context 固定为 IContext。等价于 g.Api[IContext, I, O]。
+// noCtrl 是控制器无关注册的零大小占位 receiver：Api 方法要求 func(Ctrl, C, *I)(*O, error)
+// 的方法表达式形态，而 Handle / 直接的 typed handler 没有控制器。用 noCtrl 作 Ctrl 把
+// 无 receiver 的 handler 适配成方法形态，对调用方不可见（零分配）。
+type noCtrl struct{}
+
+// Handle 是 Api 的便捷形态：context 固定为 IContext。等价于 g.Api[noCtrl, IContext, I, O]
+// 经 noCtrl 适配（handler 无须 receiver）。
 func Handle[I, O any](g *TGroup, method, path string, h TypedHandler[I, O], opts ...OpOption) *route {
-	return g.Api[IContext, I, O](method, path, h, opts...)
+	return g.Api[noCtrl, IContext, I, O]([]string{method}, path,
+		func(_ noCtrl, ctx IContext, in *I) (*O, error) { return h(ctx, in) }, opts...)
 }
 
 // bindPathQuery 用 path 参数（HTTP/RPC 皆有）和 query/form（仅 HTTP）填充 in 的字段。

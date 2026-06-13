@@ -137,7 +137,7 @@ func (self *Config) Load() error {
 	}
 
 	if self.UseRootStatics && self.Router != nil {
-		self.Router.Url("GET", "/<:fileName>.<:ext>", rootStaticHandler)
+		self.Router.Url([]string{"GET"}, "/<:fileName>.<:ext>", rootStaticHandler)
 	}
 
 	return nil
