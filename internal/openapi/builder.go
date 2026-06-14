@@ -55,6 +55,19 @@ func BuildSpec(info Info, eps []*registry.Endpoint) []byte {
 			op.Description = ep.Metadata["description"]
 		}
 
+		// x-transport：机器可读地标注传输协议。CONNECT 走 TCP-RPC，其余 HTTP。
+		transport := "http"
+		for _, m := range ep.Method {
+			if m == "CONNECT" {
+				transport = "tcp-rpc"
+				break
+			}
+		}
+		if op.Extensions == nil {
+			op.Extensions = map[string]interface{}{}
+		}
+		op.Extensions["x-transport"] = transport
+
 		// Collect the set of path-param names from the converted URL (e.g. {id}).
 		urlPathParams := map[string]bool{}
 		for _, match := range openAPIParamRe.FindAllStringSubmatch(oapiPath, -1) {
@@ -149,6 +162,8 @@ func BuildSpec(info Info, eps []*registry.Endpoint) []byte {
 			case "GET":
 				item.Get = op
 			case "POST", "CONNECT":
+				// CONNECT(RPC/TCP) 仍映射为 POST：OpenAPI 规范未定义 connect 操作，
+				// Scalar 等 UI 不渲染它。协议区分改由 tag / x-transport 承载（见 RouteToEndpiont）。
 				item.Post = op
 			case "PUT":
 				item.Put = op

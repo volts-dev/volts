@@ -78,6 +78,19 @@ func RouteToEndpiont(r *route) *registry.Endpoint {
 		ep.Request = op.Request
 		ep.Response = op.Response
 	}
+	// 默认分类：未显式 OpTags 时，按所属模块（Group 名）归类，便于 OpenAPI/Scalar 分组。
+	// RPC（CONNECT/TCP）与 HTTP 默认分到不同 tag 组（"<模块> (RPC)" vs "<模块>"），区分协议。
+	if len(ep.Tags) == 0 && r.group != nil {
+		if name := r.group.String(); name != "" {
+			for _, m := range r.methods {
+				if m == "CONNECT" {
+					name += " (RPC)"
+					break
+				}
+			}
+			ep.Tags = []string{name}
+		}
+	}
 	if ep.Name == "" {
 		ep.Name = r.Path()
 	}
