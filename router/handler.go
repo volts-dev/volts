@@ -79,7 +79,7 @@ type (
 	handler struct {
 		sync.RWMutex
 		Config        *ControllerConfig
-		_services     []*registry.Service //todo remove 该路由服务线路 提供网关等特殊服务用// Versions of this service
+		services      []*registry.Service //todo remove 该路由服务线路 提供网关等特殊服务用// Versions of this service
 		service       string
 		Id            int           // 根据Name生成的UID用于缓存
 		Name          string        // handler名称
@@ -114,36 +114,6 @@ type (
 	}
 )
 
-func WrapHttp(fn func(IContext)) func(*THttpContext) {
-	return func(ctx *THttpContext) {
-		fn(ctx)
-	}
-}
-
-func WrapRpc(fn func(IContext)) func(*TRpcContext) {
-	return func(ctx *TRpcContext) {
-		fn(ctx)
-	}
-}
-
-// HandleRpc 以泛型注册一个使用 *TRpcContext 的 typed RPC handler。
-// 运行期零 reflect.Call，比 Url() 自动识别的反射版更高效。
-func WrapRpcX[I, O any](fn func(IContext, *I) (*O, error)) func(*TRpcContext) {
-	return func(ctx *TRpcContext) {
-		var in I
-		if b := ctx.Body(); b != nil {
-			_ = b.Decode(&in)
-		}
-		bindPathQuery(ctx, &in)
-		out, err := fn(ctx, &in)
-		if err != nil {
-			writeError(ctx, err)
-			return
-		}
-		ctx.RespondByJson(out)
-	}
-}
-
 // Typed handler 的可插拔编解码钩子。
 //
 // 默认走纯 JSON（Body().Decode / RespondByJson），上层（如 vectors 的 JSON-RPC
@@ -158,13 +128,27 @@ var (
 		}
 		return nil
 	}
+
 	TypedResponseEncoder = func(ctx IContext, v any) {
 		ctx.RespondByJson(v)
 	}
+
 	TypedErrorEncoder = func(ctx IContext, err error) {
 		writeError(ctx, err)
 	}
 )
+
+func WrapHttp(fn func(IContext)) func(*THttpContext) {
+	return func(ctx *THttpContext) {
+		fn(ctx)
+	}
+}
+
+func WrapRpc(fn func(IContext)) func(*TRpcContext) {
+	return func(ctx *TRpcContext) {
+		fn(ctx)
+	}
+}
 
 // WrapFn is a helper function for wrapping http.HandlerFunc and returns a HttpContext.
 func WrapFn(fn http.HandlerFunc) func(*THttpContext) {
@@ -373,28 +357,6 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 	return h
 }
 
-// addMiddlewares 把 middlewares 追加到 self.funcs（按 self.TransportType 选择 Http/Rpc 包装）。
-func (self *handler) addMiddlewares(middlewares []any) {
-	for _, mid := range middlewares {
-		switch v := mid.(type) {
-		case func(IContext):
-			if self.TransportType == HttpHandler {
-				self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
-			} else {
-				self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
-			}
-		case func(*THttpContext):
-			self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: v})
-		case func(*TRpcContext):
-			self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: v})
-		case func(IRouter) IMiddleware:
-			self.funcs = append(self.funcs, &handle{IsFunc: true, MiddlewareCreator: v})
-		default:
-			log.Errf("unknow middleware %v", v)
-		}
-	}
-}
-
 // add which middleware name blocked handler name
 func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 	self.mutex.Lock()
@@ -419,7 +381,6 @@ func (self *ControllerConfig) AddFilter(middleware string, handlers ...string) {
 func (self *handlerManager) Store(h *handler) {
 	self.Lock()
 	defer self.Unlock()
-	log.Dbgf("%d,%s", h.Id, h.Type.String())
 	self.handlerModel[h.Id] = h
 }
 
@@ -466,7 +427,7 @@ func (self *handlerManager) Put(id int, h *handler) {
 func (self *handler) Services() []*registry.Service {
 	self.RLock()
 	defer self.RUnlock()
-	return self._services
+	return self.services
 }
 
 func (self *handler) Service() string {
@@ -476,7 +437,7 @@ func (self *handler) Service() string {
 func (self *handler) SetServices(services []*registry.Service) {
 	self.Lock()
 	defer self.Unlock()
-	self._services = services
+	self.services = services
 }
 
 // 处理器名称
@@ -731,12 +692,10 @@ func (self *handler) clone() *handler {
 
 // 统一处理 HTTP 和 RPC 的 handler 调用逻辑
 func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error {
+	ln := len(self.funcs)
 	for {
 		pos := int(self.pos.Load())
-		if pos >= len(self.funcs) {
-			break
-		}
-		if ctx.IsDone() {
+		if pos >= ln || ctx.IsDone() {
 			break
 		}
 
@@ -803,6 +762,28 @@ func (self *handler) InvokeSubscriber(ctx *TSubscriberContext) error {
 		}
 	}
 	return nil
+}
+
+// addMiddlewares 把 middlewares 追加到 self.funcs（按 self.TransportType 选择 Http/Rpc 包装）。
+func (self *handler) addMiddlewares(middlewares []any) {
+	for _, mid := range middlewares {
+		switch v := mid.(type) {
+		case func(IContext):
+			if self.TransportType == HttpHandler {
+				self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
+			} else {
+				self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
+			}
+		case func(*THttpContext):
+			self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: v})
+		case func(*TRpcContext):
+			self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: v})
+		case func(IRouter) IMiddleware:
+			self.funcs = append(self.funcs, &handle{IsFunc: true, MiddlewareCreator: v})
+		default:
+			log.Errf("unknow middleware %v", v)
+		}
+	}
 }
 
 // 初始化

@@ -412,6 +412,7 @@ func (self *TGroup) Api[Ctrl any, C IContext, I, O any](
 			TypedErrorEncoder(ctx, err)
 			return
 		}
+
 		bindPathQuery(ctx, &in)
 
 		out, err := h(recv, c, &in) // 静态调用，零 reflect.Call
@@ -419,6 +420,7 @@ func (self *TGroup) Api[Ctrl any, C IContext, I, O any](
 			TypedErrorEncoder(ctx, err)
 			return
 		}
+
 		if out == nil {
 			// 处理器返回 nil *O 表示已自行写响应（如网关 raw 透传：ctx.Write + return nil,nil），
 			// 不再二次编码，避免在已写出的响应后追加多余的 {"result":null} 信封。
@@ -434,15 +436,19 @@ func (self *TGroup) Api[Ctrl any, C IContext, I, O any](
 	if ctrlType.Kind() == reflect.Ptr {
 		ctrlType = ctrlType.Elem()
 	}
+
 	funcName := GetFuncName(h, '.')
+
 	tt := HttpHandler
 	if utils.IndexOf("CONNECT", methods...) > -1 || utils.IndexOf("RPC", methods...) > -1 {
 		tt = RpcHandler
 	}
+
 	serviceName := ""
 	if self.config.IsService {
 		serviceName = self.config.Name
 	}
+
 	uid := nextLocalHandlerId()
 	hd := &handler{
 		Id:            uid,
@@ -457,11 +463,13 @@ func (self *TGroup) Api[Ctrl any, C IContext, I, O any](
 		isTyped:       true,
 		pos:           *atomic.NewInt32(-1),
 	}
+
 	if tt == HttpHandler {
 		hd.typedFunc = &handle{IsFunc: true, HttpFunc: WrapHttp(core)}
 	} else {
 		hd.typedFunc = &handle{IsFunc: true, RpcFunc: WrapRpc(core)}
 	}
+
 	defaultHandlerManager.Store(hd)
 
 	// 直接调用 addRoute，传预建 handler；addRoute 仅负责建路由尾部。
@@ -469,6 +477,7 @@ func (self *TGroup) Api[Ctrl any, C IContext, I, O any](
 	if r != nil {
 		r.meta = buildOp[I, O](opts...)
 	}
+
 	return r
 }
 
@@ -498,6 +507,7 @@ func (self *TGroup) Subscribe(subscriber ISubscriber) error {
 	if ok {
 		return fmt.Errorf("subscriber %v already exists", subscriber.Topic())
 	}
+
 	self.subscribers[subscriber] = nil
 	return nil
 }
