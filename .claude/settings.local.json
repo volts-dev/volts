@@ -9,7 +9,14 @@
       "Bash(grep -n \"func.*Tx\\\\|func.*Records\\\\|func.*TSession\\\\|func.*IModel\" /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/orm/*.go)",
       "Bash(go test:*)",
       "Bash(go version:*)",
-      "Bash(ls /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/*_test.go)"
+      "Bash(ls /Users/shadow/SectionZero/MyProject/Go/src/volts-dev/volts/router/*_test.go)",
+      "Bash(rtk ls *)",
+      "Bash(echo \"=== dataset build exit: $? ===\")",
+      "Bash(echo \"=== orm build exit: $? ===\")",
+      "Bash(go env *)",
+      "Bash(go list *)",
+      "Bash(rm -rf /private/tmp/claude-501/*/[0-9a-f]*/tasks/*)",
+      "Bash(rtk df *)"
     ]
   }
 }

@@ -263,10 +263,14 @@ github.com/volts-dev/cacher v0.0.0-20260314091036-7e3a317fca8b h1:+OuUkqxYeg/jek
 github.com/volts-dev/cacher v0.0.0-20260314091036-7e3a317fca8b/go.mod h1:TlathlseFnOs7DE5N2JWO+IFDmVIYQaNquV9uEkMrlQ=
 github.com/volts-dev/dataset v0.0.0-20260327150141-d193079889ee h1:x4+GrhHGi0PIOM0IMgvez4KzgY/jPhzUOV7EZ4LJGUw=
 github.com/volts-dev/dataset v0.0.0-20260327150141-d193079889ee/go.mod h1:Yp+aEyzt3Xd2IUh9Yk9RgH1VThgXPx+1ixwsjzr2nb8=
+github.com/volts-dev/dataset v0.0.0-20260617191314-fb0664d334c6 h1:OKPm0/m9ddyu4yGU2CosPSPr5dx8YVSQxf7BdjUPGek=
+github.com/volts-dev/dataset v0.0.0-20260617191314-fb0664d334c6/go.mod h1:Yp+aEyzt3Xd2IUh9Yk9RgH1VThgXPx+1ixwsjzr2nb8=
 github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479 h1:AlwwtWVPD8mE/bIb2Iyu1XfOZMdVrnqH31Slp22hhYE=
 github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479/go.mod h1:bvGyJ4HsPK/QJ16nYYQcoCvyXXkt6wNGulIIE8GuWps=
 github.com/volts-dev/utils v0.0.0-20241206111447-ee54d4e2c42c h1:/U3BhhBRBlQzSsZD/jqoZhvXEIPzxIVBwhuLD3+7unc=
 github.com/volts-dev/utils v0.0.0-20241206111447-ee54d4e2c42c/go.mod h1:TODvPD1m6eFUenwyxUSS1unXP95G4RMa6oLy7AwX33E=
+github.com/volts-dev/utils v0.0.0-20260429065959-186108449dda h1:e92Iv9OGyJwL+JXT00TCadpVYXsf59i/3/wagdsrDZo=
+github.com/volts-dev/utils v0.0.0-20260429065959-186108449dda/go.mod h1:TODvPD1m6eFUenwyxUSS1unXP95G4RMa6oLy7AwX33E=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 go.etcd.io/etcd/api/v3 v3.5.21 h1:A6O2/JDb3tvHhiIz3xf9nJ7REHvtEFJJ3veW3FbCnS8=

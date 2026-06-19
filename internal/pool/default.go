@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"net"
 	"sync"
 	"time"
 
@@ -84,15 +85,20 @@ func (p *pool) getPoolKey(addr string, opts ...transport.DialOption) poolKey {
 func (p *pool) Get(addr string, opts ...transport.DialOption) (Conn, error) {
 	key := p.getPoolKey(addr, opts...)
 
-	p.Lock()
-	conns := p.conns[key]
-
-	// while we have conns check age and then return one
-	// otherwise we'll create a new conn
-	for len(conns) > 0 {
+	// while we have conns check age/liveness and then return one, otherwise
+	// we'll create a new conn. Each candidate is popped under the lock, but the
+	// TTL and liveness checks run unlocked — the liveness probe does a short
+	// blocking read and must not stall every other Get/Release on the pool.
+	for {
+		p.Lock()
+		conns := p.conns[key]
+		if len(conns) == 0 {
+			p.Unlock()
+			break
+		}
 		conn := conns[len(conns)-1]
-		conns = conns[:len(conns)-1]
-		p.conns[key] = conns
+		p.conns[key] = conns[:len(conns)-1]
+		p.Unlock()
 
 		// if conn is old kill it and move on
 		if d := time.Since(conn.Created()); d > p.ttl {
@@ -100,13 +106,16 @@ func (p *pool) Get(addr string, opts ...transport.DialOption) (Conn, error) {
 			continue
 		}
 
-		// we got a good conn, lets unlock and return it
-		p.Unlock()
+		// if the peer already closed the conn (server idle ReadTimeout or a
+		// server restart), reusing it would make the next Recv return io.EOF.
+		// Drop it and keep looking / dial a fresh one instead.
+		if connClosedByPeer(conn.IClient) {
+			conn.IClient.Close()
+			continue
+		}
 
 		return conn, nil
 	}
-
-	p.Unlock()
 
 	// create new conn
 	c, err := p.tr.Dial(addr, opts...)
@@ -156,4 +165,49 @@ func (p *poolConn) Created() time.Time {
 
 func (p *poolConn) Key() any {
 	return p.key
+}
+
+// connClosedByPeer reports whether the remote end has already closed conn. It
+// runs a short non-blocking read probe on the underlying net.Conn:
+//   - a timeout means the socket is idle but still alive  -> not closed
+//   - io.EOF / reset / unexpected data means it is dead    -> closed
+//
+// A pooled RPC conn only sits idle between a completed response and the next
+// request, so there is never legitimate unread data — anything readable is the
+// peer's FIN/RST. Transports without a real net.Conn (in-memory/mock) cannot be
+// probed and are assumed alive.
+func connClosedByPeer(c transport.IClient) bool {
+	nc := netConnOf(c)
+	if nc == nil {
+		return false
+	}
+
+	// Small positive deadline so the first read syscall is actually attempted
+	// (an already-elapsed deadline would return immediately and miss a pending
+	// EOF). The 1ms cost is only paid when reusing a genuinely live connection.
+	if err := nc.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+		return true // can't probe safely -> treat as dead and dial fresh
+	}
+	defer nc.SetReadDeadline(time.Time{})
+
+	var buf [1]byte
+	n, err := nc.Read(buf[:])
+	if err == nil {
+		return n > 0 // unexpected payload on an idle conn -> out of sync, drop it
+	}
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return false // idle but alive
+	}
+	return true // EOF / reset / other -> closed
+}
+
+// netConnOf returns the underlying net.Conn of c, or nil if the transport does
+// not expose one (recovering from transports whose Conn() is unimplemented).
+func netConnOf(c transport.IClient) (nc net.Conn) {
+	defer func() {
+		if recover() != nil {
+			nc = nil
+		}
+	}()
+	return c.Conn()
 }

@@ -20,9 +20,9 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/volts-dev/cacher v0.0.0-20260314091036-7e3a317fca8b
-	github.com/volts-dev/dataset v0.0.0-20260327150141-d193079889ee
+	github.com/volts-dev/dataset v0.0.0-20260617191314-fb0664d334c6
 	github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479
-	github.com/volts-dev/utils v0.0.0-20241206111447-ee54d4e2c42c
+	github.com/volts-dev/utils v0.0.0-20260429065959-186108449dda
 	go.etcd.io/etcd/api/v3 v3.5.21
 	go.etcd.io/etcd/client/v3 v3.5.21
 	go.uber.org/atomic v1.11.0
