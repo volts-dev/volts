@@ -373,10 +373,17 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 	case StaticNode:
 		// match static node
 		if strings.HasPrefix(path, node.Text) {
-			if len(path) == len(node.Text) {
+			// 路径被本节点完全消费且本节点自己挂了 handler:直接命中——更具体的
+			// 静态匹配优先于子节点里的 catch-all。
+			if len(path) == len(node.Text) && node.Route != nil {
 				return node
 			}
-
+			// 否则(要么还有余量要么本节点没挂 handler)必须继续尝试子节点用
+			// 余量(可能为空串)匹配。不能在"本节点无 handler"时直接放弃——
+			// 否则任何"前缀节点自己无 handler、只挂了 * 子节点"的写法(如根路径
+			// "/" 下挂 "/*" catch-all)永远匹配不到路径恰好等于前缀本身的请求
+			// (例如 GET / 匹配不到 /* 路由)；子节点里的 AnyNode 对空余量本就
+			// 有合法语义(捕获空字符串)。
 			for _, c := range node.Children {
 				e := r.matchNode(c, path[len(node.Text):], delimitChar, params)
 				if e != nil {

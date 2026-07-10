@@ -206,6 +206,37 @@ func TestTreeComprehensive(t *testing.T) {
 			path:   "/items/delete/info",
 			match:  false,
 		},
+		{
+			// 回归用例:静态前缀节点自己不挂 handler、只挂了 "*" catch-all 子节点时
+			// (典型场景:注册路由 "/*"，编译期会拆成 StaticNode("/") + AnyNode("*")，
+			// 前者本身无 Route)，请求路径恰好等于该前缀(这里是根路径 "/")必须仍能
+			// 命中 catch-all、拿到空字符串捕获，而不是被 StaticNode 的"精确匹配即返回
+			// 自身"短路成未命中。
+			name:   "Catch-all Matches Exact Prefix (root)",
+			routes: []string{"/*rest"},
+			method: "GET",
+			path:   "/",
+			match:  true,
+			params: map[string]string{"rest": ""},
+		},
+		{
+			name:   "Catch-all Matches Non-empty Suffix",
+			routes: []string{"/*rest"},
+			method: "GET",
+			path:   "/anything/deep",
+			match:  true,
+			params: map[string]string{"rest": "anything/deep"},
+		},
+		{
+			// 静态路由和同前缀下的 catch-all 共存时，精确的静态匹配仍必须优先，
+			// 不能被上面那条修复误伤成总是继续下钻子节点。
+			name:   "Static Route Still Wins Over Sibling Catch-all",
+			routes: []string{"/exact", "/*rest"},
+			method: "GET",
+			path:   "/exact",
+			match:  true,
+			params: map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
