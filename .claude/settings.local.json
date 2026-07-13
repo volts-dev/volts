@@ -16,7 +16,13 @@
       "Bash(go env *)",
       "Bash(go list *)",
       "Bash(rm -rf /private/tmp/claude-501/*/[0-9a-f]*/tasks/*)",
-      "Bash(rtk df *)"
+      "Bash(rtk df *)",
+      "Bash(rtk read *)",
+      "Bash(rtk grep *)",
+      "Bash(/usr/local/bin/git checkout *)",
+      "Bash(/usr/local/bin/git branch *)",
+      "Bash(/usr/local/bin/git log *)",
+      "Bash(/usr/local/bin/git status *)"
     ]
   }
 }
