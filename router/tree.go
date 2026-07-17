@@ -85,6 +85,10 @@ type (
 		__DelimitChar byte // Delimit Char xxx<.>xxx
 		PrefixChar    byte // the Prefix Char </>xxx.xxx
 		Count         atomic.Int32
+		// onRouteReplaced 在 addNode 以新 route 对象覆盖旧 route（非 hook 合并）时
+		// 携带被替换的旧 route 回调。TRouter 用它清理按 route id 键控的上下文池
+		// （见 router.go New）。在树写锁内调用；须在后台 goroutine 启动前赋值。
+		onRouteReplaced func(old *route)
 	}
 )
 
@@ -788,6 +792,12 @@ func (self *TTree) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bo
 				if isHook {
 					n.Route.CombineHandler(nodes[i].Route)
 				} else {
+					// 通知持有方旧 route 已被替换（新对象携带新 id）——
+					// router 据此清理按 route id 键控的上下文池，防止
+					// registry 周期刷新导致的池条目无限累积。
+					if old := n.Route; old != nil && old != nodes[i].Route && self.onRouteReplaced != nil {
+						self.onRouteReplaced(old)
+					}
 					n.Route = nodes[i].Route
 					self.Count.Inc()
 				}

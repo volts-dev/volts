@@ -64,6 +64,8 @@ type (
 		rpcCtxPool sync.Map
 		// exit channel signals background tasks to stop.
 		exit chan bool
+		// closeOnce guarantees the exit channel is closed exactly once (Close is idempotent).
+		closeOnce sync.Once
 	}
 )
 
@@ -97,6 +99,15 @@ func New(opts ...Option) *TRouter {
 	}
 	cfg.Router = router
 	router.TGroup.config.StaticCacheTTL = cfg.StaticCacheTTL
+
+	// registry 每 60s 刷新（watch/refresh→store）会为同一 (method,path) 生成
+	// **新 id** 的 route 对象热替换树节点；上下文池按 route id 键控、请求命中时
+	// 惰性创建，若不随替换清理，被命中过的旧 id 池条目会随刷新无限累积。
+	// 回调在 tree 写锁内执行，只做 sync.Map 删除，无锁交叉。
+	router.tree.onRouteReplaced = func(old *route) {
+		router.httpCtxPool.Delete(old.Id())
+		router.rpcCtxPool.Delete(old.Id())
+	}
 
 	go router.watch()   // Real-time registry subscription.
 	go router.refresh() // Periodic registry refreshing.
@@ -447,6 +458,13 @@ func (self *TRouter) isClosed() bool {
 	default:
 		return false
 	}
+}
+
+// Close 停止路由器的后台任务（registry watch/refresh、静态存储清理）。幂等。
+// 由 server 的 Stop 路径调用——此前 exit 通道从无人关闭，这些 goroutine 在
+// 服务器停止后仍永久运行并继续轮询 registry。
+func (self *TRouter) Close() {
+	self.closeOnce.Do(func() { close(self.exit) })
 }
 
 // filteSelf filters out the nodes that belong to the current instance from a service.

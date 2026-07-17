@@ -530,11 +530,19 @@ func (self *TServer) Start() error {
 			}
 		}
 
+		var deregErr error
 		if self.registered.Load() {
 			// deregister self
-			if err := self.Deregister(); err != nil {
-				log.Errf("Server %s-%s deregister error: %s", cfg.Name, cfg.Uid, err)
+			if deregErr = self.Deregister(); deregErr != nil {
+				log.Errf("Server %s-%s deregister error: %s", cfg.Name, cfg.Uid, deregErr)
 			}
+		}
+
+		// 停掉路由器后台任务（registry watch/refresh、静态存储清理）。
+		// router 的 exit 通道此前无人触发，这些 goroutine 在服务器停止后
+		// 仍永久运行并继续轮询 registry。
+		if c, ok := cfg.Router.(interface{ Close() }); ok {
+			c.Close()
 		}
 
 		swg := self.wg
@@ -553,7 +561,8 @@ func (self *TServer) Start() error {
 			log.Errf("Broker [%s] Disconnect error: %v", bname, brokerErr)
 		}
 
-		ch <- errors.Join(tsErr, brokerErr)
+		// 聚合全部关闭错误（deregister/transport/broker），任何一步失败都不被吞掉
+		ch <- errors.Join(deregErr, tsErr, brokerErr)
 	}, func(err error) { log.Err(err.Error()) })
 
 	return nil
