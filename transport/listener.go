@@ -2,8 +2,10 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -15,7 +17,10 @@ type (
 		listener  net.Listener
 		transport ITransport
 		sock      ISocket // TODO 还没实现
-		http      *http.Server
+		// mu 保护 http：Serve（写）与 Close（读）可能并发（见
+		// httpTransportListener 同款说明）。
+		mu   sync.Mutex
+		http *http.Server
 	}
 )
 
@@ -24,11 +29,20 @@ func (self *transportListener) Addr() net.Addr {
 }
 
 func (self *transportListener) Close() error {
-	if self.http != nil {
-		err := self.http.Close()
-		if err != nil {
-			return err
+	self.mu.Lock()
+	srv := self.http
+	self.mu.Unlock()
+
+	if srv != nil {
+		// http.Server.Close 会连带关闭其正在 Serve 的 listener；随后的显式
+		// listener.Close 必然得到 net.ErrClosed——这是收尾时序的假错误，
+		// 不是资源泄漏，予以忽略（broker/http 的 Close 曾因此误报
+		// "use of closed network connection"）。
+		err := srv.Close()
+		if lerr := self.listener.Close(); lerr != nil && !errors.Is(lerr, net.ErrClosed) && err == nil {
+			err = lerr
 		}
+		return err
 	}
 
 	return self.listener.Close()
@@ -38,37 +52,36 @@ func (t *transportListener) Accept() (net.Conn, error) {
 	return t.listener.Accept()
 }
 
+// serveHTTP 在锁内发布 srv 到 self.http（Close 并发读取）后开始服务。
+func (self *transportListener) serveHTTP(srv *http.Server) error {
+	// default http2 server
+
+	// insecure connection use h2c
+	if !(self.transport.Config().Secure || self.transport.Config().TlsConfig != nil) {
+		srv.Handler = h2c.NewHandler(srv.Handler, &http2.Server{})
+	}
+
+	self.mu.Lock()
+	self.http = srv
+	self.mu.Unlock()
+
+	// begin serving
+	return srv.Serve(self.listener)
+}
+
 func (self *transportListener) Serve(handler Handler) error {
 	switch v := handler.Handler().(type) {
 	case http.Handler:
-		self.http = &http.Server{
+		return self.serveHTTP(&http.Server{
 			Handler: v,
-		}
-		// default http2 server
-
-		// insecure connection use h2c
-		if !(self.transport.Config().Secure || self.transport.Config().TlsConfig != nil) {
-			self.http.Handler = h2c.NewHandler(self.http.Handler, &http2.Server{})
-		}
-
-		// begin serving
-		return self.http.Serve(self.listener)
+		})
 
 	case customHandler:
-		self.http = &http.Server{
+		return self.serveHTTP(&http.Server{
 			Handler: &customxx{
 				hd: v,
 			},
-		}
-		// default http2 server
-
-		// insecure connection use h2c
-		if !(self.transport.Config().Secure || self.transport.Config().TlsConfig != nil) {
-			self.http.Handler = h2c.NewHandler(self.http.Handler, &http2.Server{})
-		}
-
-		// begin serving
-		return self.http.Serve(self.listener)
+		})
 
 	case rpcHandler:
 		var tempDelay time.Duration

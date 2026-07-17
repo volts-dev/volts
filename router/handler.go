@@ -414,14 +414,26 @@ func (self *handlerManager) Put(id int, h *handler) {
 		}
 	}
 	if c == nil {
-		c = memory.NewStack(
+		// LoadOrStore 收口首放竞态：原先 Load-检查-Store 两步下，并发首放会各建
+		// 一个 StackCache 且后写覆盖前写——输家的 cache（NewStack 会起 vaccuum
+		// GC goroutine）被静默丢弃造成 goroutine 泄漏。现在输家显式 Close。
+		fresh := memory.NewStack(
 			memory.WithInterval(60),
 			memory.WithExpire(3600),
 		) // cacher
-		self.handlerPool.Store(id, c)
+		if v, loaded := self.handlerPool.LoadOrStore(id, fresh); loaded {
+			if closer, ok := fresh.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+			c, _ = v.(memory.StackCache)
+		} else {
+			c = fresh
+		}
 	}
 
-	c.Push(h)
+	if c != nil {
+		c.Push(h)
+	}
 }
 
 func (self *handler) Services() []*registry.Service {

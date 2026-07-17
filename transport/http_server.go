@@ -1,8 +1,10 @@
 package transport
 
 import (
+	"errors"
 	"net"
 	"net/http"
+	"sync"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -19,7 +21,10 @@ type (
 		listener  net.Listener
 		transport *HttpTransport
 		sock      *HttpConn // TODO 还没实现
-		http      *http.Server
+		// mu 保护 http：Serve（写）与 Close（读）可能并发——broker 的
+		// serve 重试循环会在 Close 进行中再次调用 Serve。
+		mu   sync.Mutex
+		http *http.Server
 	}
 )
 
@@ -32,11 +37,23 @@ func (h *httpTransportListener) Addr() net.Addr {
 }
 
 func (h *httpTransportListener) Close() error {
-	err := h.http.Close()
-	if err != nil {
-		return err
+	h.mu.Lock()
+	srv := h.http
+	h.mu.Unlock()
+
+	// Serve 未被调用过时 srv 为 nil，直接关 listener 即可。
+	if srv == nil {
+		return h.listener.Close()
 	}
-	return h.listener.Close()
+	// http.Server.Close 会连带关闭其正在 Serve 的 listener；随后的显式
+	// listener.Close 必然得到 net.ErrClosed——收尾时序的假错误而非资源
+	// 泄漏，予以忽略（broker/http 的 Close 曾因此误报
+	// "use of closed network connection"）。
+	err := srv.Close()
+	if lerr := h.listener.Close(); lerr != nil && !errors.Is(lerr, net.ErrClosed) && err == nil {
+		err = lerr
+	}
+	return err
 }
 
 func (t *httpTransportListener) Accept() (net.Conn, error) {
@@ -48,8 +65,10 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 	// 8KiB 足以容纳常规 cookie+UA+自定义头，攻击者无法用大 header 耗内存。
 	const maxHeaderBytes = 8 << 10
 
+	// 先在局部构建完毕，再在锁内发布到 h.http（Close 并发读取）。
+	var srv *http.Server
 	if hd, ok := handler.Handler().(http.Handler); ok {
-		h.http = &http.Server{
+		srv = &http.Server{
 			Handler:        hd,
 			ReadTimeout:    h.transport.config.ReadTimeout,
 			WriteTimeout:   h.transport.config.WriteTimeout,
@@ -58,7 +77,7 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 	}
 
 	if hd, ok := handler.Handler().(customHandler); ok {
-		h.http = &http.Server{
+		srv = &http.Server{
 			Handler: &customxx{
 				hd: hd,
 			},
@@ -71,11 +90,15 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 
 	// insecure connection use h2c
 	if !(h.transport.config.Secure || h.transport.config.TlsConfig != nil) {
-		h.http.Handler = h2c.NewHandler(h.http.Handler, &http2.Server{})
+		srv.Handler = h2c.NewHandler(srv.Handler, &http2.Server{})
 	}
 
+	h.mu.Lock()
+	h.http = srv
+	h.mu.Unlock()
+
 	// begin serving
-	return h.http.Serve(h.listener)
+	return srv.Serve(h.listener)
 }
 
 func (self *httpTransportListener) Sock() ISocket {

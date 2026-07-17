@@ -357,15 +357,18 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 }
 
 func (self *httpBroker) Close() error {
-	self.RLock()
+	// 先在锁内判定并标记 running=false，随即释放锁再做退出握手：
+	// exit 处理 goroutine 在注销订阅时要拿 RLock，若持写锁等待 <-ch
+	// 会与之死锁（TestBroker 曾卡死在此，长期被投递失败掩盖）。
+	// running=false 同时保证并发/重入 Close 只有一个真正执行握手。
+	self.Lock()
 	if !self.running {
-		self.RUnlock()
+		self.Unlock()
 		return nil
 	}
-	self.RUnlock()
-
-	self.Lock()
-	defer self.Unlock()
+	self.running = false
+	self.started.Store(false)
+	self.Unlock()
 
 	// stop cache
 	rc, ok := self.registry.(registry.IRegistryCacher)
@@ -376,11 +379,7 @@ func (self *httpBroker) Close() error {
 	// exit and return err
 	ch := make(chan error)
 	self.exit <- ch
-	err := <-ch
-
-	// set not running
-	self.running = false
-	return err
+	return <-ch
 }
 
 func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...broker.PublishOption) error {
@@ -439,7 +438,11 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 		vals := url.Values{}
 		vals.Add("id", node.Id)
 
-		uri := fmt.Sprintf("%s://%s%s?%s", scheme, node.Address, DefaultSubPath, vals.Encode())
+		// 本机地址转回环后再发（与 client/rpc_client、http_client、reverse_proxy
+		// 同一约定）：Subscribe 经 maddr.Extract 注册的是物理网卡 IP，macOS 的
+		// 网络扩展（VPN/防火墙）会在内核层拦截发往物理接口的本机流量导致投递
+		// 挂死——TestBroker 卡在 <-done 即此因。回环不受拦截。
+		uri := fmt.Sprintf("%s://%s%s?%s", scheme, maddr.LocalFormat(node.Address), DefaultSubPath, vals.Encode())
 		r, err := self.client.Post(uri, "application/json", bytes.NewReader(b))
 		if err != nil {
 			return err

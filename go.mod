@@ -4,6 +4,10 @@ go 1.27
 
 //replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
 
+// 本地 cacher 已修 TMemoryCache.Push 的 Len() 锁外读竞态（发布版 v0314 仍带竞态，
+// TestConcurrentPubBroker -race 可实锤）；发布 cacher 新版后移除本 replace 并 bump。
+replace github.com/volts-dev/cacher => ../cacher
+
 require (
 	github.com/bwmarrin/snowflake v0.3.0
 	github.com/bytedance/sonic v1.15.2
