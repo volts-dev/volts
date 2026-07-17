@@ -113,9 +113,13 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 
 ### Known Issues (tracked in memory)
 
-See project memory for 20 identified concurrency/correctness issues including:
-- WebSocket goroutine leak in `router/reverse_proxy.go:145`
-- Context pool race condition in `router/router.go:260`
-- `SIGKILL` in signal handler (uncatchable) in `volts.go:130` — already fixed in current code
-- Unprotected `registered` field in `server/server.go:487`
-- `handler.Services` written without lock in `router/handler.go:207` (data race with `SetServices`)
+The original 20-item concurrency/correctness audit (see project memory) has been fully
+dispositioned as of 2026-07-17 — every CRITICAL/HIGH item and each named MEDIUM item is
+either fixed or verified already-fixed in current code (WebSocket proxy leak, context
+pool race, SIGKILL, `registered` field, `handler.Services` lock, pool-key growth via
+`TTree.onRouteReplaced`, router lifecycle via `TRouter.Close()`, Stop error aggregation,
+broker/http Close deadlock + transport double-close). Remaining open notes:
+- `IClient` interface completeness is a design gap, not a bug (unaudited in depth)
+- broker/http `Publish` must keep `maddr.LocalFormat` on node addresses (macOS network
+  extensions intercept traffic to physical interfaces — same rule as client/reverse_proxy)
+- go.mod carries a local `replace` for volts-dev/cacher until its Push race fix is published
