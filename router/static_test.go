@@ -3,11 +3,15 @@ package router
 import (
 	"io"
 	"io/fs"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/volts-dev/volts/transport"
 )
 
 func TestStaticStore_EmbedOnly(t *testing.T) {
@@ -236,5 +240,30 @@ func TestSetStatic_WithEmbedFS(t *testing.T) {
 	routes := g.GetRoutes()
 	if routes == nil {
 		t.Fatal("routes should not be nil")
+	}
+}
+
+// TestSetStatic_MultiSegmentDispatch 验证静态路由 {filepath} 能匹配多级子路径
+// (css/site.css),而不是只吞一段——网站前台资源(/website/static/css/xxx.css)
+// 依赖这一行为。
+func TestSetStatic_MultiSegmentDispatch(t *testing.T) {
+	fsys := fstest.MapFS{
+		"static/css/site.css": &fstest.MapFile{Data: []byte("body{color:red}")},
+	}
+
+	r := New()
+	defer close(r.exit)
+
+	g := NewGroup()
+	g.config.EmbedFS = fsys
+	g.SetStatic("/static", t.TempDir())
+	r.RegisterGroup(g)
+
+	req := httptest.NewRequest("GET", "/static/css/site.css", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, transport.NewHttpRequest(req))
+
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "color:red") {
+		t.Fatalf("multi-segment static path not served: code=%d body=%q", w.Code, w.Body.String())
 	}
 }
