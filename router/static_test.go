@@ -266,4 +266,9 @@ func TestSetStatic_MultiSegmentDispatch(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "color:red") {
 		t.Fatalf("multi-segment static path not served: code=%d body=%q", w.Code, w.Body.String())
 	}
+	// 浏览器缓存头:此前静态资源零缓存头(embed 无 mod time,连协商缓存都没有),
+	// 每次页面访问重复全量拉取。
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=") {
+		t.Fatalf("static response missing Cache-Control, got %q", cc)
+	}
 }

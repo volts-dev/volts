@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -274,11 +275,19 @@ func staticHandler(urlPattern string, filePath string) func(c *THttpContext) {
 	}
 }
 
+// browserStaticMaxAge 静态资源的浏览器缓存时长(秒)。此前不发任何缓存头,
+// 每次页面访问都重复拉取全部 CSS/JS/图片(embed 资源无 mod time,连
+// Last-Modified 协商缓存都没有)。资源随二进制发布,1 小时是保守值。
+const browserStaticMaxAge = 3600
+
 // staticStoreHandler 基于 TStaticStore 的静态文件 handler
 func staticStoreHandler(urlPattern string, store *TStaticStore) func(c *THttpContext) {
 	fileServer := http.StripPrefix(urlPattern, http.FileServer(http.FS(store)))
 	return func(ctx *THttpContext) {
 		defer ctx.Apply()
+		if ctx.response.Header().Get("Cache-Control") == "" {
+			ctx.response.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", browserStaticMaxAge))
+		}
 		fileServer.ServeHTTP(ctx.response, ctx.request.Request)
 	}
 }
