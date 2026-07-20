@@ -21,6 +21,13 @@ import (
 
 var log = registry.Logger()
 
+// maxDecodedTxt 是单条 mDNS TXT 记录解压后的字节上限。
+// 记录装的是服务元数据（endpoint、node metadata），正常在 KB 量级。
+const maxDecodedTxt = 4 << 20
+
+// errTxtTooLarge 表示 TXT 记录解压后超过 maxDecodedTxt，按恶意/损坏丢弃。
+var errTxtTooLarge = fmt.Errorf("mdns: decoded txt record exceeds %d bytes", maxDecodedTxt)
+
 type (
 	mdnsRegistry struct {
 		sync.Mutex
@@ -134,11 +141,20 @@ func decode(record []string) (*mdnsTxt, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer zr.Close()
 
-	rbuf, err := io.ReadAll(zr)
-	if err != nil {
+	// 解压上限：mDNS 记录来自组播 UDP，是网段内任何人都能发的完全不可信输入。
+	// 不设上限则一个构造的 zlib 记录可膨胀到数 GB 把进程 OOM 掉。
+	// 多读 1 字节用于判定越界（CopyN 返回 EOF 才说明源已耗尽）。
+	var buf bytes.Buffer
+	n, err := io.CopyN(&buf, zr, maxDecodedTxt+1)
+	if err != nil && err != io.EOF {
 		return nil, err
 	}
+	if n > maxDecodedTxt {
+		return nil, errTxtTooLarge
+	}
+	rbuf := buf.Bytes()
 
 	var txt *mdnsTxt
 

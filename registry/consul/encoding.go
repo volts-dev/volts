@@ -23,6 +23,13 @@ func encode(buf []byte) string {
 	return hex.EncodeToString(b.Bytes())
 }
 
+// maxDecodedTag 是单个服务标签解压后的字节上限。
+//
+// 标签装的是服务元数据（endpoint 定义、node metadata），正常在 KB 量级。
+// 不设上限则一个被篡改/构造的 zlib 标签可膨胀到数 GB 把进程 OOM 掉 ——
+// 注册中心应答同样是不可信输入（TLS 校验只保证链路，不保证内容合理）。
+const maxDecodedTag = 4 << 20
+
 func decode(d string) []byte {
 	hr, err := hex.DecodeString(d)
 	if err != nil {
@@ -34,14 +41,20 @@ func decode(d string) []byte {
 	if err != nil {
 		return nil
 	}
+	defer zr.Close()
 
-	rbuf, err := io.ReadAll(zr)
-	if err != nil {
+	// 多读 1 字节用于判定越界：CopyN 返回 EOF 说明源已耗尽，
+	// 没有 EOF 就说明还有数据，即已超过上限。
+	var buf bytes.Buffer
+	n, err := io.CopyN(&buf, zr, maxDecodedTag+1)
+	if err != nil && err != io.EOF {
 		return nil
 	}
-	zr.Close()
+	if n > maxDecodedTag {
+		return nil
+	}
 
-	return rbuf
+	return buf.Bytes()
 }
 
 func encodeEndpoints(en []*registry.Endpoint) []string {
