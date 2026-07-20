@@ -2,6 +2,8 @@ package router
 
 import (
 	"bytes"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -77,7 +79,11 @@ func HttpReverseProxy(ctx *THttpContext) {
 	}
 
 	if isWebSocket(ctx) {
-		serveWebSocket(rp.Host, ctx.Response(), ctx.Request().Request)
+		// 必须把 scheme 一并传下去：后端是 https 时要走 TLS 拨号。
+		// 此前只传 rp.Host，对 HTTPS 后端会以明文 TCP 直连 —— 握手必然失败，
+		// 而 getService 明明已经解析出了 protocol。
+		err := serveWebSocket(rp.Scheme, rp.Host, ctx.Response(), ctx.Request().Request)
+		markNode(err)
 		return
 	}
 
@@ -170,14 +176,19 @@ func getService(ctx *THttpContext) (string, *registry.Node, error) {
 }
 
 // serveWebSocket used to serve a web socket proxied connection
-func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
-	req := new(http.Request)
-	*req = *r
-
+//
+// scheme 为 "https" 时以 TLS 拨号后端。返回的 error 用于上报节点健康度
+// （nil 表示已成功接管连接）。
+func serveWebSocket(scheme, host string, w http.ResponseWriter, r *http.Request) error {
 	if len(host) == 0 {
 		http.Error(w, "invalid host", 500)
-		return
+		return errors.New("websocket proxy: empty host")
 	}
+
+	// 深拷贝请求：此前是 `req := new(http.Request); *req = *r` 的浅拷贝，
+	// Header 仍与原请求共享同一个 map，下面的 Header.Set 会直接改写调用方
+	// 持有的请求头。Clone 会连 Header/Trailer/URL 一并复制。
+	req := r.Clone(r.Context())
 
 	// set x-forward-for
 	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -188,32 +199,61 @@ func serveWebSocket(host string, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// connect to the backend host
-	conn, err := net.Dial("tcp", host)
+	//
+	// scheme 是 getService 依据节点 metadata["protocol"] 得出的。此前这里
+	// 无条件明文 net.Dial —— 对 HTTPS 后端必然握手失败，等于 WebSocket
+	// 反代在 TLS 后端上从来不可用。
+	conn, err := dialBackend(scheme, host)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
-		return
+		return err
 	}
 
 	// hijack the connection
 	hj, ok := w.(http.Hijacker)
 	if !ok {
+		conn.Close() // 已建立的后端连接必须关掉，否则每次失败泄漏一条
 		http.Error(w, "failed to connect", 500)
-		return
+		return errors.New("websocket proxy: response writer is not a Hijacker")
 	}
 
 	nc, _, err := hj.Hijack()
 	if err != nil {
-		return
+		conn.Close()
+		return err
 	}
 
 	defer nc.Close()
 	defer conn.Close()
 
 	if err = req.Write(conn); err != nil {
-		return
+		return err
 	}
 
 	proxyBidir(conn, nc)
+	return nil
+}
+
+// dialBackend 按 scheme 拨号后端。https 走 TLS，其余明文。
+//
+// TLS 握手带超时：没有超时的话，一个不响应的后端会让这条 goroutine
+// 连同被劫持的客户端连接一起永久挂住。
+func dialBackend(scheme, host string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+
+	if scheme != "https" {
+		return dialer.Dial("tcp", host)
+	}
+
+	serverName := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		serverName = h
+	}
+
+	return tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
+		ServerName: serverName,
+		MinVersion: tls.VersionTLS12,
+	})
 }
 
 // proxyBidir copies bytes between a and b in both directions. It returns once
