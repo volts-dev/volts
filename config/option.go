@@ -3,8 +3,6 @@ package config
 import (
 	"log"
 	"path/filepath"
-
-	"github.com/fsnotify/fsnotify"
 )
 
 func WithPrefix(name string) Option {
@@ -30,6 +28,10 @@ func WithConfig(model IConfig) Option {
 }
 
 // 监听配置文件变动
+//
+// NOTE 此前直接用 core.fmt.v.WatchConfig()，绕过了 format 的读写锁：viper 会
+// 起一条自己的协程去调 v.ReadInConfig()，与 SetConfigFile / 各类 Get 并发
+// （-race 下 config 包必炸）。现改走 format.Watch，所有 viper 访问统一加锁。
 func WithWatcher() Option {
 	return func(cfg *Config) {
 		core := cfg.Core()
@@ -37,13 +39,13 @@ func WithWatcher() Option {
 		if core.FileName == "" {
 			core.FileName = CONFIG_FILE_NAME //filepath.Join(AppPath, CONFIG_FILE_NAME)
 		}
-		core.fmt.v.SetConfigFile(filepath.Join(AppPath, core.FileName))
-		core.fmt.v.WatchConfig()
-		core.fmt.v.OnConfigChange(func(e fsnotify.Event) {
-			if e.Op == fsnotify.Write {
-				cfg.Reload() // 重新加载配置
-			}
-		})
+
+		path := filepath.Join(AppPath, core.FileName)
+		core.fmt.SetConfigFile(path)
+
+		if err := core.fmt.Watch(path, cfg.Reload); err != nil {
+			log.Printf("config: 启动配置文件监听失败: %v", err)
+		}
 	}
 }
 

@@ -1,10 +1,12 @@
 package config
 
 import (
+	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	"github.com/volts-dev/utils"
@@ -14,6 +16,10 @@ type (
 	format struct {
 		sync.RWMutex
 		v *viper.Viper
+
+		// watchOnce / watchStop 管理配置文件监听协程。
+		watchOnce sync.Once
+		watchStop chan struct{}
 	}
 )
 
@@ -21,7 +27,84 @@ func newFormat() *format {
 	file := viper.New()
 	//file.SetConfigFile(CONFIG_FILE_NAME)
 	return &format{
-		v: file,
+		v:         file,
+		watchStop: make(chan struct{}),
+	}
+}
+
+// Watch 监听配置文件变动，变动时先重载再回调 onChange。
+//
+// 这里自建 fsnotify 监听，而不用 viper.WatchConfig —— 后者会启动一条**不受
+// 本结构体的锁保护**的协程去调 v.ReadInConfig()，与 SetConfigFile / 各类
+// Get 形成数据竞态（-race 下 config 包必炸，viper 的 Viper 对这组操作不是
+// 并发安全的）。本实现所有 viper 访问都走加锁的方法。
+//
+// 监听的是文件所在**目录**而非文件本身：多数编辑器保存时走"写临时文件 + 原子
+// rename"，直接监听文件会在第一次保存后就丢掉 inode，再不触发。
+//
+// 多次调用只会启动一条协程。
+func (self *format) Watch(path string, onChange func()) error {
+	var err error
+
+	self.watchOnce.Do(func() {
+		var watcher *fsnotify.Watcher
+		watcher, err = fsnotify.NewWatcher()
+		if err != nil {
+			return
+		}
+
+		dir := filepath.Dir(path)
+		if err = watcher.Add(dir); err != nil {
+			watcher.Close()
+			return
+		}
+
+		target := filepath.Clean(path)
+
+		go func() {
+			defer watcher.Close()
+			for {
+				select {
+				case <-self.watchStop:
+					return
+
+				case ev, ok := <-watcher.Events:
+					if !ok {
+						return
+					}
+					if filepath.Clean(ev.Name) != target {
+						continue
+					}
+					if !ev.Has(fsnotify.Write) && !ev.Has(fsnotify.Create) {
+						continue
+					}
+					// 走加锁的 ReadInConfig，与其他访问互斥
+					if rerr := self.ReadInConfig(); rerr != nil {
+						continue
+					}
+					if onChange != nil {
+						onChange()
+					}
+
+				case _, ok := <-watcher.Errors:
+					if !ok {
+						return
+					}
+				}
+			}
+		}()
+	})
+
+	return err
+}
+
+// StopWatch 停止配置文件监听。可安全多次调用。
+func (self *format) StopWatch() {
+	select {
+	case <-self.watchStop:
+		// 已关闭
+	default:
+		close(self.watchStop)
 	}
 }
 

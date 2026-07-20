@@ -110,38 +110,54 @@ func TestEncodingEndpoints(t *testing.T) {
 	}
 }
 
+// 版本标签编解码。
+//
+// NOTE 这里**不断言精确的编码字节**。原测试把 zlib 输出写死成
+// "v-789c32d433d03300040000ffff02ce00ee"，而 Go 的 flate 实现对极短输入改用了
+// stored block（实际输出变成 "v-789c000500faff312e302e30030002ce00ee"），
+// 于是测试随 Go 版本升级而失败 —— 但编码本身并没有坏，往返完全正确。
+//
+// 真正需要钉死的性质有两条，下面分别断言：
+//  1. 往返一致：encode→decode 拿回原值
+//  2. 向后兼容：**旧版本写进 Consul 的标签必须仍能解出来**。这条才是关键 ——
+//     标签持久化在注册中心里，滚动升级期间新旧版本会同时读到对方写的标签。
 func TestEncodingVersion(t *testing.T) {
 	testData := []struct {
 		decoded string
-		encoded string
+		// legacyEncoded 是历史版本产生的编码，用于验证向后兼容
+		legacyEncoded string
 	}{
 		{"1.0.0", "v-789c32d433d03300040000ffff02ce00ee"},
 		{"latest", "v-789cca492c492d2e01040000ffff08cc028e"},
 	}
 
 	for _, data := range testData {
+		// 1) 往返一致
 		e := encodeVersion(data.decoded)
-
-		if e[0] != data.encoded {
-			t.Fatalf("Expected %s got %s", data.encoded, e)
-		}
 
 		d, ok := decodeVersion(e)
 		if !ok {
-			t.Fatalf("Unexpected %t for %s", ok, data.encoded)
+			t.Fatalf("decodeVersion(%v) 返回 ok=false", e)
 		}
-
 		if d != data.decoded {
-			t.Fatalf("Expected %s got %s", data.decoded, d)
+			t.Fatalf("往返后 = %q, want %q", d, data.decoded)
 		}
 
-		d, ok = decodeVersion([]string{data.encoded})
+		// 2) 旧编码仍可解出
+		d, ok = decodeVersion([]string{data.legacyEncoded})
 		if !ok {
-			t.Fatalf("Unexpected %t for %s", ok, data.encoded)
+			t.Fatalf("旧编码 %s 解不出来了 —— 滚动升级时会读不懂存量标签", data.legacyEncoded)
 		}
-
 		if d != data.decoded {
-			t.Fatalf("Expected %s got %s", data.decoded, d)
+			t.Fatalf("旧编码解出 %q, want %q", d, data.decoded)
 		}
+	}
+}
+
+// 明文的更老格式（v=1.0.0）也必须继续兼容。
+func TestDecodeVersionLegacyPlain(t *testing.T) {
+	d, ok := decodeVersion([]string{"v=1.0.0"})
+	if !ok || d != "1.0.0" {
+		t.Fatalf("明文旧格式解析失败: d=%q ok=%v", d, ok)
 	}
 }
