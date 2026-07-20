@@ -3,7 +3,6 @@ package etcd
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	hash "github.com/mitchellh/hashstructure"
+	vtls "github.com/volts-dev/volts/internal/tls"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -68,14 +68,11 @@ func configure(e *etcdRegistry) error {
 	}
 
 	if e.config.Secure || e.config.TlsConfig != nil {
-		tlsConfig := e.config.TlsConfig
-		if tlsConfig == nil {
-			tlsConfig = &tls.Config{
-				InsecureSkipVerify: true,
-			}
-		}
-
-		config.TLS = tlsConfig
+		// Secure(true) 但未给 TlsConfig 时，使用「开启证书校验 + TLS>=1.2」的安全
+		// 默认。此前这里默认 InsecureSkipVerify:true —— 中间人可篡改服务发现应答，
+		// 把整个集群的 RPC 流量导向攻击者节点。要跳过校验必须显式传入
+		// TlsConfig(&tls.Config{InsecureSkipVerify: true})。
+		config.TLS = vtls.Secure(e.config.TlsConfig)
 	}
 
 	if e.config.Context != nil {

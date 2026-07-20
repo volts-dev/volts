@@ -14,6 +14,7 @@ import (
 	consul "github.com/hashicorp/consul/api"
 	hash "github.com/mitchellh/hashstructure"
 	mnet "github.com/volts-dev/volts/internal/net"
+	vtls "github.com/volts-dev/volts/internal/tls"
 	"github.com/volts-dev/volts/registry"
 )
 
@@ -70,12 +71,14 @@ func getDeregisterTTL(t time.Duration) time.Duration {
 	return deregTTL
 }
 
+// newTransport 构造访问 Consul 的 HTTP transport。
+//
+// config 为 nil 时使用「开启证书校验 + TLS>=1.2」的安全默认。此前默认
+// InsecureSkipVerify:true —— 中间人可篡改服务发现应答，把整个集群的 RPC 流量
+// 导向攻击者节点，危害远大于劫持单条业务连接。要跳过校验必须显式传入
+// &tls.Config{InsecureSkipVerify: true}。
 func newTransport(config *tls.Config) *http.Transport {
-	if config == nil {
-		config = &tls.Config{
-			InsecureSkipVerify: true,
-		}
-	}
+	config = vtls.Secure(config)
 
 	t := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,

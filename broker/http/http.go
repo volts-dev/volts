@@ -21,6 +21,7 @@ import (
 	maddr "github.com/volts-dev/volts/internal/addr"
 	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	vnet "github.com/volts-dev/volts/internal/net"
+	vtls "github.com/volts-dev/volts/internal/tls"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/router"
@@ -67,12 +68,14 @@ func init() {
 	broker.Register("http", New)
 }
 
+// newTransport 构造 broker 的出站 HTTP transport。
+//
+// config 为 nil 时使用「开启证书校验 + TLS>=1.2」的安全默认，与 transport/http.go
+// 的数据面策略保持一致。此前这里默认 InsecureSkipVerify:true —— 中间人可劫持
+// broker 的 Publish 目标并伪造/篡改消息，且调用方无从察觉。要跳过校验必须显式传入
+// &tls.Config{InsecureSkipVerify: true}。
 func newTransport(config *tls.Config) *http.Transport {
-	if config == nil {
-		config = &tls.Config{
-			InsecureSkipVerify: true,
-		}
-	}
+	config = vtls.Secure(config)
 
 	dialTLS := func(network string, addr string) (net.Conn, error) {
 		return tls.Dial(network, addr, config)
