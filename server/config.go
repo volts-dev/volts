@@ -126,6 +126,12 @@ func newConfig(opts ...Option) *Config {
 		cfg.Init(WithRouter(vrouter.New()))
 	}
 
+	// Debug 的副作用（transport/router/registry 的调试开关）必须等到上面三者
+	// 全部就绪后才能落地：cfg.Init(opts...) 在函数开头执行，彼时 Transport /
+	// Router 都还是 nil，Debug() option 只登记 cfg.Debug 与 Address。此处补一次
+	// 无 opt 的 Init，让 applyDebug 在组件齐备的情况下重新 apply（幂等）。
+	cfg.Init()
+
 	return cfg
 }
 
@@ -145,25 +151,44 @@ func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		opt(self)
 	}
-	/*
 
-	 */
-	if self.Debug {
+	self.applyDebug()
+}
+
+// applyDebug 把 Debug 开关下发给各子组件。
+//
+// 每个组件都必须判空：newConfig 的调用顺序是 cfg.Init(opts...) 先跑、Transport /
+// Router / Registry 后建，因此 Debug() option 生效时它们全是 nil。此前这里裸调
+// self.Transport.Init(...) —— server.New(server.Debug()) 会直接 SIGSEGV。
+// 组件建齐后 newConfig 会再调一次 Init()，届时本函数把开关补上；重复调用幂等。
+func (self *Config) applyDebug() {
+	if !self.Debug {
+		return
+	}
+
+	if self.Transport != nil {
 		self.Transport.Init(transport.Debug())
+	}
+	if self.Router != nil {
 		self.Router.Config().Init(vrouter.Debug())
-		if self.Registry != nil {
-			self.Registry.Config().Init(registry.Debug())
-		}
+		self.Router.Config().RequestPrinter = true
+		self.Router.Config().RouterTreePrinter = true
+	}
+	if self.Registry != nil {
+		self.Registry.Config().Init(registry.Debug())
 	}
 }
 
 // under debug mode the port will keep at 35999
+//
+// 只登记标志与端口，不碰子组件 —— 本 option 可能在 Transport / Router 建立之前
+// 被 apply（见 newConfig）。真正的下发在 Config.applyDebug。
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
-		cfg.Router.Config().RequestPrinter = true
-		cfg.Router.Config().RouterTreePrinter = true
-		if _, ok := cfg.Transport.(*transport.HttpTransport); ok {
+		// Transport 为 nil 时走默认分支：newConfig 随后装配的是
+		// transport.Default()，即 HttpTransport，故按 HTTP 端口取值。
+		if _, ok := cfg.Transport.(*transport.HttpTransport); ok || cfg.Transport == nil {
 			cfg.Address = ":35999"
 		} else {
 			cfg.Address = ":45999"
