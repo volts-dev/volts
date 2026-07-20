@@ -74,6 +74,13 @@ type TCors struct {
 
 func (self TCors) Name() string { return "cors" }
 
+// Transports 声明 CORS 只对 HTTP 有意义 —— 它读写的 Origin / Vary /
+// Access-Control-* 全是 HTTP 头，RPC 侧没有对应语义。
+// 声明后本中间件在 RPC handler 的链上装配期即被筛掉，请求路径零开销。
+func (self TCors) Transports() []router.TransportType {
+	return []router.TransportType{router.HttpHandler}
+}
+
 func (self TCors) Handler(ctx router.IContext) {
 	if self.handle == nil {
 		// 未经构造器初始化（例如控制器内嵌但忘了 RegisterMiddleware），

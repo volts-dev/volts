@@ -22,6 +22,19 @@ type (
 		Reset()
 	}
 
+	// 中间件传输类型声明接口（可选）
+	//
+	// 本框架同时承载 HTTP 与 RPC，两者的 handler 链是各自独立装配的
+	// （handler id 即含 TransportType）。IMiddleware.Handler 的签名收 IContext，
+	// 天然协议无关，因此**不实现本接口的中间件默认两条链都装**。
+	//
+	// 只对单侧有意义的中间件（CORS 只碰 Header/Cookie，仅 HTTP 有语义）实现本接口
+	// 声明适用范围，装配期即被筛掉 —— 不适用的那一侧 funcs 里根本不存在该条目，
+	// 请求路径上零开销，而不是运行时再判断一次。
+	IMiddlewareTransport interface {
+		Transports() []TransportType
+	}
+
 	TMiddlewareManager struct {
 		middlewares sync.Map
 		names       []string     //

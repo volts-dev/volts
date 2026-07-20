@@ -43,11 +43,29 @@ const (
 	ProxyHandler
 	SubscriberHandler
 
+	// NOTE iota 在本 const 块内连续递增，未被重置：HandlerType 占了 0~2，
+	// 因此 HttpHandler 实际是 3、RpcHandler 是 4，依此类推。两者是不同类型，
+	// 不会互相误用，但**不能按下标去索引字符串数组**（见下方 String 实现）。
 	HttpHandler TransportType = iota
 	RpcHandler
 	SubscribeHandler
 	ReflectHandler // TODO废弃
 )
+
+func (self TransportType) String() string {
+	switch self {
+	case HttpHandler:
+		return "HttpHandler"
+	case RpcHandler:
+		return "RpcHandler"
+	case SubscribeHandler:
+		return "SubscribeHandler"
+	case ReflectHandler:
+		return "ReflectHandler"
+	default:
+		return "UnknownTransport"
+	}
+}
 
 type (
 	// 让控制器提供基本配置能力
@@ -478,6 +496,14 @@ func (self *handler) init(router *TRouter) {
 		return
 	}
 
+	// 全局链最先执行：插到 funcs 最前面，排在路由级 mids、控制器内嵌中间件、
+	// 主控制器之前。放在 init（而非注册期）有个好处 —— init 是首个请求才触发的
+	// 懒初始化，所以 Use() 写在 Url() 前后都生效，不存在"Use 必须先于路由注册"
+	// 这类顺序陷阱。
+	if router != nil {
+		self.prependMiddlewares(router.Middlewares())
+	}
+
 	if self.ctrlName != "" {
 		// 新建控制器
 		self.ctrlValue = reflect.New(self.ctrlType)
@@ -652,17 +678,56 @@ func (self *handler) init(router *TRouter) {
 
 initMiddlewares:
 	/* 初始化中间件 */
-	for _, handle := range self.funcs {
-		if handle.Middleware == nil && handle.MiddlewareCreator != nil {
-			middleware := handle.MiddlewareCreator(router)
-			handle.Middleware = middleware
-			handle.HttpFunc = WrapHttp(middleware.Handler)
-			handle.RpcFunc = WrapRpc(middleware.Handler)
+	//
+	// MiddlewareCreator 到这一步才能实例化（需要 router），因此其传输适配性也在
+	// 这里判定：中间件实现 IMiddlewareTransport 声明了自己只适用于某一侧时，
+	// 从本 handler 的链上原地摘除 —— 不适用的一侧运行期不会看到该条目。
+	// 不实现该接口的默认两侧都装（IMiddleware.Handler 收 IContext，天然协议无关）。
+	if len(self.funcs) > 0 {
+		kept := self.funcs[:0] // 原地过滤，不额外分配
+		for _, handle := range self.funcs {
+			if handle.Middleware == nil && handle.MiddlewareCreator != nil {
+				middleware := handle.MiddlewareCreator(router)
+				if !middlewareSupports(middleware, self.TransportType) {
+					log.Dbgf("middleware %T 未声明支持 %v，已从 handler %s 的链上跳过",
+						middleware, self.TransportType, self.Name)
+					continue
+				}
+				handle.Middleware = middleware
+				handle.HttpFunc = WrapHttp(middleware.Handler)
+				handle.RpcFunc = WrapRpc(middleware.Handler)
+			}
+			kept = append(kept, handle)
 		}
+		self.funcs = kept
 	}
 
 	self.reset()
 	self.inited = true
+}
+
+// middlewareSupports 判定中间件是否适用于给定传输类型。
+// 未实现 IMiddlewareTransport 视为通用（两侧都装）。
+func middlewareSupports(mw IMiddleware, tt TransportType) bool {
+	decl, ok := mw.(IMiddlewareTransport)
+	if !ok {
+		return true
+	}
+
+	supported := decl.Transports()
+	if len(supported) == 0 {
+		// 声明了接口却返回空集视为配置错误。按"通用"处理而非全部摘除 ——
+		// 静默丢掉一个用户明确装上的中间件，比多装一次危险得多。
+		log.Warnf("middleware %T 的 Transports() 返回空集，按通用中间件处理", mw)
+		return true
+	}
+
+	for _, t := range supported {
+		if t == tt {
+			return true
+		}
+	}
+	return false
 }
 
 func (self *handler) clone() *handler {
@@ -703,63 +768,65 @@ func (self *handler) clone() *handler {
 }
 
 // 统一处理 HTTP 和 RPC 的 handler 调用逻辑
-func (self *handler) invokeHandlers(ctx IContext, tansType TransportType) error {
+//
+// TransportType 与 ctx 的具体类型在整个 handler 的生命周期内都是常量，因此
+// switch 与类型断言在**进循环前**各做一次即可 —— 此前放在循环体内，一条挂了
+// N 个中间件的链就要重复 N 次断言。
+func (self *handler) invokeHandlers(ctx IContext) error {
+	switch self.TransportType {
+	case HttpHandler:
+		c, ok := ctx.(*THttpContext)
+		if !ok {
+			return errors.New("invalid context type for HttpHandler")
+		}
+		self.runChain(ctx, func(hd *handle) { hd.HttpFunc(c) })
+
+	case RpcHandler:
+		c, ok := ctx.(*TRpcContext)
+		if !ok {
+			return errors.New("invalid context type for RpcHandler")
+		}
+		self.runChain(ctx, func(hd *handle) { hd.RpcFunc(c) })
+
+	case ReflectHandler:
+		return errors.New("ReflectHandler not implemented")
+
+	default:
+		return fmt.Errorf("unknown transport type %v", self.TransportType)
+	}
+
+	return nil
+}
+
+// runChain 按 self.pos 推进执行 funcs，call 负责以定型后的 context 调用函数式
+// 条目；非函数式条目（IMiddleware）本就收 IContext，无需定型。
+//
+// pos 是 handler 上的原子量而非局部变量：中间件调用 ctx.Next() 会重入
+// invokeHandlers，靠共享的 pos 接着往下走，不能改成局部索引。
+func (self *handler) runChain(ctx IContext, call func(*handle)) {
 	ln := len(self.funcs)
 	for {
 		pos := int(self.pos.Load())
 		if pos >= ln || ctx.IsDone() {
-			break
+			return
 		}
 
 		hd := self.funcs[pos]
 		if hd.IsFunc {
-			switch self.TransportType {
-			case HttpHandler:
-				c, ok := ctx.(*THttpContext)
-				if !ok {
-					return errors.New("invalid context type for HttpHandler")
-				}
-				hd.HttpFunc(c)
-			case RpcHandler:
-				c, ok := ctx.(*TRpcContext)
-				if !ok {
-					return errors.New("invalid context type for RpcHandler")
-				}
-				hd.RpcFunc(c)
-			case ReflectHandler:
-				return errors.New("ReflectHandler not implemented") // 修复格式化参数缺失
-				/*
-					for self.pos < len(self.funcs) {
-						if ctx.IsDone() {
-							break
-						}
-						v := self.funcs[self.pos]
-						rcv := self.FuncsReceiver[self.pos]
-						if rcv.IsValid() {
-							v.Call([]reflect.Value{rcv, ctx.ValueModel()})
-						} else {
-							v.Call([]reflect.Value{ctx.ValueModel()})
-						}
-
-						self.pos++
-					}
-				*/
-			}
+			call(hd)
 		} else {
 			hd.Middleware.Handler(ctx)
 		}
 
 		self.pos.Inc()
 	}
-
-	return nil
 }
 
 func (self *handler) Invoke(ctx IContext) {
 	ctx.setHandler(self)
 	self.pos.Inc()
 
-	if err := self.invokeHandlers(ctx, self.TransportType); err != nil {
+	if err := self.invokeHandlers(ctx); err != nil {
 		// 不能 panic：invokeHandlers 在 context 类型错配等运行时场景会返回错误，
 		// 让 panic 逃出去会拉崩整个 server goroutine。改为记录日志、丢弃本次请求。
 		log.Errf("handler %s invoke error: %v", self.Name, err)
@@ -777,25 +844,73 @@ func (self *handler) InvokeSubscriber(ctx *TSubscriberContext) error {
 }
 
 // addMiddlewares 把 middlewares 追加到 self.funcs（按 self.TransportType 选择 Http/Rpc 包装）。
+//
+// 本框架同时承载 HTTP 与 RPC，两者的 handler 是各自独立的对象（handler id 即含
+// TransportType），因此中间件必须在**装配期**按传输类型筛掉不适用的，让不适用的
+// 一侧 funcs 里根本不存在该条目 —— 请求路径上零开销。
+//
+// 参数类型本身就携带了传输意图：func(*THttpContext) 只可能对 HTTP 有意义。
+// 此前不做筛选，把 HTTP 中间件挂到 RPC 路由上时注册期毫无提示，运行期
+// invokeHandlers 走 RPC 分支去调 nil 的 RpcFunc —— 每个请求都 nil panic，
+// 默认 Recover 开着所以表现为"这条 RPC 路由恒定 500"，日志里看不出是中间件挂错边。
+//
+// 返回 func(IRouter) IMiddleware 的中间件此刻还没实例化（需要 router），其传输
+// 适配性推迟到 init 的 initMiddlewares 段按 IMiddlewareTransport 判定。
 func (self *handler) addMiddlewares(middlewares []any) {
+	self.funcs = append(self.funcs, self.buildMiddlewares(middlewares)...)
+}
+
+// prependMiddlewares 把 middlewares 插到 self.funcs 最前面。
+// 供全局链使用 —— 全局中间件必须早于路由级、控制器内嵌的中间件执行。
+func (self *handler) prependMiddlewares(middlewares []any) {
+	built := self.buildMiddlewares(middlewares)
+	if len(built) == 0 {
+		return
+	}
+	self.funcs = append(built, self.funcs...)
+}
+
+// buildMiddlewares 把中间件声明按本 handler 的传输类型编译成 handle 列表，
+// 不适用的直接筛掉（见 addMiddlewares 的说明）。
+func (self *handler) buildMiddlewares(middlewares []any) []*handle {
+	if len(middlewares) == 0 {
+		return nil
+	}
+
+	isHttp := self.TransportType == HttpHandler
+	built := make([]*handle, 0, len(middlewares))
+
 	for _, mid := range middlewares {
 		switch v := mid.(type) {
 		case func(IContext):
-			if self.TransportType == HttpHandler {
-				self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
+			// 协议无关，两侧都装，按本 handler 的传输类型包装。
+			if isHttp {
+				built = append(built, &handle{IsFunc: true, HttpFunc: WrapHttp(v)})
 			} else {
-				self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
+				built = append(built, &handle{IsFunc: true, RpcFunc: WrapRpc(v)})
 			}
 		case func(*THttpContext):
-			self.funcs = append(self.funcs, &handle{IsFunc: true, HttpFunc: v})
+			if !isHttp {
+				log.Dbgf("middleware %s 是 HTTP 专属，已从 RPC handler %s 的链上跳过",
+					GetFuncName(v, filepath.Separator), self.Name)
+				continue
+			}
+			built = append(built, &handle{IsFunc: true, HttpFunc: v})
 		case func(*TRpcContext):
-			self.funcs = append(self.funcs, &handle{IsFunc: true, RpcFunc: v})
+			if isHttp {
+				log.Dbgf("middleware %s 是 RPC 专属，已从 HTTP handler %s 的链上跳过",
+					GetFuncName(v, filepath.Separator), self.Name)
+				continue
+			}
+			built = append(built, &handle{IsFunc: true, RpcFunc: v})
 		case func(IRouter) IMiddleware:
-			self.funcs = append(self.funcs, &handle{IsFunc: true, MiddlewareCreator: v})
+			built = append(built, &handle{IsFunc: true, MiddlewareCreator: v})
 		default:
 			log.Errf("unknow middleware %v", v)
 		}
 	}
+
+	return built
 }
 
 // 初始化

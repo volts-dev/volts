@@ -39,6 +39,10 @@ type (
 		Endpoints() (services map[*TGroup][]*registry.Endpoint)
 		// RegisterMiddleware adds global middlewares to the router.
 		RegisterMiddleware(middlewares ...func(IRouter) IMiddleware)
+		// Use 把中间件挂到全局链，对所有路由生效。
+		Use(middlewares ...any)
+		// Middlewares 返回全局链的快照。
+		Middlewares() []any
 		// RegisterGroup combines one or more groups into the router.
 		RegisterGroup(groups ...IGroup)
 		// PrintRoutes outputs the current routing tree to the logger.
@@ -62,6 +66,10 @@ type (
 		httpCtxPool sync.Map
 		// rpcCtxPool stores sync.Pools for TRpcContext per route ID.
 		rpcCtxPool sync.Map
+		// globalMiddlewares 是 Use() 挂上的全局链，在 handler.init 时前置到每条
+		// 路由的 funcs 最前面。存原始声明而非编译结果 —— 编译要按 handler 的
+		// TransportType 筛选，只能等到 init 时才知道。
+		globalMiddlewares []any
 		// exit channel signals background tasks to stop.
 		exit chan bool
 		// closeOnce guarantees the exit channel is closed exactly once (Close is idempotent).
@@ -208,6 +216,50 @@ func (self *TRouter) RegisterMiddleware(middlewares ...func(IRouter) IMiddleware
 			self.middleware.Add(name, creator)
 		}
 	}
+}
+
+// Use 把中间件挂到全局链，对**所有**路由生效 —— 包括之后新增的路由。
+//
+// 这是与 RegisterMiddleware 的关键分工：RegisterMiddleware 只把构造器登记进
+// 名字表，真正生效仍要靠控制器内嵌，漏内嵌就静默没有；Use 则是默认覆盖，
+// 适合 CORS / 鉴权 / 限流 / 追踪这类"漏一条路由就是事故"的横切关注点。
+//
+// 单入口即可同时服务 HTTP 与 RPC —— 适配性由中间件自身的类型携带，
+// 在 handler.init 按 TransportType 筛选，不适用的一侧 funcs 里根本不存在
+// 该条目，请求路径零开销：
+//
+//	Use(func(*THttpContext))          // 仅 HTTP，RPC 链自动跳过
+//	Use(func(*TRpcContext))           // 仅 RPC，HTTP 链自动跳过
+//	Use(func(IContext))               // 协议无关，两侧都装
+//	Use(func(IRouter) IMiddleware)    // 由中间件实现 IMiddlewareTransport 自行声明，
+//	                                  // 未声明则两侧都装
+//
+// 执行顺序：全局链 → 路由级 mids → 控制器内嵌中间件 → 主控制器。
+//
+// NOTE 生效时机：中间件在 handler 首次初始化（首个请求）时装配，因此 Use 与
+// Url 的先后无所谓；但**服务开始处理请求后再 Use 不会影响已初始化的 handler**。
+// 请在启动前完成全部 Use 调用。
+func (self *TRouter) Use(middlewares ...any) {
+	if len(middlewares) == 0 {
+		return
+	}
+
+	self.Lock()
+	defer self.Unlock()
+	self.globalMiddlewares = append(self.globalMiddlewares, middlewares...)
+}
+
+// Middlewares 返回全局链的快照。
+// 返回副本而非底层切片 —— 调用方（handler.init）会在自己的锁里持有它，
+// 共享底层数组会让后续 Use 的 append 与之竞争。
+func (self *TRouter) Middlewares() []any {
+	self.RLock()
+	defer self.RUnlock()
+
+	if len(self.globalMiddlewares) == 0 {
+		return nil
+	}
+	return append([]any(nil), self.globalMiddlewares...)
 }
 
 // register module
