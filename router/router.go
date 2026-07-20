@@ -398,7 +398,11 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 	//res.SetMessageType(transport.MT_RESPONSE)
 	//res.SetSerializeType(st)
 	// 获取支持的序列模式
-	coder := codec.IdentifyCodec(st)
+	//
+	// 必须走 IdentifyWireCodec：st 是**对端在协议头里填的一个字节**，任何能连上
+	// 端口的人都能借此指定服务端用哪个解码器去解析他发来的数据。默认受限的
+	// codec（如 Gob，解不可信输入有内存放大风险）在此被拒。
+	coder := codec.IdentifyWireCodec(st)
 	if coder == nil {
 		w.WriteHeader(transport.StatusForbidden)
 		w.Write([]byte{})

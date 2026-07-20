@@ -29,6 +29,11 @@ func NewHttpRequest(req *http.Request) *THttpRequest {
 	return r
 }
 
+// Codec 按请求的 Content-Type 选取解码器。
+//
+// Content-Type 完全由对端指定，等价于 RPC 侧协议头里的序列化字节 —— 注册名
+// 也在匹配范围内（"Content-Type: Gob" 能命中 Gob codec）。因此这里必须走
+// IdentifyWireCodec，让默认受限的 codec 无法被对端选中。
 func (self *THttpRequest) Codec() codec.ICodec {
 	if self.codec == nil {
 		ct := self.Request.Header.Get("Content-Type")
@@ -41,7 +46,7 @@ func (self *THttpRequest) Codec() codec.ICodec {
 		default:
 			st = codec.Use(ct)
 		}
-		self.codec = codec.IdentifyCodec(st)
+		self.codec = codec.IdentifyWireCodec(st)
 	}
 
 	return self.codec
