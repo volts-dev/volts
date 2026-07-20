@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -164,4 +165,117 @@ func TestLoggerAsyncDelivers(t *testing.T) {
 	}
 
 	t.Fatalf("3s 内未投递异步日志，实际收到: %v", w.snapshot())
+}
+
+// ------------------------------------------------------------
+// 并发安全
+// ------------------------------------------------------------
+
+// 反复调用 Async 只能有一条 listen goroutine。
+//
+// 此前每次 Async 都无条件 `go listen()`（注释写着"避免多次运行 Go 程"却没有
+// 任何保护），Async(false) 再 Async(true) 就多一条常驻协程，且多个 listener
+// 会瓜分同一个通道的消息。
+func TestAsyncStartsSingleListener(t *testing.T) {
+	l, _ := newCapturing(t, "once")
+
+	before := runtime.NumGoroutine()
+	for i := 0; i < 10; i++ {
+		l.Async(true)
+		l.Async(false)
+	}
+	l.Async(true)
+	t.Cleanup(l.Close)
+
+	// 给协程调度留出窗口，避免统计到尚未退出的临时协程
+	time.Sleep(50 * time.Millisecond)
+
+	if delta := runtime.NumGoroutine() - before; delta > 1 {
+		t.Fatalf("21 次 Async 调用后多出 %d 条 goroutine，期望至多 1 条", delta)
+	}
+}
+
+// 异步通道满时必须丢弃而不是阻塞调用方。
+//
+// 日志是可丢的，请求不是 —— 阻塞发送会让写盘慢/writer 卡住直接反向拖垮业务。
+func TestAsyncDropsInsteadOfBlocking(t *testing.T) {
+	l, _ := newCapturing(t, "drop")
+	l.SetLevel(LevelDebug)
+
+	// 打开异步但**不启动** listener，通道无人消费，必然填满
+	l.manager.asynchronous.Store(true)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < cap(l.manager.msg)+200; i++ {
+			l.Infof("flood %d", i)
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("写日志被阻塞了 —— 通道满时必须丢弃而非等待")
+	}
+
+	if l.Dropped() == 0 {
+		t.Fatal("通道已填满，Dropped() 应大于 0")
+	}
+}
+
+// 并发读写等级/开关/writer 不得触发竞态或 map 并发读写致命错误。
+// 需配合 -race 运行才有意义。
+func TestConcurrentLoggingAndReconfigure(t *testing.T) {
+	l, w := newCapturing(t, "race")
+	l.SetLevel(LevelDebug)
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				l.Infof("msg %d-%d", n, j)
+			}
+		}(i)
+	}
+
+	// 一边写日志一边改配置：等级、调用深度、level writer
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 0; j < 200; j++ {
+			l.SetLevel(LevelDebug)
+			l.SetLevel(LevelInfo)
+			l.EnableFuncCallDepth(j%2 == 0)
+			l.SetLogFuncCallDepth(2)
+			l.SetLevelWriter(LevelWarn, w)
+		}
+	}()
+
+	wg.Wait()
+}
+
+// Close 前必须把通道里的存量日志写出 —— 崩溃现场的最后几行往往最关键。
+func TestCloseFlushesPending(t *testing.T) {
+	l, w := newCapturing(t, "flush")
+	l.SetLevel(LevelDebug)
+
+	// 异步但不启动 listener，消息全部堆在通道里
+	l.manager.asynchronous.Store(true)
+	for i := 0; i < 5; i++ {
+		l.Infof("pending-%d", i)
+	}
+
+	if len(w.snapshot()) != 0 {
+		t.Fatal("尚未 flush，不应有输出")
+	}
+
+	l.Close()
+
+	if got := len(w.snapshot()); got != 5 {
+		t.Fatalf("Close 后写出 %d 条，want 5", got)
+	}
 }

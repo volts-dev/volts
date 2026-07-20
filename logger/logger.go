@@ -60,13 +60,15 @@ func New(Prefix string, opts ...Option) *TLogger {
 	log := &TLogger{
 		Config: config,
 		manager: &TWriterManager{
-			writer:              make(map[string]IWriter),
-			level_writer:        make(map[Level]IWriter),
-			config:              config,
-			msg:                 make(chan *TWriterMsg, 10000), //10000 means the number of messages in chan.
-			loggerFuncCallDepth: 2,
+			writer:       make(map[string]IWriter),
+			level_writer: make(map[Level]IWriter),
+			config:       config,
+			msg:          make(chan *TWriterMsg, 10000), //10000 means the number of messages in chan.
+			stop:         make(chan struct{}),
 		},
 	}
+	log.manager.loggerFuncCallDepth.Store(2)
+	log.manager.level.Store(int32(config.Level))
 
 	log.manager.writer["Console"] = NewConsoleWriter()
 	log.manager.writerName = "Console"
@@ -234,7 +236,11 @@ func (self *TLogger) SetWriter(name string, config string) error {
 // 设置不同等级使用不同警报方式
 func (self *TLogger) SetLevelWriter(level Level, writer IWriter) {
 	if level > -1 && writer != nil {
+		// 必须加锁：dispatch 会并发读这个 map，裸写会触发运行时的
+		// "concurrent map read and map write" 致命错误。
+		self.manager.lock.Lock()
 		self.manager.level_writer[level] = writer
+		self.manager.lock.Unlock()
 	}
 }
 
@@ -252,27 +258,65 @@ func (self *TLogger) RemoveWriter(name string) error {
 }
 
 func (self *TLogger) GetLevel() Level {
-	return self.manager.config.Level
+	return Level(self.manager.level.Load())
 }
 
 func (self *TLogger) SetLevel(level Level) {
+	// 同时更新配置对象与热路径读取的原子镜像。
+	self.manager.lock.Lock()
 	self.manager.config.Level = level
+	self.manager.lock.Unlock()
+
+	self.manager.level.Store(int32(level))
 }
 
 // Async set the log to asynchronous and start the goroutine
+//
+// 可反复调用：listen goroutine 由 sync.Once 保证只启动一份。此前每次调用都
+// 无条件 `go self.manager.listen()`（注释写着"避免多次运行 Go 程"却没有任何
+// 保护），Async(false) 再 Async(true) 就会多出一条常驻协程，且多个 listener
+// 会瓜分同一个通道的消息。
+//
+// Async(false) 只是切回同步写，已启动的 listener 会继续待命 —— 它不消耗资源，
+// 且再次 Async(true) 时无需重建。真正停止请用 Close。
 func (self *TLogger) Async(aSwitch ...bool) *TLogger {
+	on := true
 	if len(aSwitch) > 0 {
-		self.manager.asynchronous = aSwitch[0]
-	} else {
-		self.manager.asynchronous = true
+		on = aSwitch[0]
 	}
+	self.manager.asynchronous.Store(on)
 
-	// 避免多次运行 Go 程
-	if self.manager.asynchronous {
-		go self.manager.listen()
+	if on {
+		self.manager.listenOnce.Do(func() {
+			go self.manager.listen()
+		})
 	}
 
 	return self
+}
+
+// Close 切回同步写并停止 listen goroutine。可安全多次调用。
+//
+// 停止前把通道里的存量消息排空写出，避免进程退出时丢掉最后一批日志 ——
+// 崩溃现场的最后几行往往正是最关键的。
+func (self *TLogger) Close() {
+	self.manager.asynchronous.Store(false)
+
+	for {
+		select {
+		case wm := <-self.manager.msg:
+			self.manager.dispatch(wm)
+		default:
+			self.manager.stopOnce.Do(func() { close(self.manager.stop) })
+			return
+		}
+	}
+}
+
+// Dropped 返回因异步通道满而被丢弃的日志条数。
+// 持续增长说明消费端跟不上产出，应检查 writer 的写入耗时或调大通道。
+func (self *TLogger) Dropped() uint64 {
+	return self.manager.dropped.Load()
 }
 
 // 断言如果结果和条件不一致就错误
@@ -284,14 +328,12 @@ func (self *TLogger) Assert(condition bool, format string, args ...interface{}) 
 
 // enable log funcCallDepth
 func (self *TLogger) EnableFuncCallDepth(b bool) {
-	self.manager.lock.Lock()
-	defer self.manager.lock.Unlock()
-	self.manager.enableFuncCallDepth = b
+	self.manager.enableFuncCallDepth.Store(b)
 }
 
 // set log funcCallDepth
 func (self *TLogger) SetLogFuncCallDepth(aDepth int) {
-	self.manager.loggerFuncCallDepth = aDepth
+	self.manager.loggerFuncCallDepth.Store(int32(aDepth))
 }
 
 /*
