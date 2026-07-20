@@ -3,6 +3,7 @@ package selector
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
@@ -30,6 +31,14 @@ type (
 		Logger        logger.ILogger     `field:"-"` // 保留:提供给扩展使用
 		Registry      registry.IRegistry `field:"-"`
 		Strategy      Strategy           `field:"-"`
+
+		// BreakerFailures 触发节点熔断所需的连续失败次数。设为 0 关闭熔断。
+		BreakerFailures int `field:"breaker_failures"`
+		// BreakerCooldown 首次熔断的冷却时长，冷却期内该节点不参与选取。
+		BreakerCooldown time.Duration `field:"breaker_cooldown"`
+		// BreakerMaxCooldown 连续熔断指数退避后的冷却时长上限。
+		BreakerMaxCooldown time.Duration `field:"breaker_max_cooldown"`
+
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context `field:"-"`
@@ -38,10 +47,13 @@ type (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Name:     "default",
-		Logger:   log,
-		Strategy: Random,
-		Registry: registry.NewNopRegistry(),
+		Name:               "default",
+		Logger:             log,
+		Strategy:           Random,
+		Registry:           registry.NewNopRegistry(),
+		BreakerFailures:    DefaultBreakerFailures,
+		BreakerCooldown:    DefaultBreakerCooldown,
+		BreakerMaxCooldown: DefaultBreakerMaxCooldown,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)
@@ -90,6 +102,23 @@ func Registry(r registry.IRegistry) Option {
 func WithFilter(fn ...Filter) SelectOption {
 	return func(cfg *SelectConfig) {
 		cfg.Filters = append(cfg.Filters, fn...)
+	}
+}
+
+// WithBreaker 设置节点熔断参数。
+// failures 为连续失败阈值，cooldown 为首次熔断的冷却时长（后续按次指数退避）。
+func WithBreaker(failures int, cooldown time.Duration) Option {
+	return func(cfg *Config) {
+		cfg.BreakerFailures = failures
+		cfg.BreakerCooldown = cooldown
+	}
+}
+
+// WithoutBreaker 关闭节点熔断，失败节点将不再被摘除。
+// 仅在外部已有熔断设施（如 service mesh sidecar）时才应关闭。
+func WithoutBreaker() Option {
+	return func(cfg *Config) {
+		cfg.BreakerFailures = 0
 	}
 }
 

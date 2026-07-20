@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/volts-dev/volts/internal/addr"
+	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/selector"
 )
 
@@ -50,10 +51,18 @@ func RpcReverseProxy(ctx *TRpcContext) {}
 
 // TODO 改名称
 func HttpReverseProxy(ctx *THttpContext) {
-	service, err := getService(ctx)
+	service, node, err := getService(ctx)
 	if err != nil {
 		ctx.WriteHeader(500)
 		return
+	}
+
+	// markNode 把本次代理的成败上报给 selector，供失败节点摘除/熔断使用。
+	// 此前反向代理完全不上报，挂掉的上游会被持续选中直到注册中心 TTL 过期。
+	markNode := func(err error) {
+		if sel := ctx.Router().Config().Selector; sel != nil && node != nil {
+			sel.Mark(ctx.Handler().Service(), node, err)
+		}
 	}
 
 	if len(service) == 0 {
@@ -107,8 +116,16 @@ func HttpReverseProxy(ctx *THttpContext) {
 	proxy := &httputil.ReverseProxy{
 		Transport: reverseProxyTransport,
 		Rewrite:   rewriteFn,
+		ModifyResponse: func(*http.Response) error {
+			// 拿到上游响应即视为节点可达 —— 5xx 是业务语义，不代表节点故障，
+			// 拿它去熔断会把一次业务异常放大成节点摘除。
+			markNode(nil)
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)
+			// 连不上/超时/连接被重置才是节点级故障，上报给 selector。
+			markNode(err)
 			// ★ 关键修复：强制关闭客户端连接。
 			// 不设此 header，Go HTTP server 会把这条连接放回 keep-alive 池，
 			// 客户端复用该连接发下一个请求时读到损坏状态 → EOF。
@@ -123,21 +140,24 @@ func HttpReverseProxy(ctx *THttpContext) {
 	proxy.ServeHTTP(ctx.Response(), inReq)
 }
 
-// getService returns the service for this request from the selector
-func getService(ctx *THttpContext) (string, error) {
+// getService returns the service for this request from the selector.
+//
+// 同时返回选中的 node —— 调用方需要它把本次代理的成败上报给 selector
+// （Mark），否则失败节点摘除/熔断拿不到任何信号。
+func getService(ctx *THttpContext) (string, *registry.Node, error) {
 	// create a random selector
 	next, err := ctx.Router().Config().Selector.Select(
 		ctx.Handler().Service(),
 		selector.WithFilter(selector.FilterLabel("protocol", "http", "https")),
 	)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// get the next service node
 	node, err := next()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	protocol := "http"
@@ -146,7 +166,7 @@ func getService(ctx *THttpContext) (string, error) {
 	}
 
 	host := addr.LocalFormat(node.Address) // TODO 考虑整个框架统一化
-	return fmt.Sprintf("%s://%s", protocol, host), nil
+	return fmt.Sprintf("%s://%s", protocol, host), node, nil
 }
 
 // serveWebSocket used to serve a web socket proxied connection

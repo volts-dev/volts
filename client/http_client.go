@@ -455,12 +455,16 @@ func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*ht
 
 		node.Address = addr.LocalFormat(node.Address)
 		resp, err := hcall(ctx, node, request, callOpts)
-		if err != nil {
-			return nil, err
-		}
-		// 保留原逻辑：仅成功路径调用 Mark
+
+		// 成功与失败都必须上报 —— selector 靠它做失败节点摘除与熔断。
+		// 此前只在成功路径调用 Mark，而那里 err 恒为 nil（上一行失败就 return 了），
+		// 等于永远只汇报成功，熔断器拿不到任何负面信号。
 		if self.config.Selector != nil {
 			self.config.Selector.Mark(request.Service(), node, err)
+		}
+
+		if err != nil {
+			return nil, err
 		}
 		return resp, nil
 	}

@@ -136,6 +136,14 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 			// 本机 IP 自动转为 loopback 以获得最低延迟
 			node.Address = addr.LocalFormat(node.Address)
 			resp, err := self.call(ctx, node, request, callOpts)
+
+			// 上报调用结果，供 selector 做失败节点摘除与熔断。
+			// 此前 RPC 路径完全不上报，挂掉的节点会被反复选中直到注册中心
+			// TTL 过期（分钟级）。
+			if self.config.Selector != nil {
+				self.config.Selector.Mark(request.Service(), node, err)
+			}
+
 			// if the call succeeded lets bail early
 			if err == nil {
 				return resp, nil

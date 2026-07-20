@@ -14,6 +14,8 @@ type (
 		// 并发的 Match / Select / Close 必须看到一致的 rc，否则会调到已 Stop 的旧实例或 nil。
 		mu sync.RWMutex
 		rc registry.IRegistryCacher
+		// health 追踪各节点的失败情况，用于摘除/熔断（见 breaker.go）。
+		health healthTracker
 	}
 )
 
@@ -61,6 +63,12 @@ func (self *registrySelector) Match(endpoint string, opts ...SelectOption) (Next
 		}
 		return nil, err
 	}
+	// 摘掉处于熔断状态的节点（与 Select 同规则）
+	if self.config.BreakerFailures > 0 {
+		self.health.purge()
+		services = self.health.filterHealthy(services)
+	}
+
 	// if there's nothing left, return
 	if len(services) == 0 {
 		return nil, ErrNoneAvailable
@@ -97,6 +105,13 @@ func (self *registrySelector) Select(service string, opts ...SelectOption) (Next
 		services = filter(services)
 	}
 
+	// 摘掉处于熔断状态的节点。放在用户 filter 之后，确保用户的筛选逻辑
+	// 看到的是完整节点集（否则 filter 的语义会随节点健康度漂移）。
+	if self.config.BreakerFailures > 0 {
+		self.health.purge()
+		services = self.health.filterHealthy(services)
+	}
+
 	// if there's nothing left, return
 	if len(services) == 0 {
 		return nil, ErrNoneAvailable
@@ -105,11 +120,24 @@ func (self *registrySelector) Select(service string, opts ...SelectOption) (Next
 	return sopts.Strategy(services), nil
 }
 
+// Mark 记录一次针对该节点的调用结果，err 为 nil 表示成功。
+//
+// 连续失败达到 Config.BreakerFailures 次即熔断该节点，冷却期内不再被 Select
+// 选中；成功一次即完全恢复。详见 breaker.go。
+//
+// 此前本方法是空函数 —— 挂掉的节点会被持续选中，直到注册中心 TTL 过期
+// （分钟级），期间每个落到它头上的请求都必然失败。
 func (self *registrySelector) Mark(service string, node *registry.Node, err error) {
+	if node == nil || self.config.BreakerFailures <= 0 {
+		return
+	}
+	self.health.mark(service, node.Id, err, self.config)
 }
 
+// Reset 清空指定服务的全部节点健康度状态，立即解除其熔断。
+// service 为空字符串时清空所有服务。
 func (self *registrySelector) Reset(service string) {
-
+	self.health.reset(service)
 }
 
 // Close stops the watcher and destroys the cache
