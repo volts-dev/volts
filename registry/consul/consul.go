@@ -12,7 +12,7 @@ import (
 	"time"
 
 	consul "github.com/hashicorp/consul/api"
-	hash "github.com/mitchellh/hashstructure"
+	hash "github.com/mitchellh/hashstructure/v2"
 	mnet "github.com/volts-dev/volts/internal/net"
 	vtls "github.com/volts-dev/volts/internal/tls"
 	"github.com/volts-dev/volts/registry"
@@ -207,7 +207,12 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 	}
 
 	// create hash of service; uint64
-	h, err := hash.Hash(s, nil)
+	//
+	// NOTE 用 FormatV2。hashstructure v1 的 FormatV1 存在结构碰撞（不同结构可能
+	// 算出同一个哈希），而这个哈希正是用来判断"服务是否变更、要不要重新注册"的
+	// —— 碰撞意味着**变更被漏掉**，节点会带着过期的元数据继续留在注册中心。
+	// 哈希只存在进程内存里（c.register），升级后至多多做一次重复注册。
+	h, err := hash.Hash(s, hash.FormatV2, nil)
 	if err != nil {
 		return err
 	}

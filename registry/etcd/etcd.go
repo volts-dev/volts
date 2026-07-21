@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	hash "github.com/mitchellh/hashstructure"
+	hash "github.com/mitchellh/hashstructure/v2"
 	vtls "github.com/volts-dev/volts/internal/tls"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
@@ -177,7 +177,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 				}
 
 				// create hash of service; uint64
-				h, err := hash.Hash(srv.Nodes[0], nil)
+				h, err := hash.Hash(srv.Nodes[0], hash.FormatV2, nil)
 				if err != nil {
 					continue
 				}
@@ -210,7 +210,7 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	}
 
 	// create hash of service; uint64
-	h, err := hash.Hash(node, nil)
+	h, err := hash.Hash(node, hash.FormatV2, nil)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.34.4
 	github.com/miekg/dns v1.1.72
-	github.com/mitchellh/hashstructure v1.1.0
+	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/refraction-networking/utls v1.8.2
 	github.com/spf13/viper v1.21.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
