@@ -39,7 +39,6 @@ const (
 	RBracket = '}'
 )
 
-
 type NodeType byte // 节点类型
 func (self NodeType) String() string {
 	return [...]string{"StaticNode", "VariantNode", "AnyNode", "RegexpNode"}[self]
