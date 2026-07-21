@@ -495,16 +495,36 @@ func (self *TRouter) route(route *route, ctx IContext) {
 			continue
 		}
 
-		if !handler.inited {
-			handler.init(self)
-		}
-
-		handler.Invoke(ctx)
-
-		// 回收handler
-		handler.reset()
-		defaultHandlerManager.Put(handlerId, handler)
+		self.invokeHandler(handlerId, handler, ctx)
 	}
+}
+
+// invokeHandler 执行单个 handler，并保证无论如何都把它归还给对象池。
+//
+// 单独成函数是为了拿到一个 defer 作用域：此前 reset + Put 写在调用之后，
+// handler panic 时这两步被直接跳过 —— 该 handler 对象永远回不了池，
+// 下一个请求只能重新 clone 模型并走一遍 init（反射建控制器、注入中间件）。
+// 恰恰是"业务在 panic"这种最需要省资源的时刻，代价被放大。
+func (self *TRouter) invokeHandler(id int, handler *handler, ctx IContext) {
+	defer func() {
+		// reset 会遍历 funcs 调各中间件的 Reset()。若此处再 panic，会把正在
+		// 传播的原始 panic 顶替掉，日志里只剩下无关的二次现场 —— 原始堆栈
+		// 才是排查依据，必须保住。
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errf("handler %s 回收时 panic（原始错误可能已被覆盖）: %v", handler.Name, r)
+			}
+		}()
+
+		handler.reset()
+		defaultHandlerManager.Put(id, handler)
+	}()
+
+	if !handler.inited {
+		handler.init(self)
+	}
+
+	handler.Invoke(ctx)
 }
 
 func (self *TRouter) isClosed() bool {
