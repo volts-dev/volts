@@ -90,7 +90,7 @@ Because the framework serves HTTP and RPC from separate handler objects (the han
 | `registry/` | Service registration/discovery — Consul, ETCD, mDNS, or in-memory backends |
 | `broker/` | Pub/sub messaging — HTTP or in-memory backends |
 | `selector/` | Load-balancing strategy over registry nodes, plus per-node failure ejection / circuit breaking (`selector/breaker.go`) |
-| `logger/` | Structured logging built on `go.uber.org/zap` |
+| `logger/` | Self-contained leveled logger (writer manager + console writer). **Not** built on zap — `go.uber.org/zap` is pulled in only by `registry/etcd` for clientv3's `LogConfig` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
 | `config/` | Top-level config loading via `github.com/spf13/viper` |
 
@@ -188,3 +188,8 @@ See project memory for the full list. Remaining open notes:
   (see `client/http_client_test.go:skipIfNetworkError`).
 - `transport/message_fuzz_test.go` holds the fuzz targets; deep runs with
   `gotip test -run=XXX -fuzz=FuzzMessageDecode -fuzztime=10m ./transport/`.
+- **Measure before calling something an optimization.** `router/handler_bench_test.go`
+  exists because a "hoist the type assertion out of the loop" change was committed as a
+  perf win and turned out to be 15% *slower*. In short chains the surrounding ServeHTTP
+  work (route match, context pool, ~19 allocs, ~2µs) drowns out anything the dispatch loop
+  does — use the 50-middleware case, `-count=5`, and compare medians.
