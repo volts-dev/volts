@@ -155,9 +155,9 @@ func (self *healthTracker) purge() {
 // （GetService(service) 返回的就是该名字的服务），而 Match 场景一次可以返回
 // 多个不同服务，只有按各自的 Name 才对得上 Mark 写入的键。
 //
-// 返回的是**副本**：入参来自 registry cacher 的共享缓存，就地改写
-// service.Nodes 会污染其他调用方看到的数据（filter.go 的 FilterTrasport
-// 就是这么写的，是个既有缺陷）。
+// 返回的是**副本**而非就地改写 service.Nodes。当前 registry cacher 的
+// GetService 返回的是 Copy() 深拷贝，就地改并不会污染缓存，但这层依赖是隐式的
+// —— 过滤器不该假设上游一定给了它可写的数据，上游换个实现就会静默出错。
 //
 // 全部节点都被熔断时原样返回并告警 —— 见文件头关于 fail-open 的说明。
 func (self *healthTracker) filterHealthy(services []*registry.Service) []*registry.Service {
