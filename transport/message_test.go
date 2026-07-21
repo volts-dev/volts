@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/volts-dev/volts/codec"
@@ -344,5 +345,57 @@ func TestDecode_OversizedByDefaultLimit(t *testing.T) {
 	err := msg.Decode(bytes.NewReader(wire))
 	if err != ErrMessageToLong {
 		t.Fatalf("expected ErrMessageToLong with default limit, got %v", err)
+	}
+}
+
+// 谎报长度前缀不得让服务端立刻分配对应大小的内存。
+//
+// 此前是 make([]byte, l)，l 完全由对端指定、上限即 MaxMessageLength(64 MiB)。
+// 于是一个 16 字节的报文（Bom + 一个谎报 64 MiB 的长度前缀）就能让服务端当场
+// 分配 64 MiB，随后读取失败、连接关闭 —— 放大约 400 万倍，反复发送即可打爆内存。
+// 长度上限拦的是"单条消息多大"，拦不住"用一个数字换一块内存"。
+func TestDecode_DoesNotPreallocateClaimedLength(t *testing.T) {
+	const claimed = 64 << 20 // 64 MiB，正好是默认上限
+
+	// 只有头部：声明 64 MiB，实际一个字节的 body 都不给
+	wire := make([]byte, 16)
+	wire[0] = MagicNumber
+	binary.BigEndian.PutUint32(wire[12:16], claimed)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	msg := newMessage()
+	err := msg.Decode(bytes.NewReader(wire))
+
+	runtime.ReadMemStats(&after)
+
+	if err == nil {
+		t.Fatal("body 缺失却解析成功了")
+	}
+
+	// TotalAlloc 是累计值，单调递增，对 64 MiB 这种量级信噪比极高。
+	// 留出 1 MiB 余量覆盖测试自身与运行时的杂项分配。
+	allocated := after.TotalAlloc - before.TotalAlloc
+	if allocated > 1<<20 {
+		t.Fatalf("解析一个 16 字节的畸形包分配了 %d 字节 —— "+
+			"说明仍在照着长度前缀预分配", allocated)
+	}
+}
+
+// 合法的大消息仍要能正常解出，别为了防放大把正常路径也堵死。
+func TestDecode_LargeValidMessageStillWorks(t *testing.T) {
+	msg := newMessage()
+	msg.Path = "Big.Payload"
+	msg.Payload = bytes.Repeat([]byte("x"), 1<<20) // 1 MiB
+	wire := msg.Encode()
+
+	got := newMessage()
+	if err := got.Decode(bytes.NewReader(wire)); err != nil {
+		t.Fatalf("合法的 1 MiB 消息解析失败: %v", err)
+	}
+	if !bytes.Equal(got.Payload, msg.Payload) {
+		t.Fatal("大消息往返后 Payload 不一致")
 	}
 }

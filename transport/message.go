@@ -49,6 +49,12 @@ const (
 // upper bounds and prevents trivial OOM via a forged length prefix.
 const DefaultMaxMessageLength = 64 << 20
 
+// initialBodyBuffer 是解码消息体时的预分配上限。
+//
+// 长度前缀由对端指定，不能照着它一次性分配（见 Decode 里的说明）。这里只按
+// "常规消息大小"起步，超出部分随实际到达的数据逐步扩容。
+const initialBodyBuffer = 64 << 10
+
 var ( // MaxMessageLength is the max length of a message.
 	// Default is DefaultMaxMessageLength (64 MiB). Set to 0 to disable the cap.
 	// It is used to validate when read messages from io.Reader.
@@ -379,11 +385,29 @@ func (m *Message) Decode(r io.Reader) error {
 		return ErrMessageToLong
 	}
 
-	data := make([]byte, int(l))
-	_, err = io.ReadFull(r, data)
-	if err != nil {
+	// 按**实际到达的字节数**增长，而不是照着长度前缀一次性分配。
+	//
+	// 此前是 make([]byte, l) —— l 完全由对端指定，上限即 MaxMessageLength(64 MiB)。
+	// 于是 16 字节的报文（Bom + 一个谎报 64 MiB 的长度前缀）就能让服务端立刻
+	// 分配 64 MiB，随后 ReadFull 失败、连接关闭。放大倍数约 400 万倍，
+	// 反复发送即可轻松打爆内存 —— 长度上限拦住的是"单条消息多大"，
+	// 拦不住"用一个数字换一块内存"。
+	//
+	// bytes.Buffer 随 CopyN 逐步扩容，对端不发数据就不会占内存；预分配只取
+	// 一个小的起步值，避免小消息反复扩容。
+	var buf bytes.Buffer
+	if l > 0 {
+		buf.Grow(min(int(l), initialBodyBuffer))
+	}
+	if _, err = io.CopyN(&buf, r, int64(l)); err != nil {
+		if err == io.EOF {
+			// 声明了 l 字节却提前结束：按畸形包处理，与 ReadFull 的语义一致
+			err = io.ErrUnexpectedEOF
+		}
 		return err
 	}
+
+	data := buf.Bytes()
 	m.Body = data
 
 	// readField 从 data[n:] 解析一段 length-prefixed 字节，返回字段 bytes 与新偏移；
