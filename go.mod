@@ -2,8 +2,6 @@ module github.com/volts-dev/volts
 
 go 1.27
 
-//replace github.com/hzmsrv/sonic => ../../volts-dev/sonic
-
 // 本地 cacher 已修 TMemoryCache.Push 的 Len() 锁外读竞态（发布版 v0314 仍带竞态，
 // TestConcurrentPubBroker -race 可实锤）；发布 cacher 新版后移除本 replace 并 bump。
 replace github.com/volts-dev/cacher => ../cacher
@@ -14,7 +12,6 @@ require (
 	github.com/getkin/kin-openapi v0.142.0
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/go-viper/mapstructure/v2 v2.5.0
-	github.com/goccy/go-json v0.10.6
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.34.4
 	github.com/miekg/dns v1.1.72

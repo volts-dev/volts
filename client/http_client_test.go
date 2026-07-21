@@ -3,6 +3,7 @@ package client
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func TestGetRequest(t *testing.T) {
 
 	resp, err := client.Call(req)
 	if err != nil {
-		t.Fatal(err)
+		skipIfNetworkError(t, err)
 	}
 
 	log.Dbg(string(resp.Body().AsBytes()))
@@ -65,7 +66,7 @@ func TestPostRequest(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "ABC", Value: "U"})
 	resp, err := client.Call(req)
 	if err != nil {
-		t.Fatal(err)
+		skipIfNetworkError(t, err)
 	}
 
 	log.Dbg(resp.StatusCode(), string(resp.Body().AsBytes()))
@@ -102,7 +103,7 @@ func TestOrderHeader(t *testing.T) {
 	req.Header().Set("Host", u.Host)
 	resp, err := client.Call(req)
 	if err != nil {
-		t.Fatal(err)
+		skipIfNetworkError(t, err)
 	}
 	defer resp.Body().Reset()
 
@@ -115,4 +116,41 @@ func TestOrderHeader(t *testing.T) {
 	}
 
 	log.Dbg(string(resp.Body().AsBytes()))
+}
+
+// skipIfNetworkError 在网络类错误时跳过用例，其余错误照常判失败。
+//
+// 本文件的几个用例直接打公网（httpbin.org / go.dev / ti.com）：它们验证的是
+// 真实 TLS 栈上的 JA3 指纹与请求头顺序，换成本地 httptest 就失去意义，
+// 所以保留真实端点。但"外网抖动 = CI 变红"不可接受 —— 红灯一旦常态化，
+// 大家就不再看红灯了。
+//
+// NOTE 这里刻意**不做 TCP 预探测**。本机（macOS + 网络扩展/VPN）会无差别接受
+// 所有 TCP 连接：实测连 192.0.2.1（RFC 5737 保留、永不可路由）都能在 0.01s
+// "连上"。任何 Dial 式的可达性探测在这种环境下恒为真，毫无意义。
+// 只有真实发一次请求、再看错误类型，才分得清"外网不通"与"代码坏了"。
+func skipIfNetworkError(t *testing.T, err error) {
+	t.Helper()
+
+	if err == nil {
+		return
+	}
+
+	msg := err.Error()
+	for _, sig := range []string{
+		"context deadline exceeded",
+		"no such host",
+		"connection refused",
+		"connection reset",
+		"i/o timeout",
+		"network is unreachable",
+		"TLS handshake timeout",
+		"EOF",
+	} {
+		if strings.Contains(msg, sig) {
+			t.Skipf("外网访问失败（%v）—— 本用例依赖公网端点，跳过", err)
+		}
+	}
+
+	t.Fatalf("请求失败（非网络原因，需排查）: %v", err)
 }
