@@ -33,7 +33,7 @@ func init() {
 func TestHandlerReflectInterfaceChangedMetohd(t *testing.T) {
 	var aa interface{}
 	aa = &ctrl{Name: "111"}
-	val := ValueOf(aa)
+	val := reflect.ValueOf(aa)
 
 	p := val.Interface()
 	if n, ok := p.(iwrapper); ok {

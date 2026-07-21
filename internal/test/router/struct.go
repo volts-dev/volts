@@ -2,7 +2,6 @@ package router
 
 import (
 	"fmt"
-	"unsafe"
 )
 
 type (
@@ -23,11 +22,6 @@ type (
 	virtulCtrl struct {
 		ctrl interface{}
 		hds  func() string
-	}
-
-	emptyInterface struct {
-		typ  *rtype
-		word unsafe.Pointer
 	}
 
 	iwrapper interface {
