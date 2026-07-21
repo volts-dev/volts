@@ -265,9 +265,14 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 		// RpcReverseProxy），按 (service, path) 内容派生 id 并 dedup：让每 60s 的
 		// registry 刷新复用同一实例、保持路由 handler id 稳定。
 		uid = generateHandlerId(handlerType, tt, handlers, url, service)
-		if h := defaultHandlerManager.Get(uid); h != nil {
+
+		// 只查原型表，**不要用 Get** —— Get 会从对象池里弹出一个已经 init 完成的
+		// 实例（funcs 已含全局链、注入的中间件、主处理器），再 Store 回去就把原型
+		// 污染成了"成品"。而 clone 不拷贝 inited，于是后续克隆出来的实例 inited
+		// 为 false，init 会在已完整的 funcs 上**再前置一次全局链** —— 表现为网关
+		// 反代路由上的中间件执行两次，且每次 registry 刷新（60s）都可能再叠一层。
+		if h := defaultHandlerManager.Model(uid); h != nil {
 			//h.SetServices(services) // 更新服务列表
-			defaultHandlerManager.Store(h)
 			return h
 		}
 	} else {
@@ -400,6 +405,18 @@ func (self *handlerManager) Store(h *handler) {
 	self.Lock()
 	defer self.Unlock()
 	self.handlerModel[h.Id] = h
+}
+
+// Model 只查原型表，不碰对象池。
+//
+// 与 Get 的区别很关键：Get 会优先从池里弹出一个**已 init 完成**的实例，
+// 那是给请求用的成品，不是原型。想判断"某个 id 是否已登记过"必须用 Model ——
+// 用 Get 拿到成品再 Store 回去会把原型污染成成品，而 clone 不拷贝 inited，
+// 后续克隆就会在已完整的 funcs 上重复跑一遍 init。
+func (self *handlerManager) Model(id int) *handler {
+	self.RLock()
+	defer self.RUnlock()
+	return self.handlerModel[id]
 }
 
 func (self *handlerManager) Get(id int) *handler {
