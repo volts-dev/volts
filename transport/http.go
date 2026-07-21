@@ -3,7 +3,6 @@ package transport
 import (
 	"bufio"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	utls "github.com/refraction-networking/utls"
 	vaddr "github.com/volts-dev/volts/internal/addr"
 	vnet "github.com/volts-dev/volts/internal/net"
 	mls "github.com/volts-dev/volts/internal/tls"
@@ -138,6 +136,14 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		}
 
 		if dialCfg.Ja3.Ja3 != "" {
+			// JA3 指纹伪装的实现在独立子模块 volts/ja3 里（见 ja3_hook.go）。
+			// 未注册时**明确报错**而不是静默退回普通 TLS —— 后者会让伪装悄悄失效，
+			// 调用方还以为自己伪装了。
+			dial := ja3Dialer()
+			if dial == nil {
+				return nil, ErrJa3NotRegistered
+			}
+
 			rawConn, err := dialCfg.dialer.Dial(dialCfg.Network, addr)
 			if err != nil {
 				return nil, err
@@ -147,35 +153,11 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			if host, _, err = net.SplitHostPort(addr); err != nil {
 				host = addr
 			}
-			//////////////////
 
-			spec, err := parseJA3(dialCfg.Ja3.Ja3)
+			conn, err = dial(rawConn, host, config, dialCfg.Ja3.Ja3)
 			if err != nil {
 				return nil, err
 			}
-
-			cnn := utls.UClient(rawConn, &utls.Config{
-				ServerName:         host,
-				MinVersion:         tls.VersionTLS12,
-				MaxVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: config.InsecureSkipVerify,
-			}, // Default is TLS13
-				utls.HelloChrome_Auto)
-			if err := cnn.ApplyPreset(spec); err != nil {
-				return nil, err
-			}
-
-			if err = cnn.Handshake(); err != nil {
-				_ = cnn.Close()
-
-				if err.Error() == "tls: CurvePreferences includes unsupported curve" {
-					//fix this
-					return nil, fmt.Errorf("conn.Handshake() error for tls 1.3 (please retry request): %+v", err)
-				}
-				return nil, fmt.Errorf("uTlsConn.Handshake() error: %+v", err)
-			}
-
-			conn = cnn
 		} else {
 			//config.NextProtos = []string{"http/1.1"}
 			//	conn, err = newConn(func(addr string) (net.Conn, error) {

@@ -193,3 +193,28 @@ See project memory for the full list. Remaining open notes:
   perf win and turned out to be 15% *slower*. In short chains the surrounding ServeHTTP
   work (route match, context pool, ~19 allocs, ~2µs) drowns out anything the dispatch loop
   does — use the 50-middleware case, `-count=5`, and compare medians.
+
+### Optional Submodule: JA3
+
+`ja3/` is a **separate Go module** (`github.com/volts-dev/volts/ja3`) holding the TLS
+fingerprint-spoofing implementation. The main module deliberately does not depend on it,
+and therefore does not depend on `github.com/refraction-networking/utls` — a library whose
+purpose is mimicking other clients' TLS fingerprints, which most people writing business
+services do not need but would otherwise compile into every binary and have flagged in
+compliance scans.
+
+Enable it with a blank import:
+
+```go
+import _ "github.com/volts-dev/volts/ja3"
+```
+
+`transport` keeps only the hook (`transport/ja3_hook.go`): the `Ja3` config struct (plain
+strings), a dialer registry, and `INegotiatedProtocol` so `client` can read the ALPN result
+without asserting a concrete TLS type. Setting a JA3 fingerprint **without** importing the
+submodule returns `transport.ErrJa3NotRegistered` rather than silently falling back to
+ordinary TLS — a silent fallback would leave the caller believing they were disguised.
+
+The JA3 integration tests live in the submodule (`ja3/client_integration_test.go`); they
+cannot stay in the main module, since importing the submodule from there would both create
+a module cycle and drag utls back into the main dependency tree.

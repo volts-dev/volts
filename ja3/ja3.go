@@ -1,21 +1,12 @@
-package transport
+package ja3
 
 import (
 	"crypto/sha256"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
 	utls "github.com/refraction-networking/utls"
-)
-
-type (
-	Ja3 struct {
-		Ja3       string
-		UserAgent string
-		Hash      string
-	}
 )
 
 // greasePlaceholder is a random value (well, kindof '0x?a?a) specified in a
@@ -285,13 +276,3 @@ func parseJA3(ja3 string) (*utls.ClientHelloSpec, error) {
 	}, nil
 }
 
-func urlToHost(target *url.URL) *url.URL {
-	if !strings.Contains(target.Host, ":") {
-		if target.Scheme == "http" {
-			target.Host = target.Host + ":80"
-		} else if target.Scheme == "https" {
-			target.Host = target.Host + ":443"
-		}
-	}
-	return target
-}

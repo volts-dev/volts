@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	utls "github.com/refraction-networking/utls"
+	"github.com/volts-dev/volts/transport"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/proxy"
 )
@@ -122,8 +122,11 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 
 	// No http.Transport constructed yet, create one based on the results
 	// of ALPN.
-	if c, ok := conn.(*utls.UConn); ok {
-		switch c.ConnectionState().NegotiatedProtocol {
+	// 按接口而非具体类型判定 ALPN 结果：此前断言的是 *utls.UConn，把本包钉死在
+	// JA3 实现上。改用 transport.INegotiatedProtocol 后，utls 可以整体移出主模块
+	// （见 transport/ja3_hook.go）。
+	if c, ok := conn.(transport.INegotiatedProtocol); ok {
+		switch c.NegotiatedProtocol() {
 		case http2.NextProtoTLS:
 			// The remote peer is speaking HTTP 2 + TLS.
 			rt.cachedTransports[addr] = &http2.Transport{DialTLS: rt.dialTLSHTTP2}

@@ -1,21 +1,34 @@
-package client
+// JA3 的集成测试：打真实公网端点，验证指纹伪装在真实 TLS 栈上可用。
+//
+// 这些用例原本在 volts/client 包里，随 JA3 实现一起迁到本子模块 —— 主模块已不
+// 依赖 utls，其测试也就无法再构造带 JA3 的客户端（导入本模块会形成模块循环，
+// 且会把 utls 重新拖回主模块的依赖树）。
+package ja3_test
 
 import (
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/volts-dev/volts/client"
+	vlog "github.com/volts-dev/volts/logger"
+
+	// 空导入即注册 JA3 拨号实现；缺了它 transport.Dial 会返回 ErrJa3NotRegistered
+	_ "github.com/volts-dev/volts/ja3"
 )
 
+var log = vlog.New("ja3-test")
+
 func TestGetRequest(t *testing.T) {
-	client, err := NewHttpClient(
-		WithPrintRequest(),
-		WithJa3(
+	client, err := client.NewHttpClient(
+		client.WithPrintRequest(),
+		client.WithJa3(
 			"771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-16-22-23-13-43-45-51-21,29-23-30-25-24,0-1-2",
 			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36",
 		),
-		WithHttpOptions(
-			WithUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36"),
+		client.WithHttpOptions(
+			client.WithUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36"),
 		),
 	)
 	if err != nil {
@@ -40,14 +53,14 @@ func TestGetRequest(t *testing.T) {
 }
 
 func TestPostRequest(t *testing.T) {
-	client, err := NewHttpClient(
-		WithPrintRequest(),
-		WithJa3(
+	client, err := client.NewHttpClient(
+		client.WithPrintRequest(),
+		client.WithJa3(
 			"771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-16-22-23-13-43-45-51-21,29-23-1035-25-24,0-1-2",
 			"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111",
 		),
-		WithHttpOptions(
-			WithUserAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
+		client.WithHttpOptions(
+			client.WithUserAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
 		),
 	)
 	if err != nil {
@@ -75,14 +88,14 @@ func TestPostRequest(t *testing.T) {
 func TestOrderHeader(t *testing.T) {
 	//urladdr := "https://www.baidu.com/"
 	urladdr := "https://www.ti.com/secure-link-forward/"
-	client, err := NewHttpClient(
-		WithPrintRequest(),
-		WithJa3(
+	client, err := client.NewHttpClient(
+		client.WithPrintRequest(),
+		client.WithJa3(
 			"771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47-255,0-11-10-35-16-22-23-13-43-45-51-21,29-23-1035-25-24,0-1-2",
 			"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111",
 		),
-		WithHttpOptions(
-			WithUserAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
+		client.WithHttpOptions(
+			client.WithUserAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4896.140 Safari/537.36 OPR/79.0.2135.111"),
 		),
 	)
 	if err != nil {
