@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"encoding/json"
 	"log"
 	"testing"
 	"time"
@@ -89,4 +90,71 @@ func TestJosnStringValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	log.Print(test)
+}
+
+// 解到 interface{} 时必须保留数字字面量（UseNumber），不得退化成 float64。
+//
+// 这是本次从 sonic 换到 goccy 时唯一有风险的语义点：默认行为会把所有 JSON 数字
+// 变成 float64，超过 2^53 的整数被**静默改写** —— ORM 的 id 是 int64，
+// 1234541341234123412 会变成 1234541341234123520 这类"看着像但不相等"的值，
+// 且不报任何错。call_kw 这类走 map[string]any 的路径全都要靠它。
+func TestJsonDecodeUsesNumberForInterface(t *testing.T) {
+	const raw = `{"id":1234541341234123412,"name":"x"}`
+
+	coder := new(jsonCodec)
+
+	var got map[string]any
+	if err := coder.Decode([]byte(raw), &got); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	num, ok := got["id"].(json.Number)
+	if !ok {
+		t.Fatalf("id 的类型是 %T，want json.Number —— UseNumber 没生效，大整数会被静默改写", got["id"])
+	}
+
+	v, err := num.Int64()
+	if err != nil {
+		t.Fatalf("Int64: %v", err)
+	}
+	if v != 1234541341234123412 {
+		t.Fatalf("id = %d, want 1234541341234123412（差 %d）", v, v-1234541341234123412)
+	}
+}
+
+// 嵌套结构里的大整数同样不能丢精度。
+func TestJsonDecodeNestedBigInt(t *testing.T) {
+	const raw = `{"rows":[{"id":9007199254740993}]}`
+
+	var got map[string]any
+	if err := new(jsonCodec).Decode([]byte(raw), &got); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	rows := got["rows"].([]any)
+	row := rows[0].(map[string]any)
+
+	num, ok := row["id"].(json.Number)
+	if !ok {
+		t.Fatalf("嵌套 id 类型 = %T, want json.Number", row["id"])
+	}
+	if v, _ := num.Int64(); v != 9007199254740993 {
+		t.Fatalf("嵌套 id = %d, want 9007199254740993", v)
+	}
+}
+
+// 解到具体结构体时行为不变。
+func TestJsonDecodeIntoStruct(t *testing.T) {
+	type row struct {
+		Id   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+
+	var got row
+	if err := new(jsonCodec).Decode([]byte(`{"id":1234541341234123412,"name":"x"}`), &got); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if got.Id != 1234541341234123412 || got.Name != "x" {
+		t.Fatalf("got = %+v", got)
+	}
 }
