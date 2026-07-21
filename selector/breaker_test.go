@@ -227,3 +227,58 @@ func TestSelectorMarkNilNode(t *testing.T) {
 	s := &registrySelector{config: testConfig()}
 	s.Mark("svc", nil, errBoom) // 不 panic 即通过
 }
+
+// 配置字段为零值时熔断不得静默失效。
+//
+// 经 newConfig 构造时 BreakerCooldown / BreakerMaxCooldown 都有默认值，但调用方
+// 直接写 Config{BreakerFailures: 3} 就会踩到：冷却时长算成 0 → openUntil 等于
+// 当下 → 节点立刻又可选。表面上"熔断器开着"，实际什么都没做 ——
+// 一个悄悄不工作的安全机制比没有更糟，它让人以为自己有保护。
+func TestBreakerZeroCooldownStillTrips(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *Config
+	}{
+		{"只设阈值", &Config{BreakerFailures: 3}},
+		{"设了冷却但没设上限", &Config{BreakerFailures: 3, BreakerCooldown: 10 * time.Second}},
+		{"设了上限但没设冷却", &Config{BreakerFailures: 3, BreakerMaxCooldown: time.Minute}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := &healthTracker{}
+			for i := 0; i < 3; i++ {
+				h.mark("svc", "a", errBoom, c.cfg)
+			}
+
+			ids := nodeIds(h.filterHealthy([]*registry.Service{svc("svc", "a", "healthy")}))
+			if contains(ids, "a") {
+				t.Fatalf("熔断静默失效，节点仍被选中: %v", ids)
+			}
+		})
+	}
+}
+
+// 未声明上限时不做指数退避，保持基础冷却 —— 而不是把上限当成 0。
+func TestBreakerNoBackoffWithoutMax(t *testing.T) {
+	h := &healthTracker{}
+	cfg := &Config{BreakerFailures: 3, BreakerCooldown: 200 * time.Millisecond}
+
+	trip := func() time.Duration {
+		for i := 0; i < 3; i++ {
+			h.mark("svc", "a", errBoom, cfg)
+		}
+		return time.Until(time.Unix(0, h.get("svc", "a").openUntil.Load()))
+	}
+
+	first := trip()
+	second := trip()
+
+	// 允许少量执行耗时误差
+	if second > first+50*time.Millisecond {
+		t.Fatalf("未声明上限却发生了退避: 第一次 %v，第二次 %v", first, second)
+	}
+	if second < 100*time.Millisecond {
+		t.Fatalf("冷却时长 %v 明显短于配置的 200ms", second)
+	}
+}

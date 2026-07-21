@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"reflect"
 	"runtime"
 	"testing"
@@ -397,5 +398,51 @@ func TestDecode_LargeValidMessageStillWorks(t *testing.T) {
 	}
 	if !bytes.Equal(got.Payload, msg.Payload) {
 		t.Fatal("大消息往返后 Payload 不一致")
+	}
+}
+
+// Decode 必须**恰好**消费 length 前缀声明的字节数，不能多读。
+//
+// TCP 连接是复用的：一条连接上背靠背发多条消息。若 Decode 多读一个字节，
+// 下一条消息的解析就会从错位处开始 —— 表现为随机的 "wrong magic number"，
+// 且只在高并发/流水线场景下出现，极难定位。
+//
+// 这条断言守的是 Decode 从 make+ReadFull 改成 CopyN 之后的读取边界。
+func TestDecode_ConsumesExactlyDeclaredLength(t *testing.T) {
+	msg := newMessage()
+	msg.Path = "First.Message"
+	msg.Payload = []byte("first")
+	wire := msg.Encode()
+
+	const trailer = "SECOND-MESSAGE-BYTES"
+	r := bytes.NewReader(append(append([]byte{}, wire...), trailer...))
+
+	got := newMessage()
+	if err := got.Decode(r); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if got.Path != "First.Message" {
+		t.Fatalf("Path = %q", got.Path)
+	}
+
+	rest, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(rest) != trailer {
+		t.Fatalf("剩余字节 = %q, want %q —— Decode 多读/少读了，连接复用时会串包", rest, trailer)
+	}
+}
+
+// body 少于声明长度时必须报错，不能静默返回残缺数据。
+func TestDecode_ShortBodyIsUnexpectedEOF(t *testing.T) {
+	msg := newMessage()
+	msg.Path = "x"
+	wire := msg.Encode()
+
+	got := newMessage()
+	err := got.Decode(bytes.NewReader(wire[:len(wire)-1]))
+	if err != io.ErrUnexpectedEOF {
+		t.Fatalf("err = %v, want io.ErrUnexpectedEOF", err)
 	}
 }

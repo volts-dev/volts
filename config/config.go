@@ -194,6 +194,17 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
+// StopWatcher 停止 WithWatcher 启动的配置文件监听协程。可安全多次调用。
+//
+// 该协程默认活到进程结束（与替换掉的 viper.WatchConfig 行为一致），对长驻服务
+// 无所谓；提供本方法是给测试与嵌入式场景收口用的 —— 否则 format.StopWatch 因为
+// 类型未导出而根本无法从包外触达，等于一段看着有用其实够不着的死代码。
+func (self *Config) StopWatcher() {
+	if core := self.Core(); core != nil && core.fmt != nil {
+		core.fmt.StopWatch()
+	}
+}
+
 func (self *Config) Reload() {
 	// 重新加载配置
 	self.Core().models.Range(func(key any, value any) bool {
