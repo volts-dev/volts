@@ -62,7 +62,21 @@ IService (volts.go)
 
 **Handler registration** — `router/handler.go` uses reflection to resolve methods at registration time. HTTP handlers receive `*THttpContext`; RPC handlers follow the `func(ctx, req, rsp) error` signature. Route method `"CONNECT"` signals an RPC endpoint.
 
-**Codec dispatch** — `codec/codec.go` registers codecs by content-type hash. The transport `message.go` carries a codec identifier in the wire frame; the server/client negotiate serialization format (JSON via Sonic, MessagePack, Protobuf, Gob, or raw bytes).
+**Codec dispatch** — `codec/codec.go` registers codecs by content-type hash. The transport `message.go` carries a codec identifier in the wire frame; the server/client negotiate serialization format (JSON via the standard library, MessagePack, Protobuf, Gob, or raw bytes).
+
+The serialize type is **one attacker-controlled byte on the wire** (HTTP side: `Content-Type`), so parsing peer input must go through `codec.IdentifyWireCodec`, not `IdentifyCodec`. Gob is registered via `RegisterRestrictedCodec` and is therefore *not* wire-selectable by default (`encoding/gob` on untrusted input is a memory-amplification vector); opt in with `codec.SetWireAllowed("Gob", true)`.
+
+`SerializeType` is a `byte` and `HashName` truncates crc32 to its low 8 bits — only 256 ids exist. `RegisterCodec` panics on collision rather than silently overwriting. Built-in ids are part of the wire protocol and pinned by `codec/safety_test.go`.
+
+**Middleware assembly** — three mechanisms, all resolved at assembly time, never per-request:
+
+1. **Global chain** — `router.Use(...)`, applies to every route including ones added later.
+2. **Route-level** — `Url(methods, path, mainCtrl, mid1, mid2)`; `handlers[0]` is the controller, `handlers[1:]` are middlewares. Getting this order backwards reports `reflect: call of reflect.Value.NumField on interface Value`, which names nothing relevant.
+3. **Controller embedding (DI)** — `RegisterMiddleware` only records a constructor by name; binding happens by embedding the middleware type in the controller struct. `handler.init` asserts against the controller **value**, so middleware methods must use **value receivers** — pointer receivers silently fail to bind.
+
+Execution order: global → route-level → embedded → main controller.
+
+Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
 
 ### Package Responsibilities
 
@@ -72,10 +86,10 @@ IService (volts.go)
 | `server/` | Lifecycle management (Start/Stop), registry integration, broker subscriptions, transport wiring |
 | `client/` | Outbound HTTP and RPC calls, service discovery via selector, retry logic |
 | `transport/` | Wire-level HTTP and TCP transports, TLS/ACME, message framing with CRC32 |
-| `codec/` | Serialization adapters (JSON/Sonic, MsgPack, Protobuf, Gob, bytes) |
+| `codec/` | Serialization adapters (JSON via stdlib encoding/json, MsgPack, Protobuf, Gob, bytes) |
 | `registry/` | Service registration/discovery — Consul, ETCD, mDNS, or in-memory backends |
 | `broker/` | Pub/sub messaging — HTTP or in-memory backends |
-| `selector/` | Load-balancing strategy over registry nodes |
+| `selector/` | Load-balancing strategy over registry nodes, plus per-node failure ejection / circuit breaking (`selector/breaker.go`) |
 | `logger/` | Structured logging built on `go.uber.org/zap` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
 | `config/` | Top-level config loading via `github.com/spf13/viper` |
@@ -107,6 +121,25 @@ app.Run()  // blocks until SIGTERM/SIGINT/SIGQUIT or context cancel
 
 On macOS, browser/curl access via LAN IP to a locally-running server is intercepted at the kernel level. Use `localhost` for local development access instead.
 
+### Node Health / Circuit Breaking
+
+`selector` ejects a node after `BreakerFailures` consecutive failures (default 3), holds it
+out for `BreakerCooldown` (default 10s, exponential backoff up to 2min), and fully restores
+it on one success. `WithoutBreaker()` disables it.
+
+Two rules that are easy to get wrong:
+
+- **Callers must report both outcomes.** `Selector.Mark(service, node, err)` is the only
+  input the breaker has. All three call sites (`client/http_client.go`,
+  `client/rpc_client.go`, `router/reverse_proxy.go`) report success *and* failure — an
+  earlier version called `Mark` only on the success path, where `err` was always nil, so
+  the breaker never saw a single negative signal.
+- **Reverse proxy counts connection-level errors only.** A 5xx from upstream means the node
+  is reachable; ejecting on it would escalate a business error into lost capacity.
+
+When every node of a service is tripped the filter **fails open** and returns them all: a
+breaker that removes 100% of capacity is worse than the failure it guards against.
+
 ### Registry-Driven Route Updates
 
 `router/handler.go:handler.Services` stores remote service nodes for proxy routes. It is written in two places — `generateHandler()` (no lock) and `SetServices()` (with lock) — which is a known data race. `router/router.go:store()` is called on Registry watch events and periodic refresh (every 60s) to update proxy routes pointing to discovered services.
@@ -118,8 +151,40 @@ dispositioned as of 2026-07-17 — every CRITICAL/HIGH item and each named MEDIU
 either fixed or verified already-fixed in current code (WebSocket proxy leak, context
 pool race, SIGKILL, `registered` field, `handler.Services` lock, pool-key growth via
 `TTree.onRouteReplaced`, router lifecycle via `TRouter.Close()`, Stop error aggregation,
-broker/http Close deadlock + transport double-close). Remaining open notes:
-- `IClient` interface completeness is a design gap, not a bug (unaudited in depth)
+broker/http Close deadlock + transport double-close).
+
+A second, wider audit (security / stability / efficiency / stack) ran 2026-07-20..21 —
+21 items, all actionable ones fixed on branch `fix/security-audit-p0`. Acceptance:
+`go test -race ./...` clean, `go vet ./...` clean, 3 fuzz targets ~5M execs with no crash.
+See project memory for the full list. Remaining open notes:
+
+- **config hot-reload is racy** (`config.WithWatcher()`): the watcher goroutine calls
+  `UnmarshalKey(model.String(), model)`, which rewrites **every tagged field** of every
+  registered config model in place, while request goroutines read those same fields
+  (`router.Config.Recover` per request, `transport.Config.ReadTimeout` per connection,
+  `selector.Config.BreakerFailures` per Select). vectors enables this in production.
+  Deliberately left unfixed — a correct fix needs a config-layer redesign (copy-on-write
+  + accessor reads), which is scheduled separately. Do not "just add a mutex": the readers
+  are arbitrary business code touching struct fields directly.
+- `IClient` interface completeness is a design gap, not a bug. It lacks `NewRequest`
+  because HttpClient (`method, url, data`) and RpcClient (`service, method, request`)
+  differ semantically — code needing it must hold the concrete type.
 - broker/http `Publish` must keep `maddr.LocalFormat` on node addresses (macOS network
   extensions intercept traffic to physical interfaces — same rule as client/reverse_proxy)
-- go.mod carries a local `replace` for volts-dev/cacher until its Push race fix is published
+- go.mod carries a local `replace` for volts-dev/cacher until its Push race fix is
+  published. **Until then this repo cannot be `go get`-ed by anyone else.**
+
+### Testing Notes
+
+- Tests that wait on an external event **must** carry a timeout. Three separate packages
+  (logger, mdns×2, internal/test/client) each used to hang for the full test timeout
+  (~300s), which drowned every real result. A hang is worse than a failure: it reports
+  nothing.
+- Do not bind fixed ports in tests. `server.Debug()` pins 35999/45999, which collides with
+  a locally running kylin.
+- **TCP reachability probes do not work on this machine.** macOS network extensions accept
+  every TCP connect — `net.DialTimeout` to `192.0.2.1` (RFC 5737, unroutable) succeeds in
+  0.01s. Tests hitting public endpoints must classify the *request* error instead
+  (see `client/http_client_test.go:skipIfNetworkError`).
+- `transport/message_fuzz_test.go` holds the fuzz targets; deep runs with
+  `gotip test -run=XXX -fuzz=FuzzMessageDecode -fuzztime=10m ./transport/`.
