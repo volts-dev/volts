@@ -364,14 +364,50 @@ func isTrustedProxyPeer(host string) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
-// SetCookie Sets the header entries associated with key to the single element value. It replaces any existing values associated with key.
-// 一个cookie  有名称,内容,原始值,域,大小,过期时间,安全
-// cookie[0] => name string
-// cookie[1] => value string
-// cookie[2] => expires string
-// cookie[3] => path string
-// cookie[4] => domain string
-func (self *THttpContext) SetCookie(name string, value string, others ...interface{}) {
+// SetCookie 下发一个 Cookie。
+//
+// 参数是标准库的 *http.Cookie，因而支持全部属性 —— 尤其是 **SameSite**，
+// 它是防 CSRF 的第一道闸；旧的位置参数版本（现为 SetCookieValue）压根没有
+// 这个能力，等于框架不给用户防 CSRF 的基本工具。
+//
+//	ctx.SetCookie(&http.Cookie{
+//	    Name: "session", Value: token,
+//	    Path: "/", HttpOnly: true, Secure: true,
+//	    SameSite: http.SameSiteLaxMode,
+//	})
+//
+// 未指定 SameSite 时按 Lax 兜底：这是当代浏览器的事实默认，显式写出来可以
+// 避免各浏览器解释不一。确需跨站携带（如 iframe 内嵌）请显式设为
+// SameSiteNoneMode，并同时开 Secure —— 规范要求二者并存，否则浏览器直接丢弃。
+func (self *THttpContext) SetCookie(cookie *http.Cookie) {
+	if cookie == nil {
+		return
+	}
+
+	// NOTE 不能只比 SameSiteDefaultMode —— 它是 iota+1，值为 **1**，而结构体
+	// 未赋值时是 **0**（不对应任何具名常量）。只判 DefaultMode 的话，最常见的
+	// "压根没填 SameSite" 反而漏网，兜底形同虚设。
+	if cookie.SameSite <= http.SameSiteDefaultMode {
+		cookie.SameSite = http.SameSiteLaxMode
+	}
+	if cookie.SameSite == http.SameSiteNoneMode && !cookie.Secure {
+		log.Warnf("Cookie %q 设了 SameSite=None 却未开 Secure，浏览器会直接丢弃该 Cookie", cookie.Name)
+	}
+
+	http.SetCookie(self.response, cookie)
+}
+
+// SetCookieValue 以位置参数下发 Cookie（旧版 SetCookie 的行为）。
+//
+//	others[0] => Max-Age  int/int32/int64
+//	others[1] => Path     string
+//	others[2] => Domain   string
+//	others[3] => Secure   bool
+//	others[4] => HttpOnly bool
+//
+// Deprecated: 位置参数极易用错（第 4 个 bool 是 Secure、第 5 个才是 HttpOnly），
+// 且无法表达 SameSite。新代码请用 SetCookie(*http.Cookie)。
+func (self *THttpContext) SetCookieValue(name string, value string, others ...interface{}) {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%s=%s", sanitizeCookieName(name), sanitizeCookieValue(value))
 
