@@ -6,9 +6,9 @@ import (
 
 type dummyCodec struct{ name string }
 
-func (c dummyCodec) Encode(i interface{}) ([]byte, error)  { return nil, nil }
-func (c dummyCodec) Decode(d []byte, i interface{}) error  { return nil }
-func (c dummyCodec) String() string                        { return c.name }
+func (c dummyCodec) Encode(i interface{}) ([]byte, error) { return nil, nil }
+func (c dummyCodec) Decode(d []byte, i interface{}) error { return nil }
+func (c dummyCodec) String() string                       { return c.name }
 
 // 内置 codec 的 id 必须保持不变 —— 它是**线上协议的一部分**，
 // 改动会让新旧版本互相无法解码。
