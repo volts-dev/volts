@@ -48,6 +48,15 @@ type (
 		// is mTLS keypair
 		TlsConfig *tls.Config
 
+		// EnableH2C 允许明文连接上的 HTTP/2（h2c）。默认关闭。
+		//
+		// 此前非 TLS 监听会**无条件**包上 h2c handler。h2c 的明文升级
+		// （Upgrade: h2c / PRI * HTTP/2.0）在有前置代理的部署里是请求走私的
+		// 经典载体：前端代理按 HTTP/1.1 理解报文、后端按 HTTP/2 帧理解，
+		// 两者对"一个请求到哪里结束"产生分歧即可跨请求注入。
+		// 直接对外或经 gRPC 网关时才应打开。
+		EnableH2C bool `field:"enable_h2c"`
+
 		//DialTimeout sets timeout for dialing
 		DialTimeout time.Duration
 		// ReadTimeout sets readdeadline for underlying net.Conns
@@ -228,6 +237,17 @@ func Secure(b bool) Option {
 func TLSConfig(t *tls.Config) Option {
 	return func(cfg *Config) {
 		cfg.TlsConfig = t
+	}
+}
+
+// EnableH2C 开启明文连接上的 HTTP/2（h2c）。默认关闭。
+//
+// 只在服务直接对外、或确实需要明文 HTTP/2（如 gRPC 网关）时开启。
+// 若前面还有 Nginx/ALB 之类的 HTTP/1.1 代理，开启它会引入请求走私风险
+// —— 前后端对"请求边界"的理解不一致即可被跨请求注入。
+func EnableH2C(b bool) Option {
+	return func(cfg *Config) {
+		cfg.EnableH2C = b
 	}
 }
 

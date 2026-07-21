@@ -88,8 +88,10 @@ func (h *httpTransportListener) Serve(handler Handler) error {
 	}
 	// default http2 server
 
-	// insecure connection use h2c
-	if !(h.transport.config.Secure || h.transport.config.TlsConfig != nil) {
+	// 明文连接上的 HTTP/2（h2c）改为显式开启 —— 见 Config.EnableH2C 的说明：
+	// h2c 的明文升级在有前置代理的部署里是请求走私的经典载体，不该是默认行为。
+	if h.transport.config.EnableH2C &&
+		!(h.transport.config.Secure || h.transport.config.TlsConfig != nil) {
 		srv.Handler = h2c.NewHandler(srv.Handler, &http2.Server{})
 	}
 
