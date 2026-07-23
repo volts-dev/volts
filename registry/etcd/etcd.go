@@ -43,7 +43,10 @@ func New(opts ...registry.Option) registry.IRegistry {
 	var defaultOpts []registry.Option
 	defaultOpts = append(defaultOpts,
 		registry.WithName("etcd"),
-		registry.Timeout(time.Millisecond*100),
+		// 不设默认 Timeout：留 0 让下方 configure() 兜底成 5s。此前这里硬塞
+		// 100ms，对 etcd（哪怕本机单节点）都太紧——真栈实测大量注册漏注、
+		// 客户端解析服务 "not found" / "context deadline exceeded"，且因非 0
+		// 使 configure() 的 5s 兜底永不生效。调用方仍可用 registry.Timeout(...) 覆盖。
 	)
 
 	reg := &etcdRegistry{
