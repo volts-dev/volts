@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -179,21 +180,35 @@ func (self *Config) applyDebug() {
 	}
 }
 
-// under debug mode the port will keep at 35999
+// under debug mode the port will keep at 35999(http)/45999(rpc) by default.
 //
 // 只登记标志与端口，不碰子组件 —— 本 option 可能在 Transport / Router 建立之前
 // 被 apply（见 newConfig）。真正的下发在 Config.applyDebug。
+//
+// 端口可用环境变量 VOLTS_DEBUG_HTTP_PORT / VOLTS_DEBUG_RPC_PORT 覆盖——本仓
+// 原先所有走 cmd.Execute() 的进程（kylin 集成二进制、各独立微服务的 cmd）都
+// 无条件调 volts.Debug()，端口写死意味着同一台机器上两个这样的进程不可能
+// 同时跑（"bind: address already in use"，2026-07-24 独立 sale 进程真栈实测
+// 撞出）。未设置环境变量时行为与之前完全一致（仍是 :35999/:45999），kylin
+// 等既有部署零改动。
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
 		// Transport 为 nil 时走默认分支：newConfig 随后装配的是
 		// transport.Default()，即 HttpTransport，故按 HTTP 端口取值。
 		if _, ok := cfg.Transport.(*transport.HttpTransport); ok || cfg.Transport == nil {
-			cfg.Address = ":35999"
+			cfg.Address = ":" + envPortOr("VOLTS_DEBUG_HTTP_PORT", "35999")
 		} else {
-			cfg.Address = ":45999"
+			cfg.Address = ":" + envPortOr("VOLTS_DEBUG_RPC_PORT", "45999")
 		}
 	}
+}
+
+func envPortOr(envKey, fallback string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func Logger() logger.ILogger {
