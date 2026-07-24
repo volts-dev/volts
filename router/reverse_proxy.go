@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,18 @@ func RpcReverseProxy(ctx *TRpcContext) {}
 
 // TODO 改名称
 func HttpReverseProxy(ctx *THttpContext) {
+	inReq := ctx.Request().Request
+
+	// ── 环防护①：跳数上限。与注册中心状态无关，为任何转发环（自环或跨节点
+	//    A→B→A）封顶，使其永远无法耗尽临时端口。放在最前面：连节点都不必选。
+	depth := proxyDepthOf(inReq)
+	if depth >= maxProxyDepth {
+		log.Errf("http: proxy loop detected, depth=%d ≥ %d | Method: %s | Path: %s — refusing to forward",
+			depth, maxProxyDepth, inReq.Method, inReq.URL.Path)
+		ctx.WriteHeader(http.StatusLoopDetected)
+		return
+	}
+
 	service, node, err := getService(ctx)
 	if err != nil {
 		ctx.WriteHeader(500)
@@ -78,11 +91,21 @@ func HttpReverseProxy(ctx *THttpContext) {
 		return
 	}
 
+	// ── 环防护②：自身地址短路。目标即本进程监听端口时绝不拨号 —— 这正是
+	//    “反代到自己”导致 EADDRNOTAVAIL 的根因（注册中心抖动 / 同端口部署时发生）。
+	//    自环不是节点故障，因此不上报 selector（既不摘除也不重置熔断）。
+	if isSelfTarget(rp.Host, localListenAddr(inReq)) {
+		log.Errf("http: proxy self-loop blocked | Method: %s | Path: %s | Target: %s == own listen addr — a discovered node advertises this gateway's own address; check registry / filteSelf",
+			inReq.Method, inReq.URL.Path, service)
+		ctx.WriteHeader(http.StatusLoopDetected)
+		return
+	}
+
 	if isWebSocket(ctx) {
 		// 必须把 scheme 一并传下去：后端是 https 时要走 TLS 拨号。
 		// 此前只传 rp.Host，对 HTTPS 后端会以明文 TCP 直连 —— 握手必然失败，
 		// 而 getService 明明已经解析出了 protocol。
-		err := serveWebSocket(rp.Scheme, rp.Host, ctx.Response(), ctx.Request().Request)
+		err := serveWebSocket(rp.Scheme, rp.Host, ctx.Response(), inReq)
 		markNode(err)
 		return
 	}
@@ -91,7 +114,6 @@ func HttpReverseProxy(ctx *THttpContext) {
 	// GetBody 是 http.Transport 内部重试的触发条件：有 GetBody 时，transport
 	// 检测到 errServerClosedIdle 后会自动重建连接并重放请求，无需在 ErrorHandler
 	// 里手动 retry（手动 retry 传入的是已消费 Body 的 outgoing request，POST 会丢 body）。
-	inReq := ctx.Request().Request
 	var rewriteFn func(*httputil.ProxyRequest)
 	if inReq.Body != nil && inReq.ContentLength > 0 && inReq.ContentLength <= maxProxyRetryBody {
 		bodyBytes, err := io.ReadAll(inReq.Body)
@@ -104,6 +126,8 @@ func HttpReverseProxy(ctx *THttpContext) {
 			pr.SetURL(rp)
 			pr.Out.Host = rp.Host
 			pr.SetXForwarded()
+			// 累计反代跳数，供下游（含本进程自己）的跳数护盾封顶转发环。
+			pr.Out.Header.Set(proxyDepthHeader, strconv.Itoa(depth+1))
 			// 为 outgoing request 设置 GetBody，让 transport 自动重试 stale 连接
 			pr.Out.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			pr.Out.GetBody = func() (io.ReadCloser, error) {
@@ -116,6 +140,8 @@ func HttpReverseProxy(ctx *THttpContext) {
 			pr.SetURL(rp)
 			pr.Out.Host = rp.Host
 			pr.SetXForwarded()
+			// 累计反代跳数，供下游（含本进程自己）的跳数护盾封顶转发环。
+			pr.Out.Header.Set(proxyDepthHeader, strconv.Itoa(depth+1))
 		}
 	}
 
@@ -189,6 +215,9 @@ func serveWebSocket(scheme, host string, w http.ResponseWriter, r *http.Request)
 	// Header 仍与原请求共享同一个 map，下面的 Header.Set 会直接改写调用方
 	// 持有的请求头。Clone 会连 Header/Trailer/URL 一并复制。
 	req := r.Clone(r.Context())
+
+	// 累计反代跳数：WebSocket 走 Hijack 直连，也要让跳数护盾能对 WS 转发环封顶。
+	req.Header.Set(proxyDepthHeader, strconv.Itoa(proxyDepthOf(r)+1))
 
 	// set x-forward-for
 	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
