@@ -14,6 +14,7 @@ import (
 	"github.com/volts-dev/template"
 	"github.com/volts-dev/utils"
 	"github.com/volts-dev/volts/codec"
+	"github.com/volts-dev/volts/internal/addr"
 	igoroutine "github.com/volts-dev/volts/internal/goroutine"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
@@ -544,19 +545,65 @@ func (self *TRouter) Close() {
 }
 
 // filteSelf filters out the nodes that belong to the current instance from a service.
-func (self *TRouter) filteSelf(srv *registry.Service, localSet map[string]struct{}) *registry.Service {
-	service := *srv // Shallow copy to avoid mutating the cached original service object
+// selfIdentity 是本进程注册出去的全部节点的身份集合，filteSelf 用它把发现结果里
+// 指向自身的节点剔除，避免建出自环反代路由（会把本地 handler 覆盖成打向自身）。
+//
+// 同时按两条线匹配：
+//   - node.Id：常规情形，本进程注册的节点 id。
+//   - 归一化地址（addr.LocalFormat 后的 host:port）：抓住 id 对不上但地址相同的
+//     情形 —— 多进程用 server.Debug() 撞同一端口时，撞端口的节点 id 是别的进程
+//     的、地址却落在本机监听端口上，纯 node.Id 匹配结构性漏掉，只有地址线能识别。
+//     归一化与反代拨号路径（reverse_proxy.go 的 addr.LocalFormat）用同一把尺子，
+//     因此“会被拨到哪”和“算不算自己”判定一致。
+type selfIdentity struct {
+	ids   map[string]struct{}
+	addrs map[string]struct{}
+}
 
-	// If localSet is nil, it indicates a safety shield condition.
-	if localSet == nil {
-		service.Nodes = nil
-		return &service
+// localIdentity 从 RegistryCacher.LocalServices()（本进程的注册记录，非 etcd 镜像
+// 缓存，因此不随 lease 抖动）收集自身身份。返回 nil 表示本地服务尚未注册上来、
+// 暂时无法确定“自己是谁”，由调用方 store() 决定护盾还是放行。
+func (self *TRouter) localIdentity() *selfIdentity {
+	locals := self.config.RegistryCacher.LocalServices()
+	if len(locals) == 0 {
+		return nil
 	}
+
+	me := &selfIdentity{
+		ids:   make(map[string]struct{}),
+		addrs: make(map[string]struct{}),
+	}
+	for _, srv := range locals {
+		if srv == nil {
+			continue
+		}
+		for _, n := range srv.Nodes {
+			if n == nil {
+				continue
+			}
+			me.ids[n.Id] = struct{}{}
+			me.addrs[addr.LocalFormat(n.Address)] = struct{}{}
+		}
+	}
+	return me
+}
+
+// filteSelf 返回一个副本，其中指向本进程自身的节点已被剔除（按 node.Id 或归一化
+// 地址匹配），防止转发时无限自环。me 必须非 nil —— 自身未知的护盾/放行分支由调用方
+// store() 提前处置，不进这里。
+func (self *TRouter) filteSelf(srv *registry.Service, me *selfIdentity) *registry.Service {
+	service := *srv // Shallow copy to avoid mutating the cached original service object
 
 	nodes := make([]*registry.Node, 0, len(service.Nodes))
 	for _, n := range service.Nodes {
-		// Check if the node ID matches any local node ID to prevent infinite request loops during forwarding.
-		if _, hasId := localSet[n.Id]; hasId {
+		if n == nil {
+			continue
+		}
+		// node.Id 或归一化地址任一命中即视为自身，剔除以防无限自环。
+		if _, hit := me.ids[n.Id]; hit {
+			continue
+		}
+		if _, hit := me.addrs[addr.LocalFormat(n.Address)]; hit {
 			continue
 		}
 
@@ -573,28 +620,22 @@ func (self *TRouter) store(services []*registry.Service) {
 		return
 	}
 
-	// Pre-calculate the local node set to avoid O(N*M) lookups in the loop.
-	var localSet map[string]struct{}
-	localServices := self.config.RegistryCacher.LocalServices()
+	// 收集本进程的“自身身份”（node.Id + 归一化地址），用于剔除指向自己的节点。
+	me := self.localIdentity()
 
-	// Handle the case where the monitoring fetch happens before local services are fully registered.
-	if len(localServices) == 0 && self.tree.Count.Load() > 0 {
-		localSet = nil // Enter temporary empty node state.
-	} else {
-		localSet = make(map[string]struct{})
-		for _, curSrv := range localServices {
-			if curSrv == nil {
-				continue
-			}
-			for _, node := range curSrv.Nodes {
-				localSet[node.Id] = struct{}{}
-			}
-		}
+	// 尚不知“自己是谁”（本地服务还没注册上来）时的两种处置：
+	//   - 已挂本地路由：进入安全护盾，本轮不建任何代理路由。宁可这轮不更新，也
+	//     不能建出可能指向自身的路由把本地 handler 覆盖成自环。
+	//   - 尚无本地路由（纯网关刚启动，无自身可环）：放行全部节点，照常建路由。
+	if me == nil && self.tree.Count.Load() > 0 {
+		return
 	}
 
 	// Create a new endpoint mapping.
 	for _, service := range services {
-		service = self.filteSelf(service, localSet)
+		if me != nil {
+			service = self.filteSelf(service, me)
+		}
 		if len(service.Nodes) > 0 {
 			var handlerId int
 			for _, sep := range service.Endpoints {
