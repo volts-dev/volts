@@ -14,7 +14,6 @@ import (
 
 	"github.com/volts-dev/cacher/memory"
 	"github.com/volts-dev/utils"
-	"github.com/volts-dev/volts/registry"
 	"go.uber.org/atomic"
 )
 
@@ -97,7 +96,6 @@ type (
 	handler struct {
 		sync.RWMutex
 		Config        *ControllerConfig
-		services      []*registry.Service //todo remove 该路由服务线路 提供网关等特殊服务用// Versions of this service
 		service       string
 		Id            int           // 根据Name生成的UID用于缓存
 		Name          string        // handler名称
@@ -272,7 +270,6 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 		// 为 false，init 会在已完整的 funcs 上**再前置一次全局链** —— 表现为网关
 		// 反代路由上的中间件执行两次，且每次 registry 刷新（60s）都可能再叠一层。
 		if h := defaultHandlerManager.Model(uid); h != nil {
-			//h.SetServices(services) // 更新服务列表
 			return h
 		}
 	} else {
@@ -288,7 +285,6 @@ func generateHandler(handlerType HandlerType, tt TransportType, handlers []any, 
 		Name:   fmt.Sprintf("%s-%d", GetFuncName(handlers[0], filepath.Separator), uid),
 		Config: &ControllerConfig{},
 		Type:   handlerType,
-		//services: services,
 		service: service,
 		pos:     *atomic.NewInt32(-1), // 初始化位置为-1
 	}
@@ -471,20 +467,8 @@ func (self *handlerManager) Put(id int, h *handler) {
 	}
 }
 
-func (self *handler) Services() []*registry.Service {
-	self.RLock()
-	defer self.RUnlock()
-	return self.services
-}
-
 func (self *handler) Service() string {
 	return self.service
-}
-
-func (self *handler) SetServices(services []*registry.Service) {
-	self.Lock()
-	defer self.Unlock()
-	self.services = services
 }
 
 // 处理器名称
@@ -774,12 +758,6 @@ func (self *handler) clone() *handler {
 	}
 
 	h.pos.Store(self.pos.Load())
-
-	/*
-		if self.services != nil {
-			h.services = make([]*registry.Service, len(self.services))
-			copy(h.services, self.services)
-		}*/
 
 	return h
 }
