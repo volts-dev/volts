@@ -313,13 +313,21 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 		conn, _, err := hj.Hijack()
 		if err != nil {
+			// Hijack 失败时 conn 为 nil，继续走下面的 io.WriteString(conn,...)
+			// 必然 nil deref panic —— 此前就是这么写的。必须直接返回。
 			log.Errf("rpc hijacking %v: %v", r.RemoteAddr, err.Error())
+			return
 		}
+		// 一旦 Hijack 成功，连接生命周期归我们管，http.Server 不再负责关闭它。
 		io.WriteString(conn, "HTTP/1.0 200 Connected to RPC\n\n")
 
 		msg, err := transport.ReadMessage(conn)
 		if err != nil {
+			// 读不到首帧就无从构造 RpcRequest（msg 可能为 nil），继续会带着坏
+			// 消息往下走。已劫持的连接必须显式关闭，否则这条 socket 泄漏。
 			log.Errf("rpc Read %s", err.Error())
+			conn.Close()
+			return
 		}
 		sock := transport.NewTcpTransportSocket(conn, 0, 0)
 		req := transport.NewRpcRequest(r.Context(), msg, sock)
@@ -339,6 +347,10 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		route, params := self.tree.Match(r.Method, r.URL.Path)
 		if route == nil {
 			rsp.WriteHeader(http.StatusNotFound)
+			// 404 也要把 rsp 归还池——否则扫描器/缺失静态资源刷 404 时，每个
+			// 请求都重新分配一个 THttpResponse，池形同虚设。
+			rsp.ResponseWriter = nil
+			self.respPool.Put(rsp)
 			return
 		}
 
@@ -353,6 +365,8 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			// 未来若有人误存其他类型时直接 panic 拉崩整个 HTTP server。
 			log.Errf("httpCtxPool corruption: unexpected type %T for route %v", p, route.Id())
 			rsp.WriteHeader(http.StatusInternalServerError)
+			rsp.ResponseWriter = nil
+			self.respPool.Put(rsp)
 			return
 		}
 		ctx := pool.Get().(*THttpContext)
