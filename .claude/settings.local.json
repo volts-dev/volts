@@ -22,7 +22,8 @@
       "Bash(/usr/local/bin/git checkout *)",
       "Bash(/usr/local/bin/git branch *)",
       "Bash(/usr/local/bin/git log *)",
-      "Bash(/usr/local/bin/git status *)"
+      "Bash(/usr/local/bin/git status *)",
+      "Bash(lsof -nP -iTCP:35999 -sTCP:LISTEN)"
     ]
   }
 }
