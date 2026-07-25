@@ -136,23 +136,47 @@ func Default(new ...IRegistry) IRegistry {
 	return defaultRegistry
 }
 
-// 比对服务节点UID是否一致，
+// Equal 报告两个服务是否为「同名同版本、且节点集合完全一致」的同一个服务。
+//
+// ★ 历史 bug（跨进程调用时好时坏的根因之一）：节点数不等时，判断整个被 if 跳过，
+// 直接落到结尾的 `return true` —— 判定为「相等」；名称也完全不参与比较。
+// TRouter.isLocalService 用它把「本进程自己托管的服务」排除在建代理路由之外，于是
+// 只要某个远程服务的节点数与任意一个本地服务不同，它就被误判成本地服务，
+// refresh() 随即 continue 跳过，永远不为它建代理路由 —— 调用方拿不到路由，
+// 表现为 404 / 500 / 超时。
+//
+// 注册中心里存在僵尸节点时必然触发：进程被 SIGKILL（调试停止、kill -9）后 lease
+// 不会主动撤销，同名服务下新旧节点并存（节点数翻倍），与本地快照长度不等。
+// lease 过期后又恢复正常 —— 这正是「时好时坏」的由来。
+//
+// 判定方向刻意取严：宁可返回 false 多走一次 store()，那里的 filteSelf 会按
+// node.Id + 归一化地址精确剔除自身节点；返回 true 则是直接跳过，一旦误判就永久
+// 缺路由，代价不对等。
 func (self *Service) Equal(to *Service) bool {
-	// noop 会返回nil 这里需要判断
-	if self != nil && len(self.Nodes) == len(to.Nodes) {
-		var macth bool
-		for _, node := range self.Nodes {
-			macth = false
-			for _, n := range to.Nodes {
-				if node.Id == n.Id {
-					macth = true
-					break
-				}
-			}
+	// noop registry 会返回 nil，这里需要判断
+	if self == nil || to == nil {
+		return self == to
+	}
 
-			if !macth {
-				return false
+	if self.Name != to.Name || self.Version != to.Version {
+		return false
+	}
+
+	if len(self.Nodes) != len(to.Nodes) {
+		return false
+	}
+
+	for _, node := range self.Nodes {
+		match := false
+		for _, n := range to.Nodes {
+			if node.Id == n.Id {
+				match = true
+				break
 			}
+		}
+
+		if !match {
+			return false
 		}
 	}
 
