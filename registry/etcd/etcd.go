@@ -27,6 +27,19 @@ var (
 	prefix = "/volts/registry/"
 )
 
+const (
+	// defaultTimeout 是 etcd 各操作（Get/Put/Lease/Watch）的默认超时。
+	defaultTimeout = 5 * time.Second
+
+	// minTimeout 是允许的最小超时。低于它的配置一律视为配置错误并抬到
+	// defaultTimeout —— 对 etcd 来说亚秒级超时不存在合理用途：本机单节点
+	// 拉一次全量服务列表实测就要 77~130ms，跨网络更高，而超时窗口还要覆盖
+	// 传输 + 反序列化。踩线的后果不是慢，是 GetService/ListServices 直接
+	// 报 context deadline exceeded；registryCacher 在没有旧缓存可回退时会把
+	// 这个原始错误原样透出，上层网关按「无状态码错误」压成 HTTP 500。
+	minTimeout = time.Second
+)
+
 type etcdRegistry struct {
 	client *clientv3.Client
 	config *registry.Config
@@ -43,10 +56,10 @@ func New(opts ...registry.Option) registry.IRegistry {
 	var defaultOpts []registry.Option
 	defaultOpts = append(defaultOpts,
 		registry.WithName("etcd"),
-		// 不设默认 Timeout：留 0 让下方 configure() 兜底成 5s。此前这里硬塞
+		// 不设默认 Timeout：交给 configure() 按 minTimeout 下限兜底。此前这里硬塞
 		// 100ms，对 etcd（哪怕本机单节点）都太紧——真栈实测大量注册漏注、
-		// 客户端解析服务 "not found" / "context deadline exceeded"，且因非 0
-		// 使 configure() 的 5s 兜底永不生效。调用方仍可用 registry.Timeout(...) 覆盖。
+		// 客户端解析服务 "not found" / "context deadline exceeded"。调用方仍可用
+		// registry.Timeout(...) 覆盖，只要不低于 minTimeout。
 	)
 
 	reg := &etcdRegistry{
@@ -66,8 +79,17 @@ func configure(e *etcdRegistry) error {
 
 	e.config.Name = e.String()
 
-	if e.config.Timeout == 0 {
-		e.config.Timeout = 5 * time.Second
+	// 兜底不能只认 Timeout==0：那个哨兵假设「没配过就是 0」，可 registry.NewConfig
+	// 的历史默认是 100ms，且该值早已被 config.Register 持久化进各家配置文件
+	// （server.*.registry.timeout / router.*.registry.timeout / client.*… 每个使用
+	// registry 的组件都有一份自己前缀下的副本）。于是 Timeout 恒非 0，兜底永不
+	// 触发，而 100ms 对 etcd 是必然踩线的值。这里按下限判定，存量配置也能自愈。
+	if e.config.Timeout < minTimeout {
+		if e.config.Timeout > 0 {
+			log.Warnf("etcd: timeout %v 过短（下限 %v），已抬到 %v —— 亚秒级超时会让 GetService/ListServices 报 context deadline exceeded，上层通常表现为 HTTP 500；请检查配置文件里的 registry.timeout",
+				e.config.Timeout, minTimeout, defaultTimeout)
+		}
+		e.config.Timeout = defaultTimeout
 	}
 
 	if e.config.Secure || e.config.TlsConfig != nil {

@@ -65,7 +65,13 @@ func NewConfig(opts ...Option) *Config {
 		Name:    "default",
 		Logger:  log,
 		Context: context.Background(),
-		Timeout: time.Millisecond * 100,
+		// 5s 而不是原来的 100ms。这个默认值会被 config.Register 持久化进配置
+		// 文件，而且每个内嵌 registry 的组件（server/router/client/selector）都
+		// 会在自己的前缀下留一份副本 —— 100ms 因此扩散到几十处，并让 etcd 侧
+		// 「Timeout==0 才兜底」的逻辑永不触发。亚秒级超时对网络型后端
+		// （etcd/consul）没有合理用途：本机 etcd 拉一次全量服务列表实测就要
+		// 77~130ms，踩线的结果是 context deadline exceeded 一路透传成 HTTP 500。
+		Timeout: 5 * time.Second,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)
