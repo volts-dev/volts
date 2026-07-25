@@ -167,6 +167,34 @@ func (self *Bom) SetVersion(v byte) {
 	self[1] = (self[1] &^ 0xF0) | ((v << 4) & 0xF0)
 }
 
+// String 让状态位在日志与 error 文案里可读。状态位只有 4bit（0-15），
+// 越界值原样打出数字而不是伪装成某个已知状态。
+func (self MessageStatusType) String() string {
+	switch self {
+	case StatusOK:
+		return "OK"
+	case StatusError:
+		return "Error"
+	case StatusInternalError:
+		return "InternalError"
+	case StatusForbidden:
+		return "Forbidden"
+	case StatusNotFound:
+		return "NotFound"
+	case StatusUnknown:
+		return "Unknown"
+	case StatusAborted:
+		return "Aborted"
+	case StatusNotImplemented:
+		return "NotImplemented"
+	case StatusServiceUnavailable:
+		return "ServiceUnavailable"
+	case StatusUnauthorized:
+		return "Unauthorized"
+	}
+	return fmt.Sprintf("Status(%d)", byte(self))
+}
+
 // MessageStatusType returns the message status type.
 func (self Bom) MessageStatusType() MessageStatusType {
 	return MessageStatusType(self[1] & 0x0F)

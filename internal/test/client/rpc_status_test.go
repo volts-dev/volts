@@ -1,11 +1,15 @@
 package client
 
 import (
+	stderrors "errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/volts-dev/volts"
 	"github.com/volts-dev/volts/client"
+	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/test"
 	"github.com/volts-dev/volts/router"
 	"github.com/volts-dev/volts/server"
@@ -15,15 +19,11 @@ import (
 // 服务端把「路由不存在」写成 StatusNotFound + 空 body（router.ServeRPC），
 // 客户端必须能把它识别成一次失败的调用。
 //
-// 现状：识别不了。rpc_client.call 组装 rpcResponse 时只填 contentType 和 body，
-// 从不读 respMsg 的状态位、也不拷贝 respMsg.Header（handleError 写的
-// __rpc_error__ 就在那里），随后把 respMsg 归还消息池，状态彻底丢失。于是
-// rpcResponse.message 恒为 nil、StatusCode() 恒为 0(StatusOK)，Call 返回
-// (resp, nil) —— 调用方拿到一个 error 为 nil 的空结果，与「服务端正常返回空」
-// 完全无法区分。
-//
-// 本测试记录当前真实行为。修好状态透传后应改为断言 err != nil。
-func TestRpcClient_ServerNotFoundIsInvisibleToCaller(t *testing.T) {
+// 回归的是这个 bug：rpc_client.call 组装 rpcResponse 时只填 contentType 和
+// body，从不读 respMsg 的状态位、也不拷贝 respMsg.Header，随后把 respMsg 归还
+// 消息池，状态彻底丢失 —— 调用方拿到 err=nil 的空结果，与「服务端正常返回空」
+// 完全无法区分，上层网关据此回一个 HTTP 200 + 空 body。
+func TestRpcClient_ServerNotFoundIsVisibleToCaller(t *testing.T) {
 	r := router.New()
 	r.Url([]string{"CONNECT"}, "Arith", new(test.ArithCtrl))
 
@@ -71,20 +71,27 @@ func TestRpcClient_ServerNotFoundIsInvisibleToCaller(t *testing.T) {
 
 	resp, err := cli.Call(req)
 
-	if err != nil {
-		t.Logf("已能感知服务端错误（状态透传已修复）: %v", err)
-		return
+	if err == nil {
+		t.Fatalf("服务端 StatusNotFound，客户端却返回 err=nil —— 与「正常返回空结果」无法区分（resp=%v）", resp)
 	}
 
-	// —— 以下是当前（未修）行为的记录 ——
-	t.Logf("★ 服务端 StatusNotFound，客户端 Call 返回 err = nil")
+	// 错误必须带得出 HTTP 404，网关才能据此回一个正确的状态码而不是 500。
+	var verr *errors.Error
+	if !stderrors.As(err, &verr) {
+		t.Fatalf("期望 *errors.Error，实得 %T: %v", err, err)
+	}
+	if verr.Code != http.StatusNotFound {
+		t.Errorf("错误码 = %d，期望 %d(NotFound)；文案 = %q", verr.Code, http.StatusNotFound, verr.Detail)
+	}
+	if !strings.Contains(verr.Detail, "Arith.NoSuchMethod") {
+		t.Errorf("错误文案未带上被调方法名，排查时无从定位: %q", verr.Detail)
+	}
+
+	// 响应体仍应返回给调用方（状态位场景下 body 为空，但不能是 nil resp）。
 	if resp == nil {
-		t.Fatal("err 和 resp 同时为空，调用方无从判断")
+		t.Fatal("出错时 resp 为 nil，调用方读不到服务端可能写回的诊断信息")
 	}
-	t.Logf("★ StatusCode() = %d（0=StatusOK；rpcResponse.message 从未被赋值）", resp.StatusCode())
-	t.Logf("★ Header() = %v（respMsg.Header 从未拷贝，__rpc_error__ 丢失）", resp.Header())
-
-	body := resp.Body().AsBytes()
-	t.Logf("★ Body 长度 = %d 字节，内容 = %q", len(body), string(body))
-	t.Log("★ 结论：一次「方法不存在」的调用，与「服务端正常返回空」在调用方看来完全一样")
+	if resp.StatusCode() != int(transport.StatusNotFound) {
+		t.Errorf("StatusCode() = %d，期望 %d(StatusNotFound)", resp.StatusCode(), transport.StatusNotFound)
+	}
 }

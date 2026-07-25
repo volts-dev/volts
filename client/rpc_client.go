@@ -9,6 +9,7 @@ import (
 	"github.com/volts-dev/volts/errors"
 	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/internal/body"
+	"github.com/volts-dev/volts/internal/header"
 	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/internal/net"
 	"github.com/volts-dev/volts/internal/pool"
@@ -146,6 +147,16 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 
 			// if the call succeeded lets bail early
 			if err == nil {
+				// 传输层成功 ≠ 调用成功：服务端把「路由不存在 / 编解码被拒 /
+				// 鉴权失败 / Abort」写在消息状态位上，body 是空的。此前这里
+				// 直接 return (resp, nil)，调用方无法与「正常返回空结果」区分，
+				// 网关于是把一次失败的 RPC 原样变成 HTTP 200 + 空 body。
+				//
+				// 立即返回，不进重试、不改熔断上报：节点应答了就是活的（熔断
+				// 只认连接级故障），而重试一个非幂等 RPC 可能造成重复写。
+				if resp.status != transport.StatusOK {
+					return resp, resp.statusError(request.Method())
+				}
 				return resp, nil
 			}
 			response = resp
@@ -257,6 +268,13 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		resp := &rpcResponse{
 			contentType: respMsg.SerializeType(),
 			body:        bd,
+			// 状态位与消息头必须在归还消息池之前拷走：respMsg 一旦回池就会被
+			// 下一个请求覆写。此前两者都没拷，服务端的失败信号整个丢失。
+			status: respMsg.MessageStatusType(),
+			header: make(header.Header, len(respMsg.Header)),
+		}
+		for k, v := range respMsg.Header {
+			resp.header.Set(k, v)
 		}
 		transport.PutMessageToPool(respMsg)
 
