@@ -46,39 +46,56 @@ type (
 		Metadata map[string]string `json:"metadata"`
 	}
 
+	// Endpoint 描述一个对外暴露的接口。整个 Endpoint 列表会随服务注册写进注册
+	// 中心，是「各微服务之间共享接口」的载体：网关据此为远端服务的 HTTP 路径建
+	// 反向代理路由（router.store），registryCacher 据此做「路径 → 服务」反查，
+	// OpenAPI 网关据此聚合全景文档。
+	//
+	// **所有可空字段一律 omitempty**：真栈实测 4284 条端点里，
+	// description/metadata/stream/Handler/host/Body 这六个字段**无一例外全是空值**
+	// （""/null/false），却占掉整个 endpoints 载荷的 28%——每条都原样搬一遍
+	// `"description":"","metadata":null,"stream":false,...`。注册中心的每次
+	// 注册、每个 watch 事件、每次全量 ListServices 都要搬运它们。
+	// omitempty 只影响编码：读侧缺键即零值，与此前收到空值完全等价，跨版本双向兼容。
 	Endpoint struct {
 		// RPC Method e.g. Greeter.Hello
 		Name string `json:"name"`
 		// HTTP Host e.g example.com
-		Host []string `json:"host"`
+		Host []string `json:"host,omitempty"`
 		// HTTP Methods e.g GET, POST
-		Method []string `json:"method"`
+		Method []string `json:"method,omitempty"`
 		// HTTP Path e.g /greeter. Expect POSIX regex
 		Path string `json:"path"`
 		// Description e.g what's this endpoint for
-		Description string `json:"description"`
+		Description string `json:"description,omitempty"`
 		// Tags 用于 OpenAPI 分组（omitempty 保持向后兼容）
 		Tags []string `json:"tags,omitempty"`
 		// Stream flag
-		Stream bool `json:"stream"`
+		Stream bool `json:"stream,omitempty"`
 
 		// 以下待确认
-		Request  *Value            `json:"request"`
-		Response *Value            `json:"response"`
-		Metadata map[string]string `json:"metadata"`
+		Request  *Value            `json:"request,omitempty"`
+		Response *Value            `json:"response,omitempty"`
+		Metadata map[string]string `json:"metadata,omitempty"`
 
 		// API Handler e.g rpc, proxy
-		Handler string
+		//
+		// 补 json tag 是为了带上 omitempty。改成小写键不影响兼容：Go 的
+		// json 解码匹配字段名不区分大小写，旧数据里的 "Handler"/"Body"
+		// 仍能解进来。
+		Handler string `json:"handler,omitempty"`
 		// Body destination
 		// "*" or "" - top level message value
 		// "string" - inner message value
-		Body string
+		Body string `json:"body,omitempty"`
 	}
 
 	Value struct {
-		Name   string   `json:"name"`
-		Type   string   `json:"type"`
-		Values []*Value `json:"values"`
+		Name string `json:"name"`
+		Type string `json:"type"`
+		// 叶子类型（string/bool/int…）没有子字段，而请求/响应的 schema 里
+		// 绝大多数节点都是叶子：不加 omitempty 每个叶子都要多带 `"values":null`。
+		Values []*Value `json:"values,omitempty"`
 
 		// OpenAPI 扩展字段（向后兼容：omitempty）
 		Required    bool     `json:"required,omitempty"`
