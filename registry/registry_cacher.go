@@ -41,6 +41,13 @@ type (
 		watched       map[string]bool
 		localServices []*Service
 
+		// 全量服务清单的缓存。ListServices 此前**完全没有缓存**（结构体只是嵌入
+		// IRegistry，方法直接穿透到后端），而它是按模型找属主服务这类调用的入口，
+		// 每个请求都要走一趟：真栈实测网关每处理一次 call_kw 就打约 3 次 etcd
+		// Range，每次全量扫 800KB+ 的注册数据。
+		listCache []*Service
+		listTTL   time.Time
+
 		// exit is used to stop the background watcher
 		exit chan bool
 		// wg waits for run() + every watch() goroutine to fully exit on Stop()
@@ -231,6 +238,11 @@ func (c *registryCacher) update(res *Result) {
 
 	c.Lock()
 	defer c.Unlock()
+
+	// 任何注册/注销事件都让全量清单缓存立即失效——**必须在下面按 watched
+	// 过滤之前**：新上线的服务本来就还没被 watch，若放在过滤之后，新服务要等
+	// 满一个 TTL 才在清单里出现。
+	c.listTTL = time.Time{}
 
 	// only save watched services
 	if _, ok := c.watched[res.Service.Name]; !ok {
@@ -473,45 +485,107 @@ func (c *registryCacher) watch(w Watcher) error {
 	}
 }
 
+// match 按 endpoint 路径反查服务名。
+//
+// 这里曾有三个叠在一起的并发缺陷，都已修掉：
+//  1. 出错时 `return nil, err` **没有 RUnlock**，读锁永久泄漏。之后任何写者
+//     （watch 事件的 update）会永远阻塞，而 Go 的 RWMutex 一旦有写者在等，
+//     后续 RLock 也全部排在它后面——**一次瞬时的注册中心抖动会把整个缓存器
+//     永久卡死**，症状是此后所有服务发现都超时。
+//  2. `c.endpointMap[...] = ...` 是**在读锁下写 map**：并发调用会触发
+//     "concurrent map writes" 直接崩进程，也与 update 的写入互相竞争。
+//  3. 持锁做网络调用（ListServices），把后端的慢直接传导成锁竞争。
 func (c *registryCacher) match(endpoint string) ([]*Service, error) {
 	c.RLock()
-	// check the cache first
 	service, has := c.endpointMap[endpoint]
-	if !has {
-		val, err, _ := c.sg.Do(endpoint, func() (interface{}, error) {
-			return c.IRegistry.ListServices()
-		})
-		if err != nil {
-			return nil, err
-		}
+	c.RUnlock()
 
-		services, _ := val.([]*Service)
-		// reset the status
-		if err := c.getStatus(); err != nil {
-			c.setStatus(nil)
-		}
+	if has {
+		return c.get(service)
+	}
 
-		for _, srv := range services {
-			for _, ep := range srv.Endpoints {
-				// 获取服务名称
-				if ep.Path == endpoint {
-					service = srv.Name
-				}
+	// 不持锁做网络调用；并发的同名查询由 singleflight 合并成一次。
+	val, err, _ := c.sg.Do(endpoint, func() (interface{}, error) {
+		return c.ListServices()
+	})
+	if err != nil {
+		return nil, err
+	}
 
-				if srvName, has := c.endpointMap[ep.Path]; has {
-					if srvName != srv.Name {
-						log.Errf("same endpiont in diff service %s-%s", srvName, srv.Name)
-					}
+	services, _ := val.([]*Service)
+	// reset the status
+	if err := c.getStatus(); err != nil {
+		c.setStatus(nil)
+	}
 
-					continue
-				}
-				c.endpointMap[ep.Path] = srv.Name
-
+	c.Lock()
+	for _, srv := range services {
+		for _, ep := range srv.Endpoints {
+			// 获取服务名称
+			if ep.Path == endpoint {
+				service = srv.Name
 			}
+
+			if srvName, exists := c.endpointMap[ep.Path]; exists {
+				if srvName != srv.Name {
+					log.Errf("same endpiont in diff service %s-%s", srvName, srv.Name)
+				}
+
+				continue
+			}
+			c.endpointMap[ep.Path] = srv.Name
 		}
 	}
-	c.RUnlock()
+	c.Unlock()
+
 	return c.get(service)
+}
+
+// ListServices 返回全量服务清单，带 TTL 缓存。
+//
+// 必须覆写：registryCacher 只是嵌入 IRegistry，不覆写就直接穿透到后端，
+// 「缓存器」这个名字对它完全不成立。而这个方法是「按模型/按路径找属主服务」
+// 的入口，处在每个网关请求的必经路径上——真栈实测 20 次 call_kw 打出 61 次
+// etcd Range，每次全量扫 800KB+ 注册数据，间歇性把 5s 超时耗尽，表现为
+// 跨服务调用约一成随机失败。
+//
+// 与 get() 同款约定：singleflight 合并并发回源、出错时**退回陈旧缓存**而不是
+// 把错误抛给调用方（服务清单短暂过期，远好过整条链路报错），返回副本防止
+// 调用方改到缓存里的对象。watch 事件会让缓存立即失效（见 update），所以
+// 新注册/注销的可见延迟不受 TTL 限制。
+func (c *registryCacher) ListServices() ([]*Service, error) {
+	c.RLock()
+	cached := Copy(c.listCache)
+	ttl := c.listTTL
+	c.RUnlock()
+
+	if c.isValid(cached, ttl) {
+		return cached, nil
+	}
+
+	val, err, _ := c.sg.Do("*list*", func() (interface{}, error) {
+		return c.IRegistry.ListServices()
+	})
+	if err != nil {
+		if len(cached) > 0 {
+			c.setStatus(err)
+			return cached, nil
+		}
+		return nil, err
+	}
+
+	services, _ := val.([]*Service)
+
+	if err := c.getStatus(); err != nil {
+		c.setStatus(nil)
+	}
+
+	c.Lock()
+	c.listCache = Copy(services)
+	c.listTTL = time.Now().Add(c.config.TTL)
+	c.Unlock()
+
+	return services, nil
 }
 
 func (c *registryCacher) Match(endpoint string) ([]*Service, error) {
