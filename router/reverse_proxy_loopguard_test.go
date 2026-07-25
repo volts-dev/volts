@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/volts-dev/volts/internal/addr"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -35,7 +36,7 @@ func TestIsLoopbackHost(t *testing.T) {
 	}
 }
 
-// isSelfTarget 的判据是“loopback 主机 + 端口等于本机监听端口”。
+// isSelfTarget 的判据是“端口等于本机监听端口 + 主机指向本机（loopback 或本机网卡 IP）”。
 func TestIsSelfTarget(t *testing.T) {
 	listen := &net.TCPAddr{IP: net.IPv6zero, Port: 35999} // 监听 [::]:35999
 
@@ -49,7 +50,7 @@ func TestIsSelfTarget(t *testing.T) {
 		{"::1 同端口即自身", "[::1]:35999", listen, true},
 		{"localhost 同端口即自身", "localhost:35999", listen, true},
 		{"loopback 但端口不同", "127.0.0.1:45999", listen, false},
-		{"远端同端口不算自环", "192.168.1.5:35999", listen, false},
+		{"非本机地址同端口不算自环", "192.0.2.1:35999", listen, false}, // RFC 5737 文档地址，不会是本机
 		{"拿不到监听地址时保守放行", "127.0.0.1:35999", nil, false},
 		{"目标地址非法", "not-an-addr", listen, false},
 	}
@@ -57,6 +58,33 @@ func TestIsSelfTarget(t *testing.T) {
 		if got := isSelfTarget(c.target, c.listen); got != c.want {
 			t.Errorf("%s: isSelfTarget(%q,%v) = %v, want %v", c.name, c.target, c.listen, got, c.want)
 		}
+	}
+}
+
+// 护盾必须认出「本机网卡 IP + 同端口」这种自环 —— 注册中心里存的正是网卡地址
+// （192.168.x.x:35999），而不是 loopback。此前只认 loopback，一旦上游
+// addr.LocalFormat 的折叠失效（IP 缓存 TTL 内网络刚切换、或注册的是僵尸节点的旧
+// 地址），目标就以网卡 IP 原样进来，护盾被整个绕过，请求真的拨回自己。
+func TestIsSelfTarget_LocalNICAddressIsSelf(t *testing.T) {
+	var lan net.IP
+	for _, ip := range addr.IPs() {
+		if ip.To4() != nil && !ip.IsLoopback() {
+			lan = ip
+			break
+		}
+	}
+	if lan == nil {
+		t.Skip("本机没有非 loopback 的 IPv4 网卡地址，跳过")
+	}
+
+	listen := &net.TCPAddr{IP: net.IPv6zero, Port: 35999}
+
+	if !isSelfTarget(net.JoinHostPort(lan.String(), "35999"), listen) {
+		t.Fatalf("本机网卡地址 %s:35999 与监听端口相同，必须判为自环", lan)
+	}
+	// 端口不同则不是自身：同一台机器上别的进程完全可以在另一个端口提供服务。
+	if isSelfTarget(net.JoinHostPort(lan.String(), "45999"), listen) {
+		t.Fatalf("本机网卡地址 %s:45999 端口不同，不该判为自环", lan)
 	}
 }
 
