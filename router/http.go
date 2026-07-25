@@ -100,6 +100,7 @@ type (
 		handler      *handler // -- 当前处理器
 		handlerIndex int      // -- 提示目前处理器索引
 		isDone       bool     // -- 已经提交过
+		hijacked     bool     // -- 连接已被接管(WebSocket)，禁止 Apply 与池回收
 		inited       bool     // -- 初始化固定值保存进POOL
 		val          reflect.Value
 		typ          reflect.Type
@@ -684,6 +685,14 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THtt
 	self.Result = nil
 	self.handlerIndex = 0 // -- 提示目前控制器Index
 	self.isDone = false   // -- 已经提交过
+	self.hijacked = false // -- 上一轮若被 WebSocket 接管，取出复用时必须清掉
+}
+
+// Hijacked 返回连接是否已被接管（WebSocket 升级成功）。为真时 router 不再写响应，
+// 也不把 context/response 放回池——接管方的 goroutine 还持有它们，
+// 回收会让下一个请求复用到同一个对象，正是 context pool 竞态的成因。
+func (self *THttpContext) Hijacked() bool {
+	return self.hijacked
 }
 
 // TODO 修改API名称  设置response数据

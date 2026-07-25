@@ -78,6 +78,50 @@ Execution order: global → route-level → embedded → main controller.
 
 Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
 
+### WebSocket
+
+Native server-side WebSocket (RFC 6455) lives in two layers: `transport/websocket.go` is
+the frame codec and connection (`TWebsocketConn`), `router/websocket.go` is the handshake
+(`TWebsocketUpgrader`, plus `THttpContext.Upgrade()` / `IsWebsocket()`). There is no
+third-party dependency — not gorilla, not nhooyr.
+
+```go
+grp.Url([]string{"GET"}, "/bus/websocket", func(ctx *router.THttpContext) {
+    ws, err := ctx.Upgrade()   // 或 (&router.TWebsocketUpgrader{...}).Upgrade(ctx)
+    if err != nil { return }   // Upgrade 已写好错误响应
+    go serve(ws)               // 连接生命周期归调用方，用完必须 Close
+})
+```
+
+Four rules that are easy to get wrong:
+
+- **A successful upgrade detaches the context from the pool.** `Upgrade` sets
+  `ctx.hijacked`, and `TRouter.ServeHTTP` returns immediately instead of running
+  `ctx.Apply()` / `pool.Put(ctx)` / `respPool.Put(rsp)`. Skipping this is not cosmetic: the
+  WS goroutine still holds `ctx` and `rsp`, so recycling hands the *same* objects to the
+  next request, and the pool-return path nils `rsp.ResponseWriter` out from under the live
+  connection. `THttpContext.reset` must keep clearing the flag, or a recycled context makes
+  an ordinary request skip `Apply` and return an empty body.
+  Regression: `TestWebsocketUpgrade_ContextNotReturnedToPool`,
+  `TestWebsocketUpgrade_RouterDoesNotApplyAfterHijack`.
+- **`CheckOrigin: nil` means same-origin, not allow-all.** Browsers apply no same-origin
+  policy to WebSocket and send no preflight — the handshake is a plain GET any page can
+  issue. Allowing every `Origin` hands the endpoint to arbitrary third-party pages (CSWSH).
+  Cross-origin needs an explicit allowlist.
+- **The read limit is load-bearing.** The 127-length branch takes a peer-supplied `uint64`
+  and would otherwise drive a `make([]byte, n)` — same memory-amplification shape as the
+  gob restriction above. Default is 32MB, enforced *twice*: once per frame, and again when
+  merging fragments (each fragment can be small while the total is not).
+- **One reader goroutine, many writers.** `ReadMessage` is not safe to call concurrently;
+  `WriteMessage`/`WriteControl` are (they hold `wmu`), which is what lets a broadcast fan
+  out to many connections.
+
+`transport/websocket_fuzz_test.go` holds the fuzz targets (`FuzzWebsocketFrameDecode`,
+`FuzzWebsocketRoundTrip`).
+
+Note this is unrelated to `router/reverse_proxy.go`'s WebSocket handling — that one only
+passes an `Upgrade` request through to an upstream and never parses a frame.
+
 ### Package Responsibilities
 
 | Package | Responsibility |

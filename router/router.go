@@ -382,6 +382,13 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		// Execute the routing chain.
 		self.route(route, ctx)
 
+		// 连接被接管（WebSocket 升级）后，处理方的 goroutine 仍持有 ctx 与 rsp，
+		// 且底层 socket 已脱离 http.Server 管理。此时既不能再写响应，也绝不能
+		// 归还池——否则下一个请求会取到同一个对象，与 WS goroutine 同时读写。
+		if ctx.hijacked {
+			return
+		}
+
 		// Apply the context changes and return objects to pools.
 		ctx.Apply()
 		pool.Put(ctx)
