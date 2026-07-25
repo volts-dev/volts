@@ -49,8 +49,20 @@ var (
 	}
 )
 
-// TODO 改名称
-func RpcReverseProxy(ctx *TRpcContext) {}
+// RpcReverseProxy 是 RPC(CONNECT) 端点的代理占位实现 —— RPC 层的反向代理转发从未
+// 实现过。
+//
+// ★ 它此前是一个空函数体：请求命中这条路由后什么都不做、也不写任何响应，连接就
+// 那么挂着，调用方只能等满 RequestTimeout（默认 20s）拿到一句
+// "context deadline exceeded"，而日志里没有任何线索指向这里。
+//
+// 现在 TRouter.store 不再为 CONNECT 端点建代理路由，正常路径不会走到这里。保留本
+// 函数并让它立即失败，是为了万一还有其它路径引用：故障至少表现为一条能指认问题的
+// 错误，而不是一次静默超时。跨进程 RPC 应由 client 依据注册中心直连目标服务节点。
+func RpcReverseProxy(ctx *TRpcContext) {
+	log.Errf("rpc: reverse proxy is not implemented | Service: %s — RPC 层不支持代理转发，调用方应通过 client 直连目标服务节点", ctx.Handler().Service())
+	ctx.Abort("rpc reverse proxy is not implemented: call the target service node directly")
+}
 
 // TODO 改名称
 func HttpReverseProxy(ctx *THttpContext) {

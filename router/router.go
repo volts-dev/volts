@@ -661,11 +661,20 @@ func (self *TRouter) store(services []*registry.Service) {
 				// Determine the handler type (HTTP or RPC/CONNECT).
 				isConnect := utils.IndexOf("CONNECT", sep.Method...) != -1
 				if isConnect {
-					handlerId = generateHandler(ProxyHandler, RpcHandler, []interface{}{RpcReverseProxy}, nil, url, service.Name).Id
-
-				} else {
-					handlerId = generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, service.Name).Id
+					// ★ 不为 RPC 端点建代理路由：RPC 层根本没有反向代理实现
+					// （RpcReverseProxy 是空函数体）。这条路由唯一的效果是把请求
+					// 静默吞掉 —— 调用方等满 RequestTimeout 才拿到
+					// "context deadline exceeded"；更糟的是 TTree.addNode 对同路径
+					// 路由是「后写覆盖」，它会顶掉本地真正的 RPC handler，把本来
+					// 正常的本地调用也变成黑洞。
+					//
+					// 跨进程 RPC 本就由 client 按注册中心直连目标节点，从不经网关
+					// 转发，所以这里没有任何东西需要代理。不建路由后，请求打到没有
+					// 该服务的进程会立刻得到 StatusNotFound，而不是挂到超时。
+					continue
 				}
+
+				handlerId = generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, service.Name).Id
 
 				r.handlers = append(r.handlers, handlerId)
 				if err := self.tree.AddRoute(r); err != nil {
@@ -775,9 +784,13 @@ func (self *TRouter) refresh() {
 		maxRetry = 10
 	)
 
-	localServices := self.config.RegistryCacher.LocalServices()
-
 	for {
+		// 每轮重新取本地服务快照。此前它在循环外只取一次 —— refresh 启动仅延迟
+		// 5s，那一刻本进程往往还没把全部服务注册完（模块是逐个注册上来的），
+		// 于是这份残缺快照被后续每一轮 60s 刷新永久沿用：已注册但不在快照里的
+		// 本地服务会被反复当成远程服务送进 store()。
+		localServices := self.config.RegistryCacher.LocalServices()
+
 		list, err = self.config.Registry.ListServices()
 		if err != nil {
 			attempts++
