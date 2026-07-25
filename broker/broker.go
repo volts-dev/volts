@@ -43,9 +43,17 @@ var brokerMap = make(map[string]func(opts ...Option) IBroker)
 var brokerHost sync.Map
 var defaultBroker IBroker
 
+// Default 返回默认 broker。
+//
+// **没有任何后端被注册时返回 nil**，调用方必须判空。后端靠 init() 注册（通常是
+// 一行空导入），一个只用 HTTP/RPC 的进程完全可能没引入任何 broker —— 此前这里
+// 会拿到 nil 构造器直接调用而 panic，把"没配 pub/sub"变成启动崩溃。
 func Default(opts ...Option) IBroker {
 	if defaultBroker == nil {
 		defaultBroker = Use("http")
+	}
+	if defaultBroker == nil {
+		return nil
 	}
 	defaultBroker.Init(opts...)
 	return defaultBroker
@@ -88,5 +96,10 @@ func Use(name string, opts ...Option) IBroker {
 
 	// 默认
 	def := brokerMap["http"]
+	if def == nil {
+		// 未注册任何后端。返回 nil 而不是调用 nil 构造器 —— 后者是段错误，
+		// 且崩在 init 阶段，栈里看不出"你没导入 broker 后端"这个真正原因。
+		return nil
+	}
 	return def(opts...)
 }
