@@ -644,19 +644,40 @@ func (self *TRouter) store(services []*registry.Service) {
 	// 收集本进程的“自身身份”（node.Id + 归一化地址），用于剔除指向自己的节点。
 	me := self.localIdentity()
 
-	// 尚不知“自己是谁”（本地服务还没注册上来）时的两种处置：
-	//   - 已挂本地路由：进入安全护盾，本轮不建任何代理路由。宁可这轮不更新，也
-	//     不能建出可能指向自身的路由把本地 handler 覆盖成自环。
-	//   - 尚无本地路由（纯网关刚启动，无自身可环）：放行全部节点，照常建路由。
-	if me == nil && self.tree.Count.Load() > 0 {
+	// 不知道“自己是谁”就**一律不建代理路由**。
+	//
+	// 此前这里分两支：已挂本地路由 → 护盾跳过；尚无本地路由 → 认为“纯网关刚启动、
+	// 无自身可环”而**放行全部节点**。后一支的前提不成立，是一个真实的启动竞态：
+	// 进程注册自己的服务（写进 registry）与 RegistryCacher.LocalServices() 可见、
+	// 以及模块把本地路由挂上路由树，这三件事并不同步。refresh() 首轮只延迟 5s 就跑，
+	// 完全可能落在“自己的服务已经在注册中心里、但 LocalServices() 还是空、路由树也
+	// 还没挂上本地路由”的窗口里 —— 于是本进程的服务被当成远程服务，按它的 endpoints
+	// 建出一整批**指向自身**的代理路由。
+	//
+	// 后果不是“慢一拍”而是永久性的：TTree.addNode 对同路径是后写覆盖，这些自环路由
+	// 会顶掉随后挂上来的本地 handler；而 refresh() 的后续轮次会把该服务判成 local 并
+	// 跳过（isLocalService），**再也不会去修正已经写进树里的坏路由**。
+	//
+	// 2026-07-26 真栈实测：kylin 同进程托管 account，`/account/static/*` 对存在的文件
+	// 稳定返回 508（`http: proxy self-loop blocked ... Target: http://127.0.0.1:35999
+	// == own listen`），而对不存在的文件返回 404 —— 说明本地静态路由建对了、只是被
+	// 自环代理路由盖住。直接后果是装模块时取不到 Data 文件
+	// （core/download 用 /{service}/static/... 下载），**依赖闭包含该服务的租户一律
+	// 建不出来**。同进程的其它模块没暴露，只是因为它们把业务端点登记成 CONNECT、
+	// HTTP 端点很少（account 的 http 节点有 161 个 endpoint，purchase 只有 2 个），
+	// 并非 filteSelf 对它们生效了。
+	//
+	// 代价：识别不出自身的那一轮不更新代理路由，60s 后下一轮重来。这与
+	// isLocalService 那里“宁可假阴性、多跑一轮 store()”是同一个取舍方向 ——
+	// 少一轮路由更新是可恢复的，建出自环路由则不可恢复。
+	if me == nil {
 		return
 	}
 
 	// Create a new endpoint mapping.
 	for _, service := range services {
-		if me != nil {
-			service = self.filteSelf(service, me)
-		}
+		// me 到这里必非 nil（上面已提前返回），无需再判空。
+		service = self.filteSelf(service, me)
 		if len(service.Nodes) > 0 {
 			var handlerId int
 			for _, sep := range service.Endpoints {
