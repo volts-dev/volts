@@ -434,13 +434,16 @@ func (self *HttpClient) callTyped(request *httpRequest, opts ...CallOption) (*ht
 	default:
 	}
 
+	// 出站请求钩子：横切信息（调用方身份、追踪 id 等）统一在这里盖上，见 hook.go。
+	// 位置在重试循环**之外** —— 每个请求盖一次，不是每次重试盖一次。
+	var hookErr error
+	ctx, hookErr = applyRequestHooks(ctx, request, self.config.RequestHooks)
+	if hookErr != nil {
+		return nil, errors.InternalServerError("http.client", hookErr.Error())
+	}
+
 	// make copy of call method
 	hcall := self.call
-
-	// wrap the call in reverse
-	//for i := len(callOpts.CallWrappers); i > 0; i-- {
-	//	hcall = callOpts.CallWrappers[i-1](hcall)
-	//}
 
 	// call 执行一次请求：选 node、发起 HTTP、返回 fresh response。
 	// 不再用外层 goroutine 包装 —— hcall 内部走 hreq.WithContext(ctx)，

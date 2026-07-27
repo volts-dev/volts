@@ -72,8 +72,11 @@ type (
 		// Duration to cache the response for
 		CacheExpiry time.Duration
 
-		// Middleware for low level call func
-		//CallWrappers []CallWrapper
+		// 曾有一个 `CallWrappers []CallWrapper` 的半成品挂在这里（类型从未定义、
+		// 调用点也是注释掉的）。它想包住两个 client 各自的低层 call，而那两个函数返回
+		// 不同的具体类型（*httpResponse / *rpcResponse），一个类型套不住；且横切信息
+		// 在重试循环内部重复施加没有意义。改成请求级钩子挂在两条链路共用的 IRequest
+		// 上（见 hook.go 的 RequestHook），问题自然消失。
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -101,6 +104,9 @@ type (
 		TlsConfig   *tls.Config            `field:"-"` // TLSConfig for tcp and quic
 		CallOptions CallOptions            `field:"-"` // Default Call Options
 		DialOptions []transport.DialOption `field:"-"` // TODO 		// 提供实时变化sturct
+		// RequestHooks 本客户端的出站请求钩子，在选节点与重试之前逐个执行（见 hook.go）。
+		// 进程级钩子（RegisterGlobalRequestHook）先于它们执行。
+		RequestHooks []RequestHook `field:"-"`
 		// Breaker is used to config CircuitBreaker
 		///Breaker Breaker
 
@@ -361,6 +367,15 @@ func WithRegistries(typ string, Hosts ...string) Option {
 		cfg.Init(WithRegistry(registry.Use(typ, registry.Addrs(Hosts...))))
 		cfg.RegistryType = typ
 		cfg.RegistryHost = Hosts
+	}
+}
+
+// WithRequestHooks 给本客户端追加出站请求钩子（见 hook.go 的 RequestHook）。
+// 进程级钩子用 RegisterGlobalRequestHook —— 服务身份那类"一个进程只有一份"的东西
+// 应当走进程级，否则每处 New 客户端都得记得传，漏一处就是一次匿名调用。
+func WithRequestHooks(hooks ...RequestHook) Option {
+	return func(cfg *Config) {
+		cfg.RequestHooks = append(cfg.RequestHooks, hooks...)
 	}
 }
 

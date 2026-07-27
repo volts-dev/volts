@@ -113,6 +113,13 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 	default:
 	}
 
+	// 出站请求钩子：横切信息（调用方身份、追踪 id 等）统一在这里盖上，见 hook.go。
+	// 位置在重试循环**之外** —— 每个请求盖一次，不是每次重试盖一次。
+	ctx, err = applyRequestHooks(ctx, request, self.config.RequestHooks)
+	if err != nil {
+		return nil, errors.InternalServerError("volts.client", err.Error())
+	}
+
 	var gerr error
 	var response IResponse
 	// get the retries
