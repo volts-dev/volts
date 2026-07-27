@@ -216,7 +216,23 @@ func (self *TServer) Register() error {
 	node.Metadata["registry"] = config.Registry.String()
 	node.Metadata["protocol"] = config.Transport.Protocol()
 
-	var servics []*registry.Service
+	// **按服务名合并后再注册**，不能按 group 直接注册。
+	//
+	// Endpoints() 是按 *TGroup 指针分组的，而同一个服务名可能对应**多个 group 对象**：
+	// vectors 的 module.NewModule 写的是 `TGroup: *router.NewGroup(...)`（值拷贝），
+	// 于是原始堆对象与模块内嵌的副本共享同一个 *GroupConfig —— 名字、路径全一样。
+	// 随后 WithStatic() 走 `cfg.Group.SetStatic(...)` 把静态路由加到**原始**那个上，
+	// 而模块自己的 Url() 加到**副本**上，两边各持一部分路由。
+	//
+	// 此前按 group 逐个 regFunc，同名服务写的是同一个 etcd 键（服务名 + 节点 id 都相同），
+	// **后写的整份覆盖先写的**；再叠加 Go map 迭代顺序随机，于是同一份二进制每次启动
+	// 注册出的端点集都可能不同 —— 真栈实测 website 有时 204 条、有时只剩 2 条静态路由。
+	//
+	// 后果不是"少几条元数据"：网关按对方注册的端点建反向代理路由（见 router.store），
+	// 端点丢了代理路由就不建，该服务的 HTTP 流量不再被转发。表现为「前台/预览有时
+	// 404、重启又好了」这类最难查的间歇故障。2026-07-28 的 /website/preview 404 即此。
+	byName := make(map[string]*registry.Service, 8)
+	var order []string // 保持稳定的注册顺序，便于日志比对
 	for grp, endpoints := range config.Router.Endpoints() {
 		if len(endpoints) == 0 {
 			continue
@@ -227,21 +243,33 @@ func (self *TServer) Register() error {
 			name = config.Name // default registry service of this server
 		}
 
-		// default registry service of this server
-		service := &registry.Service{
-			Name:      name,
-			Version:   config.Version,
-			Metadata:  grp.Metadata,
-			Nodes:     []*registry.Node{node},
-			Endpoints: endpoints,
+		svc, ok := byName[name]
+		if !ok {
+			svc = &registry.Service{
+				Name:     name,
+				Version:  config.Version,
+				Metadata: grp.Metadata,
+				Nodes:    []*registry.Node{node},
+			}
+			byName[name] = svc
+			order = append(order, name)
+		} else if len(svc.Metadata) == 0 {
+			// 同名组的 Metadata 通常是同一个 map（共享 GroupConfig），
+			// 但先到的那个若为空，用后来者补上。
+			svc.Metadata = grp.Metadata
 		}
+		svc.Endpoints = append(svc.Endpoints, endpoints...)
+	}
 
-		// register the service
-		if err := regFunc(service); err != nil {
+	var servics []*registry.Service
+	for _, name := range order {
+		svc := byName[name]
+		svc.Endpoints = dedupEndpoints(svc.Endpoints)
+
+		if err := regFunc(svc); err != nil {
 			return err
 		}
-
-		servics = append(servics, service)
+		servics = append(servics, svc)
 	}
 
 	registered := self.registered.Load()
@@ -594,4 +622,24 @@ func (self *TServer) String() string {
 
 func (self *TServer) Config() *Config {
 	return self.config
+}
+
+// dedupEndpoints 按端点名去重，保留首次出现的顺序。
+//
+// 同名服务的多个 group 合并后可能带来重复项（同一条路由被两处登记）。注册中心对
+// 重复端点没有硬约束，但它会让载荷凭空变大、也让"这个服务到底暴露了什么"难以核对。
+func dedupEndpoints(eps []*registry.Endpoint) []*registry.Endpoint {
+	if len(eps) < 2 {
+		return eps
+	}
+	seen := make(map[string]bool, len(eps))
+	out := eps[:0]
+	for _, e := range eps {
+		if e == nil || seen[e.Name] {
+			continue
+		}
+		seen[e.Name] = true
+		out = append(out, e)
+	}
+	return out
 }
