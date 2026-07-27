@@ -133,6 +133,14 @@ func (self *TRpcContext) reset(rw *transport.RpcResponse, req *transport.RpcRequ
 	self.isDone = false
 	self.handlerIndex = 0
 	self.route = Route
+
+	// **必须清空**：TRpcContext 走 rpcCtxPool 复用，而 self.context 里挂着的是
+	// 上一个请求的 context —— 包括中间件/处理器往里塞的任何值。不清就会串给下一个
+	// 请求，而 ServeRPC 现在会把 wire 帧头里的**调用方身份**灌进这个 context
+	// （见 router.go），串号就从"看到别人的调试值"升级成"顶着别人的身份执行"。
+	// 与 THttpContext.reset 清 hijacked 标志同款理由：池化对象的每一个字段都必须
+	// 在 reset 里有明确归宿。
+	self.context = nil
 }
 
 func (self *TRpcContext) setData(v interface{}) {

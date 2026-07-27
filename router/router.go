@@ -16,6 +16,7 @@ import (
 	"github.com/volts-dev/volts/codec"
 	"github.com/volts-dev/volts/internal/addr"
 	igoroutine "github.com/volts-dev/volts/internal/goroutine"
+	"github.com/volts-dev/volts/internal/metadata"
 	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"github.com/volts-dev/volts/transport"
@@ -458,6 +459,26 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		}
 		ctx.reset(w, r, self, route)
 		ctx.setPathParams(params)
+
+		// 把 wire 帧头灌回 context metadata。
+		//
+		// 客户端侧 rpc_client 已经把 metadata.FromContext(ctx) 与 req.Header() 一起写进
+		// 帧头；服务端这一步把它还原，于是横切信息（调用方身份、租户上下文、追踪 id）
+		// 能穿透到任意深度的业务代码，而不必一路手动传参 —— 与 gRPC 的 metadata 同义。
+		//
+		// 全量灌入而不做白名单过滤：过滤名单是又一个会漂移的东西，而"帧头即 metadata"
+		// 这条规则可预测。ServicePath/ServiceMethod 等保留键同样在内，它们另有
+		// r.Service()/r.Method() 可取，重复不构成问题。
+		//
+		// 复用安全性依赖 TRpcContext.reset 清空 self.context（见 rpc.go 里那段注释）：
+		// 不清就会把上一个请求的身份串给下一个。
+		if len(reqMessage.Header) > 0 {
+			base := r.Context
+			if base == nil {
+				base = context.Background()
+			}
+			ctx.Context(metadata.MergeContext(base, reqMessage.Header, true))
+		}
 
 		// Execute the controller.
 		self.route(route, ctx)
