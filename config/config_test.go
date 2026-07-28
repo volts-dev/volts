@@ -95,7 +95,7 @@ func TestBuildJsonConfigAndGet(t *testing.T) {
 func TestCoverageSuite(t *testing.T) {
 	// Covering options
 	testConfModel := newTestConfig()
-	cfg := New("coverageSuite", WithPrefix("testprefix"), WithConfig(testConfModel))
+	cfg := New("coverageSuite", WithConfig(testConfModel))
 
 	// Cover Unregister and InConfig
 	cfg.Unregister(testConfModel)
@@ -179,14 +179,14 @@ func TestCoverageSuite(t *testing.T) {
 	var unmarshalObj struct {
 		TestInt int `field:"test_int"`
 	}
-	if err := cfg.xUnmarshal(&unmarshalObj); err != nil {
+	if err := cfg.Core().fmt.Unmarshal(&unmarshalObj); err != nil {
 		t.Error(err)
 	}
 
 	var customDurationObj struct {
 		CustomDur time.Duration `field:"test_duration"`
 	}
-	cfg.xUnmarshal(&customDurationObj)
+	cfg.Core().fmt.Unmarshal(&customDurationObj)
 
 	// Cover various types in Duration DecodeHook
 	cfg.SetValue("test_duration_hook_int", int(100))
@@ -203,9 +203,9 @@ func TestCoverageSuite(t *testing.T) {
 		CustomDur time.Duration `field:"test_duration_hook_float"`
 	}
 
-	cfg.xUnmarshal(&durInt)
-	cfg.xUnmarshal(&durInt32)
-	cfg.xUnmarshal(&durFloat)
+	cfg.Core().fmt.Unmarshal(&durInt)
+	cfg.Core().fmt.Unmarshal(&durInt32)
+	cfg.Core().fmt.Unmarshal(&durFloat)
 
 	// Cover Format SetDefault directly
 	cfg.Core().fmt.SetDefault("test_set_def", 123)

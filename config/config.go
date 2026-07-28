@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -558,11 +557,6 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 			continue
 		}
 
-		// 忽略零值或空值，防止其覆盖现有合法配置从而提高配置干净度
-		/*if isZeroValue(v) {
-			 continue
-		}*/
-
 		// 针对时间间隔 (time.Duration) 将其扁平化为毫无精度的毫秒级以增强向外输出配置的可读性
 		if d, ok := v.(time.Duration); ok {
 			v = d.Milliseconds()
@@ -587,33 +581,6 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 	}
 
 	return nil
-}
-
-// isZeroValue 判断值是否为零值/空值
-func isZeroValue(v interface{}) bool {
-	if v == nil {
-		return true
-	}
-
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.String:
-		return rv.Len() == 0
-	case reflect.Bool:
-		return !rv.Bool()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return rv.Int() == 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return rv.Uint() == 0
-	case reflect.Float32, reflect.Float64:
-		return rv.Float() == 0
-	case reflect.Slice, reflect.Map, reflect.Array:
-		return rv.Len() == 0
-	case reflect.Ptr, reflect.Interface:
-		return rv.IsNil()
-	}
-
-	return false
 }
 
 func (self *Config) GetBool(field string, defaultValue bool) bool {
@@ -658,11 +625,3 @@ func (self *Config) SetValue(field string, value interface{}) {
 	self.Core().fmt.SetValue(field, value)
 }
 
-func (self *Config) xUnmarshal(rawVal interface{}) error {
-	return self.Core().fmt.Unmarshal(rawVal)
-}
-
-// 反序列字段映射到数据类型
-func (self *Config) xUnmarshalField(field string, rawVal interface{}) error {
-	return self.Core().fmt.UnmarshalKey(field, rawVal)
-}

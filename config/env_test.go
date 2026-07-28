@@ -206,3 +206,69 @@ func TestReport_SkipsExternalizedSecrets(t *testing.T) {
 		t.Error("真正的明文凭据漏报了")
 	}
 }
+
+// TestDump_MasksSecrets 锁定：Dump 生成的模板不含明文凭据。
+//
+// 模板的用途就是提交进版本库、发给同事、当部署样例 —— 把明文密钥烤进去等于把它
+// 散布得更广。占位符本身是可用的写法，拿到模板的人设好环境变量即可直接跑。
+func TestDump_MasksSecrets(t *testing.T) {
+	fn := "env_dump.json"
+	path := filepath.Join(AppPath, fn)
+	tpl := "env_dump_tpl.json"
+	tplPath := filepath.Join(AppPath, tpl)
+	defer os.Remove(path)
+	defer os.Remove(tplPath)
+
+	write(t, path, `{"envsec":{"password":"literal-secret","plain":"visible"}}`)
+
+	cfg := newIsolated(t, fn)
+	cfg.Register(&envCfg{})
+
+	if err := cfg.Dump(tpl); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(tplPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(string(raw), "literal-secret") {
+		t.Errorf("Dump 出的模板含明文凭据:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "${ENVSEC_PASSWORD}") {
+		t.Errorf("凭据字段应被替换成 ${环境变量名} 占位符:\n%s", raw)
+	}
+	// 非凭据字段必须原样保留，否则模板就没法用了
+	if !strings.Contains(string(raw), "visible") {
+		t.Errorf("非凭据字段被误改:\n%s", raw)
+	}
+}
+
+// TestGetString_ExpandsEnvRefs 锁定：GetString 与模型装载路径对 ${VAR} 的处理一致。
+//
+// 两条读路径对同一份数据必须给出同样的结果，否则把密钥外置成 ${VAR} 之后，
+// 走 GetString 的调用方会拿到字面量 "${VS_DB_PASSWORD}" 并把它当密码用。
+func TestGetString_ExpandsEnvRefs(t *testing.T) {
+	t.Setenv("VOLTS_TEST_GS", "resolved")
+
+	fn := "env_getstring.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	write(t, path, `{"envsec":{"password":"${VOLTS_TEST_GS}","host":"${VOLTS_TEST_GS_MISSING}","plain":"raw"}}`)
+	cfg := newIsolated(t, fn)
+
+	if got := cfg.GetString("envsec.password", "fallback"); got != "resolved" {
+		t.Errorf("GetString 未展开 ${VAR}: %q", got)
+	}
+	if got := cfg.GetString("envsec.plain", "fallback"); got != "raw" {
+		t.Errorf("无引用的值被改动: %q", got)
+	}
+	// 变量缺失时回落默认值，而不是把 ${VAR} 字面量交出去当密码用
+	if got := cfg.GetString("envsec.host", "fallback"); got != "fallback" {
+		t.Errorf("变量缺失时应回落默认值, got %q", got)
+	}
+	if got := cfg.GetString("envsec.absent", "fallback"); got != "fallback" {
+		t.Errorf("缺失键应回落默认值: %q", got)
+	}
+}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -126,18 +127,6 @@ func (self *format) StopWatch() {
 	}
 }
 
-func (self *format) Unset(key string) {
-	self.Lock()
-	defer self.Unlock()
-	newViper := viper.New()
-	for k, v := range self.v.AllSettings() {
-		if k != key {
-			newViper.Set(k, v)
-		}
-	}
-	self.v = newViper
-}
-
 func (self *format) InConfig(key string) bool {
 	self.RLock()
 	defer self.RUnlock()
@@ -174,10 +163,43 @@ func (self *format) WriteConfig() error {
 }
 
 // WriteConfigFull 落盘**全量**配置（含所有代码默认值），用于生成给人编辑的模板。
+//
+// 凭据字段会被替换成 ${环境变量名} 占位符而不是原值：模板的用途就是提交进版本库、
+// 发给同事、当部署样例，把明文密钥烤进去等于把它散布得更广。占位符本身就是可用的
+// 写法（见 config/env.go），拿到模板的人设好环境变量即可直接跑。
 func (self *format) WriteConfigFull(file string) error {
 	self.Lock()
 	defer self.Unlock()
-	return self.v.WriteConfigAs(file)
+
+	out := viper.New()
+	out.SetConfigFile(file)
+	collectLeaves(self.v.AllSettings(), "", func(path string, val any) {
+		if name, ok := secretPlaceholder(path, val); ok {
+			out.Set(path, name)
+			return
+		}
+		out.Set(path, val)
+	})
+	return out.WriteConfig()
+}
+
+// secretPlaceholder 为疑似凭据的叶子生成 ${环境变量名} 占位符。
+//
+// 变量名由配置路径推导（db.db_password -> ${DB_DB_PASSWORD}），这样模板既隐去了
+// 原值，又直接告诉拿到它的人该设哪个环境变量。
+func secretPlaceholder(path string, val any) (string, bool) {
+	if !isLikelySecret(lastSegment(path), val) {
+		return "", false
+	}
+	name := strings.ToUpper(strings.NewReplacer(".", "_", "-", "_").Replace(path))
+	return "${" + name + "}", true
+}
+
+func lastSegment(path string) string {
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 // persistableLeaves 返回应当落盘的叶子集合，键为点分全路径。调用方须持有锁。
@@ -224,14 +246,27 @@ func (self *format) GetBool(key string, defaultValue bool) bool {
 	return self.v.GetBool(key)
 }
 
-// GetString from default namespace
+// GetString 读取字符串配置，并展开其中的 ${VAR} 环境变量引用。
+//
+// 与模型装载路径（LoadToModel -> expandEnvRefs）保持一致：两条读路径对同一份数据
+// 必须给出同样的结果，否则把密钥外置成 ${VAR} 之后，走 GetString 的调用方会拿到
+// 字面量 "${VS_DB_PASSWORD}" 并把它当成密码用。
+//
+// 展开失败（变量未设置且未声明缺省）时返回 defaultValue 并告警，而不是把 ${VAR}
+// 字面量交出去 —— 后者会以一个看起来像密码的字符串继续往下跑。
 func (self *format) GetString(key, defaultValue string) string {
 	self.RLock()
 	defer self.RUnlock()
 	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	return self.v.GetString(key)
+	raw := self.v.GetString(key)
+	out, err := expandString(raw)
+	if err != nil {
+		log.Printf("config: %s 的环境变量引用无法解析，回落默认值: %v", key, err)
+		return defaultValue
+	}
+	return out
 }
 
 // GetInt from default namespace

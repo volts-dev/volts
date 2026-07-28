@@ -5,12 +5,6 @@ import (
 	"path/filepath"
 )
 
-func WithPrefix(name string) Option {
-	return func(cfg *Config) {
-		//cfg.Prefix = name
-	}
-}
-
 func WithFileName(fileName string) Option {
 	return func(cfg *Config) {
 		cfg.Core().FileName = fileName
