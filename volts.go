@@ -84,6 +84,12 @@ func (self *service) Start() error {
 		log.Warn(b.String())
 	}
 
+	// 配置校验：装载成功不等于配置合理（端口为 0、超时为负、地址为空都能装进去）。
+	// 同样只告警不拒绝启动；要严格拒绝的在 BeforeStart 里查 config.Validate()。
+	if err := config.Validate(); err != nil {
+		log.Warnf("配置校验未通过：\n%v", err)
+	}
+
 	for _, fn := range self.config.BeforeStart {
 		if err := fn(); err != nil {
 			return err
