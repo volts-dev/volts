@@ -174,3 +174,46 @@ func TestValidate_SkipsModelsWithoutValidator(t *testing.T) {
 		t.Errorf("未实现 IValidator 的模型不该产生错误: %v", err)
 	}
 }
+
+type valMixedCase struct {
+	Config
+	Endpoint string `field:"endpoint"`
+}
+
+// String 刻意带大小写，模拟 vectors 的 aliyun 配置（其 String() 返回 "AliyunOSS"）。
+func (self *valMixedCase) String() string { return "MixedCase" }
+func (self *valMixedCase) Validate() error {
+	if self.Endpoint == "" {
+		return Invalid("endpoint", "不能为空")
+	}
+	return nil
+}
+
+// TestValidate_PathIsLowercased 锁定：错误里的配置路径一律小写。
+//
+// 配置键在 viper 里本就大小写不敏感，文件里写的是 mixedcase；若照模型 String() 的
+// 原样打印 MixedCase.endpoint，用户拿这个路径去配置文件里搜是搜不到的。报错要指向
+// 用户能搜到的东西。
+func TestValidate_PathIsLowercased(t *testing.T) {
+	fn := "validate_case.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	if err := os.WriteFile(path, []byte(`{"mixedcase":{"endpoint":""}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newIsolated(t, fn)
+	cfg.Register(&valMixedCase{})
+
+	err := cfg.ValidateAll()
+	if err == nil {
+		t.Fatal("非法配置没有被校验出来")
+	}
+	if strings.Contains(err.Error(), "MixedCase") {
+		t.Errorf("路径未小写化，用户在配置文件里搜不到: %s", err)
+	}
+	if !strings.Contains(err.Error(), "mixedcase.endpoint") {
+		t.Errorf("缺少小写的完整路径: %s", err)
+	}
+}

@@ -126,7 +126,11 @@ func (self *Config) decorate(section string, err error) []error {
 
 	var fe *fieldError
 	if errors.As(err, &fe) && fe.field != "" {
-		path := section + "." + fe.field
+		// 路径一律小写：配置键在 viper 里本就是大小写不敏感的，而模型的 String()
+		// 可能带大小写（如 aliyun 的 "AliyunOSS"），照它原样打印出来，用户拿去在
+		// 配置文件里搜是搜不到的 —— 文件里写的是 aliyunoss。报错要指向用户能搜到
+		// 的东西。
+		path := strings.ToLower(section + "." + fe.field)
 		if loc := self.Origin(path); loc.Source == SourceFile {
 			return []error{fmt.Errorf("%s: %s: %s", loc, path, fe.msg)}
 		}
