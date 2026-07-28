@@ -50,27 +50,111 @@ func TestRegister_BindsCoreToModel(t *testing.T) {
 		t.Errorf("注册方 core 里读不到值: got %d, want 8080", got)
 	}
 
-	if err := cfg.SaveToFile(); err != nil {
-		t.Fatalf("SaveToFile: %v", err)
+	// Dump 输出全量（含默认值），可用来证明值确实进了**本实例**的 core 而非全局单例。
+	// 这里不能用 SaveToFile 做判据 —— 它只写差异，纯默认值本就不该出现在里面。
+	if err := cfg.Dump(fn); err != nil {
+		t.Fatalf("Dump: %v", err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读回配置文件: %v", err)
 	}
 	if strings.TrimSpace(string(raw)) == "{}" {
-		t.Fatal("落盘结果为空对象 —— 注册的模型没有写进本实例的 core")
+		t.Fatal("Dump 结果为空对象 —— 注册的模型没有写进本实例的 core")
 	}
 
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("解析落盘结果: %v", err)
+		t.Fatalf("解析 Dump 结果: %v", err)
 	}
 	owner, ok := m["regowner"].(map[string]any)
 	if !ok {
-		t.Fatalf("落盘结果缺少 regowner 节: %s", raw)
+		t.Fatalf("Dump 结果缺少 regowner 节: %s", raw)
 	}
 	if _, ok := owner["sub"]; !ok {
-		t.Errorf("落盘结果缺少 regowner.sub 节: %s", raw)
+		t.Errorf("Dump 结果缺少 regowner.sub 节: %s", raw)
+	}
+}
+
+// TestSaveToFile_OnlyPersistsDiff 锁定：落盘只写差异，代码默认值不落盘。
+//
+// 曾经的缺陷：LoadFromFile 末尾 `if changed && AutoCreateFile { SaveToFile() }`，
+// 只要有模型的配置节不在文件里就把默认值刷回磁盘。后果是配置文件膨胀成全量快照
+// （kylin 实测 453 个 key，400+ 是默认值，光 registry.timeout 就复制了 15 份），
+// 而默认值一旦落盘就成了「用户配置」—— 此后改代码里的默认值再也不生效。
+func TestSaveToFile_OnlyPersistsDiff(t *testing.T) {
+	fn := "regression_diff.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	// 文件里预先只有一项，代表「用户真的写过的配置」
+	if err := os.WriteFile(path, []byte(`{"regowner":{"value":"from_file"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := New("regression_diff", WithFileName(fn))
+	child := &regChild{Port: 8080} // 纯默认值，没人设定过
+	cfg.Register(child)
+
+	// 运行期显式设定一项
+	cfg.SetValue("runtime.explicit", "set_at_runtime")
+
+	if err := cfg.SaveToFile(); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("解析落盘结果: %v\n%s", err, raw)
+	}
+
+	// 文件里本来就有的，必须保留 —— 否则一次保存就把用户配置抹了
+	owner, _ := m["regowner"].(map[string]any)
+	if owner == nil || owner["value"] != "from_file" {
+		t.Errorf("文件里原有的配置被丢弃: %s", raw)
+	}
+	// 运行期显式设定的，必须落盘
+	rt, _ := m["runtime"].(map[string]any)
+	if rt == nil || rt["explicit"] != "set_at_runtime" {
+		t.Errorf("运行期显式设定的值没有落盘: %s", raw)
+	}
+	// 纯默认值，不得落盘
+	if owner != nil {
+		if _, leaked := owner["sub"]; leaked {
+			t.Errorf("代码默认值被写进了配置文件: %s", raw)
+		}
+	}
+}
+
+// TestLoadFromFile_DoesNotCreateFile 锁定：装载配置不会自动创建/回写配置文件。
+//
+// 取消的是 LoadFromFile 末尾的自动回写。除了会污染配置内容，它还是多进程并发
+// 启动时把 config.json 写截断（服务器随后静默退出而进程还活着）的直接原因。
+func TestLoadFromFile_DoesNotCreateFile(t *testing.T) {
+	fn := "regression_nocreate.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+	os.Remove(path)
+
+	cfg := New("regression_nocreate", WithFileName(fn))
+	child := &regChild{Port: 8080}
+	cfg.Register(child)
+
+	if err := cfg.LoadFromFile(); err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		raw, _ := os.ReadFile(path)
+		t.Errorf("LoadFromFile 自动创建了配置文件: %s", raw)
+	}
+
+	// 但模型仍应拿到默认值，正常跑
+	if child.Port != 8080 {
+		t.Errorf("没有配置文件时模型应保留默认值: got %d", child.Port)
 	}
 }
 

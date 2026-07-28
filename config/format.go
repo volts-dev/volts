@@ -3,6 +3,7 @@ package config
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,16 @@ type (
 		sync.RWMutex
 		v *viper.Viper
 
+		// overrideKeys 记录经 SetValue 显式设定过的 key（点分全路径）。
+		//
+		// 落盘时用它把「代码默认值」与「真的有人设定过的值」区分开：只有本集合里的
+		// key、以及本来就存在于配置文件里的 key 才会被写回。没有这份记账，
+		// viper 的 AllSettings() 会把 defaults 层一并吐出来，配置文件于是膨胀成
+		// 全量快照 —— kylin 那份 453 个 key 里 400+ 是这么来的，其中 registry.timeout
+		// 这一个默认值就复制了 15 份。副本一旦落盘就成了「用户配置」，此后改代码
+		// 里的默认值再也不生效。
+		overrideKeys map[string]struct{}
+
 		// watchOnce / watchStop 管理配置文件监听协程。
 		watchOnce sync.Once
 		watchStop chan struct{}
@@ -27,8 +38,9 @@ func newFormat() *format {
 	file := viper.New()
 	//file.SetConfigFile(CONFIG_FILE_NAME)
 	return &format{
-		v:         file,
-		watchStop: make(chan struct{}),
+		v:            file,
+		overrideKeys: make(map[string]struct{}),
+		watchStop:    make(chan struct{}),
 	}
 }
 
@@ -138,10 +150,63 @@ func (self *format) ReadInConfig() error {
 	return self.v.ReadInConfig()
 }
 
+// WriteConfig 把配置落盘，但**只写差异**：运行期显式设定过的值，以及本来就在
+// 配置文件里的值。纯粹的代码默认值不落盘。
+//
+// 这样配置文件里的每一行都是「有人真的写过」，可读、可 diff、可手改；也让「改代码
+// 默认值」这件事重新生效 —— 默认值一旦被回写成文件内容，就再也不是默认值了。
 func (self *format) WriteConfig() error {
 	self.Lock()
 	defer self.Unlock()
-	return self.v.WriteConfig()
+
+	out := viper.New()
+	out.SetConfigFile(self.v.ConfigFileUsed())
+	for path, val := range self.persistableLeaves() {
+		out.Set(path, val)
+	}
+	return out.WriteConfig()
+}
+
+// WriteConfigFull 落盘**全量**配置（含所有代码默认值），用于生成给人编辑的模板。
+func (self *format) WriteConfigFull(file string) error {
+	self.Lock()
+	defer self.Unlock()
+	return self.v.WriteConfigAs(file)
+}
+
+// persistableLeaves 返回应当落盘的叶子集合，键为点分全路径。调用方须持有锁。
+func (self *format) persistableLeaves() map[string]any {
+	out := make(map[string]any)
+	collectLeaves(self.v.AllSettings(), "", func(path string, val any) {
+		// Delete 走的是 v.Set(key, nil)（viper 无法真正删除 key），若把 nil 写回去，
+		// 文件里会留下一个 null 节点，下次加载时该 key「存在但为空」。
+		if val == nil {
+			return
+		}
+		if _, ok := self.overrideKeys[path]; ok {
+			out[path] = val
+			return
+		}
+		if self.v.InConfig(path) {
+			out[path] = val
+		}
+	})
+	return out
+}
+
+// collectLeaves 深度遍历嵌套 map，对每个叶子回调一次点分全路径。
+func collectLeaves(m map[string]any, prefix string, fn func(path string, val any)) {
+	for k, v := range m {
+		path := k
+		if prefix != "" {
+			path = prefix + "." + k
+		}
+		if sub, ok := v.(map[string]any); ok && len(sub) > 0 {
+			collectLeaves(sub, path, fn)
+			continue
+		}
+		fn(path, v)
+	}
 }
 
 func (self *format) GetBool(key string, defaultValue bool) bool {
@@ -261,12 +326,17 @@ func (self *format) UnmarshalKey(key string, rawVal interface{}) error {
 	return self.v.UnmarshalKey(key, rawVal, withTagName("field"), withMatchName(), withDurationHook())
 }
 
+// SetValue 写入一个运行期显式设定值（override 层，优先级高于配置文件），并记账
+// 以便落盘时能与代码默认值区分开。
 func (self *format) SetValue(key string, value interface{}) {
 	self.Lock()
 	self.v.Set(key, value)
+	self.overrideKeys[strings.ToLower(key)] = struct{}{}
 	self.Unlock()
 }
 
+// SetDefault 写入一个代码默认值（defaults 层，优先级低于配置文件）。
+// 刻意不记账：默认值不该落盘，否则它就不再是默认值了。
 func (self *format) SetDefault(key string, value interface{}) {
 	self.Lock()
 	self.v.SetDefault(key, value)
@@ -276,6 +346,14 @@ func (self *format) SetDefault(key string, value interface{}) {
 func (self *format) Delete(key string) {
 	self.Lock()
 	self.v.Set(key, nil)
+	// 同时撤销记账：这个 key 不再是「有人设定过的值」，落盘时不应带上它。
+	// persistableLeaves 另外还会跳过 nil 值，两处配合才能真正把 key 从文件里去掉。
+	prefix := strings.ToLower(key) + "."
+	for k := range self.overrideKeys {
+		if k == strings.ToLower(key) || strings.HasPrefix(k, prefix) {
+			delete(self.overrideKeys, k)
+		}
+	}
 	self.Unlock()
 }
 

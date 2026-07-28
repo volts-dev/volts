@@ -175,6 +175,11 @@ func ClearErrors() {
 	defaultConfig.ClearErrors()
 }
 
+// Dump 把默认单例的全部配置（含代码默认值）写成一份可编辑的模板文件。
+func Dump(fileName ...string) error {
+	return defaultConfig.Dump(fileName...)
+}
+
 // New 创建并返回一个新的特定命名配置实体。
 // 通过加载同名空间配置以及支持绑定一系列 Option 以控制加载及缓存策略。
 func New(name string, opts ...Option) *Config {
@@ -227,7 +232,9 @@ func (self *Config) Core() *core {
 }
 
 // Register 注册一个配置模型（实现 IConfig 接口）。
-// 注册时如果指定的配置文件中尚未包含该部分配置，将使用模型默认值保存并持久化到文件（受 AutoCreateFile 控制）。
+//
+// 若配置文件中尚未包含该节，模型的当前值会作为**默认值**灌进 core（defaults 层，
+// 优先级低于配置文件），随后立即把 core 里的实际配置装载回模型。注册不写磁盘。
 func (self *Config) Register(cfg IConfig) {
 	core := self.Core()
 
@@ -321,7 +328,7 @@ func (self *Config) InConfig(path string) bool {
 
 // LoadFromFile 尝试从文件系统加载配置。
 // 并会将已注册的配置模型与加载的数据文件进行校对。
-// 缺失的配置模型（未存在于文件）将被补全并根据 AutoCreateFile 开关写回。
+// 未出现在文件里的配置模型，以其自身当前值作为默认值补全（只进内存，不写磁盘）。
 func (self *Config) LoadFromFile(fileName ...string) error {
 	core := self.Core()
 
@@ -370,12 +377,40 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 		return true
 	})
 
-	// 有变更且允许创建及修改文件，则刷回磁盘
-	if changed && self.AutoCreateFile {
-		return self.SaveToFile()
-	}
+	// 此处刻意**不再**自动回写磁盘。
+	//
+	// 原先是 `if changed && self.AutoCreateFile { return self.SaveToFile() }`：
+	// 只要有任何一个模型的配置节不在文件里，就把它的默认值刷回磁盘。后果是
+	// 配置文件必然膨胀成全量快照（kylin：453 个 key，400+ 是默认值），运行期状态
+	// 也会被写回去（Debug 端口、空字符串地址），而多进程同时启动时并发写同一个
+	// config.json 会把文件写截断 —— 服务器随后静默退出而进程还活着。
+	//
+	// 更要命的是语义：默认值一旦落盘就成了「用户配置」，此后改代码里的默认值
+	// 再也不生效（etcd 超时从 100ms 调到 5s 那次完全没起作用，就是因为各家配置
+	// 文件里早已存着 28 份旧值）。
+	//
+	// 配置文件现在是只读输入。要生成一份可编辑的模板，用 Dump()。
+	_ = changed
 
 	return nil
+}
+
+// Dump 把当前全部配置（含所有代码默认值）写到指定文件，用于生成一份给人编辑的
+// 模板。这是唯一会输出默认值的出口 —— 常规的 SaveToFile 只写差异。
+//
+// 不传 fileName 时写到 core.FileName 指向的路径。
+func (self *Config) Dump(fileName ...string) error {
+	core := self.Core()
+
+	name := core.FileName
+	if len(fileName) > 0 && fileName[0] != "" {
+		name = fileName[0]
+	}
+	if name == "" {
+		name = CONFIG_FILE_NAME
+	}
+
+	return core.fmt.WriteConfigFull(filepath.Join(AppPath, name))
 }
 
 func (self *Config) checkSelf(cfg IConfig) {
@@ -440,6 +475,13 @@ func (self *Config) LoadToModel(model IConfig) error {
 }
 
 // SaveToFile 原地或切换后保存 core 缓存层配置到文件驱动。
+//
+// 只写差异：运行期显式设定过的值，以及本来就在配置文件里的值。代码默认值不落盘
+// （要全量模板用 Dump）。
+//
+// AutoCreateFile 为 false 时，若目标文件尚不存在则跳过本次保存 —— 这是
+// WithNoAutoCreateFile 的语义所在。它此前挂在 LoadFromFile 的自动回写上，
+// 那条路径已随「配置文件是只读输入」一并取消。
 func (self *Config) SaveToFile(opts ...Option) error {
 	core := self.Core()
 
@@ -451,7 +493,12 @@ func (self *Config) SaveToFile(opts ...Option) error {
 		core.FileName = CONFIG_FILE_NAME
 	}
 
-	core.fmt.SetConfigFile(filepath.Join(AppPath, core.FileName))
+	path := filepath.Join(AppPath, core.FileName)
+	if !self.AutoCreateFile && !utils.FileExists(path) {
+		return nil
+	}
+
+	core.fmt.SetConfigFile(path)
 	return core.fmt.WriteConfig()
 }
 
