@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/volts-dev/volts/client"
@@ -57,6 +58,13 @@ func (self *service) Config() *Config {
 	return self.config
 }
 
+// configDiagnosticsOnce 保证配置诊断在一个进程里只报一次。
+//
+// 一个进程通常起多个 service（kylin 就同时起 HttpServer 与 RpcServer），每个都会
+// 走到这里。诊断针对的是**整个进程共享的那一份配置**，报第二遍不带来任何新信息，
+// 只会让同样几十行告警在启动日志里出现两次 —— 真实启动日志里已经这样了。
+var configDiagnosticsOnce sync.Once
+
 func (self *service) Start() error {
 	// 组件已装配完毕，此时把配置装载期累积的错误汇总报一次。
 	//
@@ -67,6 +75,29 @@ func (self *service) Start() error {
 	// 默认只告警不拒绝启动：坏的往往是某一节业务配置，该组件会退回默认值，
 	// 而整个服务仍然可用。要严格拒绝启动的场景，自行在 BeforeStart 里查
 	// config.Errors() 并返回错误。
+	configDiagnosticsOnce.Do(self.reportConfigDiagnostics)
+
+	for _, fn := range self.config.BeforeStart {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+
+	if err := self.config.Server.Start(); err != nil {
+		return err
+	}
+
+	for _, fn := range self.config.AfterStart {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// reportConfigDiagnostics 汇总报告配置的装载错误、未知项与校验结果。
+func (self *service) reportConfigDiagnostics() {
 	if err := config.Errors(); err != nil {
 		log.Warnf("配置装载期存在错误，相关组件已退回默认值：\n%v", err)
 	}
@@ -99,24 +130,6 @@ func (self *service) Start() error {
 	if os.Getenv("VOLTS_CONFIG_REPORT") != "" {
 		log.Info("\n" + config.Inspect().String())
 	}
-
-	for _, fn := range self.config.BeforeStart {
-		if err := fn(); err != nil {
-			return err
-		}
-	}
-
-	if err := self.config.Server.Start(); err != nil {
-		return err
-	}
-
-	for _, fn := range self.config.AfterStart {
-		if err := fn(); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (self *service) Stop() error {
