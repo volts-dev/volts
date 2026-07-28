@@ -1,11 +1,14 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/volts-dev/utils"
@@ -49,6 +52,25 @@ type (
 		// Mode定义了操作模式，决定了如何处理和格式化数据。
 		// 操作模式通过ModeType类型定义，可能包括不同的处理策略和选项。
 		Mode ModeType
+
+		// errMu/errs 收集装载期错误。
+		//
+		// 这里刻意不再 log.Fatal：配置层是库代码，一个坏 key 直接 os.Exit(1)
+		// 让调用方毫无补救余地，而 vectors 会在运行期动态注册租户/模块配置，
+		// 那种场景下退进程是不可接受的。错误改为累积，由 Errors() 一次取全。
+		errMu sync.Mutex
+		errs  []error
+
+		// savingDefaults 标记当前这次 Save 灌的是「代码默认值」而非「运行期设定值」。
+		//
+		// 两者必须落在配置系统的不同层：默认值优先级要**低于**配置文件，否则启动时
+		// 灌进去的默认值会永久压住用户在文件里写的真实配置 —— 用户改了配置没反应，
+		// 且毫无提示。
+		//
+		// 放在 core 而不是 Config 上：core 始终以指针传递，Config 却会被按值复制
+		// （如 broker/memory/memory.go 从 *m.config 取字面量），把 atomic.Bool 放
+		// Config 里会让 go vet 的 copylocks 对既有代码报警。
+		savingDefaults atomic.Bool
 	}
 
 	Config struct {
@@ -66,9 +88,53 @@ type (
 	}
 
 	iConfig interface {
-		checkSelf(cfg IConfig) // 检测自己是否被赋值
+		checkSelf(cfg IConfig)  // 检测自己是否被赋值
+		bindCore(c *core) *core // 把注册方的 core 注入模型内嵌的 Config
 	}
 )
+
+// saveDefaults 以「灌默认值」的模式执行 model 的 Save。
+//
+// 走 model.Save() 而不是直接 SaveFromModel，是因为各包普遍覆写了 Save 并在其中做
+// 额外动作（见 client/config.go 的 Init→Save、测试里的 testConfig.Save）；绕开覆写
+// 会静默改变这些包的行为。
+func saveDefaults(c *core, model IConfig) error {
+	if c == nil {
+		return model.Save()
+	}
+	c.savingDefaults.Store(true)
+	defer c.savingDefaults.Store(false)
+	return model.Save()
+}
+
+// errorf 累积一条装载期错误。
+func (self *core) errorf(format string, args ...any) error {
+	err := fmt.Errorf(format, args...)
+	self.errMu.Lock()
+	self.errs = append(self.errs, err)
+	self.errMu.Unlock()
+	log.Println("config:", err)
+	return err
+}
+
+// Errors 返回自上次 ClearErrors 以来累积的全部装载期错误。
+//
+// 刻意做成「聚合后一次取全」而不是「遇错即停」：一份 config.json 动辄数百个 key，
+// 报第一个就退出意味着改一次重启一次，一个个撞。
+func (self *core) Errors() error {
+	self.errMu.Lock()
+	defer self.errMu.Unlock()
+	if len(self.errs) == 0 {
+		return nil
+	}
+	return errors.Join(self.errs...)
+}
+
+func (self *core) ClearErrors() {
+	self.errMu.Lock()
+	self.errs = nil
+	self.errMu.Unlock()
+}
 
 // Default 返回系统初始化时的基础配置单例 (singleton)。
 func Default() *Config {
@@ -94,6 +160,19 @@ func Unregister(cfg IConfig) {
 // Load 指定重载配置文件入口并立即刷新至缓存和底层组件模型中。
 func Load(fileName ...string) error {
 	return defaultConfig.LoadFromFile(fileName...)
+}
+
+// Errors 返回默认单例上累积的装载期错误（多条已用 errors.Join 聚合）。
+//
+// 装载错误不再直接 os.Exit：调用方（通常是 volts.Run 或各服务的 cmd）应在组件
+// 装配完毕后查一次，自行决定是拒绝启动还是带着默认值继续跑。
+func Errors() error {
+	return defaultConfig.Errors()
+}
+
+// ClearErrors 清空默认单例上累积的装载期错误。
+func ClearErrors() {
+	defaultConfig.ClearErrors()
 }
 
 // New 创建并返回一个新的特定命名配置实体。
@@ -126,6 +205,16 @@ func New(name string, opts ...Option) *Config {
 	return cfg
 }
 
+// Errors 返回本配置实例所属 core 上累积的装载期错误。
+func (self *Config) Errors() error {
+	return self.Core().Errors()
+}
+
+// ClearErrors 清空本配置实例所属 core 上累积的装载期错误。
+func (self *Config) ClearErrors() {
+	self.Core().ClearErrors()
+}
+
 func (self *Config) Core() *core {
 	if self.core == nil {
 		c, ok := cfgs.Load(DEFAULT_PREFIX)
@@ -140,49 +229,57 @@ func (self *Config) Core() *core {
 // Register 注册一个配置模型（实现 IConfig 接口）。
 // 注册时如果指定的配置文件中尚未包含该部分配置，将使用模型默认值保存并持久化到文件（受 AutoCreateFile 控制）。
 func (self *Config) Register(cfg IConfig) {
+	core := self.Core()
+
 	if c, ok := cfg.(iConfig); ok {
 		c.checkSelf(cfg)
+		// ★ 把注册方的 core 注入模型内嵌的 Config。
+		//
+		// 此前这一步不存在：Register 只把模型指针存进 core.models，而模型内嵌的
+		// Config.core 始终是 nil，于是模型自己的 Save/Load 走 Core() 时回落到全局
+		// DEFAULT_PREFIX 那个 core。后果是 New(name) 建出来的命名配置实体对
+		// Register 完全无效 —— 注册两个模型再 SaveToFile()，写出来的是 `{}`，
+		// 值全跑进了全局单例。
+		c.bindCore(core)
 	}
 
 	cfgStr := cfg.String()
 	if cfgStr == "" {
-		log.Fatal("config name is empty")
+		core.errorf("配置模型 %T 的 String() 返回空名称，已跳过注册", cfg)
 		return
 	}
-
-	core := self.Core()
 
 	// 缓存到 core
 	core.models.Store(cfgStr, cfg)
 
 	if !self.InConfig(cfgStr) {
-		// 尚未存储该配置：使用默认值写入到内存（core）
-		if err := cfg.Save(); err != nil {
-			log.Fatal(err)
+		// 尚未存储该配置：把模型当前值作为**默认值**灌进 core（defaults 层）。
+		// 走 defaults 而非 override，配置文件才能盖得过它。
+		if err := saveDefaults(core, cfg); err != nil {
+			core.errorf("保存配置 %q 的默认值失败: %w", cfgStr, err)
 		}
 	}
 
 	// 从 core 中装载真实的配置到模型实体
 	if err := cfg.Load(); err != nil {
-		log.Fatalf("load %v config failed!", cfgStr)
+		core.errorf("装载配置 %q 失败: %w", cfgStr, err)
 	}
 }
 
-// Unregister 移除配置模型并保存持久化状态。
+// Unregister 移除配置模型。
+//
+// 不再顺手写盘：Unregister 的主要调用方是 WithConfigPrefixName / Name 这类改名
+// option（见 server/client/router 各自的 config.go），它们在**装配期**每改一次名就
+// 触发一次全量落盘。多进程同时启动时并发写同一个 config.json 会把文件写截断，
+// 服务器随后静默退出而进程还活着 —— 症状与配置无关，极难回溯到这里。
+// 落盘统一由 SaveToFile 显式触发。
 func (self *Config) Unregister(cfg IConfig) {
 	cfgStr := cfg.String()
 	self.Core().models.Delete(cfgStr)
 
 	if self.InConfig(cfgStr) {
 		self.Core().fmt.Delete(cfgStr)
-
-		// 保存配置到文件
-		err := self.SaveToFile()
-		if err != nil {
-			log.Fatal(err)
-		}
 	}
-
 }
 
 // config: the config struct with binding the options
@@ -206,12 +303,12 @@ func (self *Config) StopWatcher() {
 }
 
 func (self *Config) Reload() {
+	core := self.Core()
 	// 重新加载配置
-	self.Core().models.Range(func(key any, value any) bool {
+	core.models.Range(func(key any, value any) bool {
 		v := value.(IConfig)
-		err := v.Load()
-		if err != nil {
-			log.Fatalf("reload %v config failed!", key)
+		if err := v.Load(); err != nil {
+			core.errorf("重载配置 %v 失败: %w", key, err)
 		}
 		return true
 	})
@@ -258,15 +355,15 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 		if v, ok := value.(IConfig); ok {
 			// 如果没有文件提供原始配置，或者该节配置不在文件里
 			if !fileExists || !core.fmt.InConfig(v.String()) {
-				if err := v.Save(false); err != nil {
-					log.Fatalf("save %v config failed!", v.String())
-					return false
+				if err := saveDefaults(core, v); err != nil {
+					core.errorf("保存配置 %q 的默认值失败: %w", v.String(), err)
+					return true
 				}
 				changed = true
 			} else {
 				// 配置存在，立即反序列化加载到对应的内存模型实例
 				if err := v.Load(); err != nil {
-					log.Fatalf("save %v config failed!", key)
+					core.errorf("装载配置 %v 失败: %w", key, err)
 				}
 			}
 		}
@@ -286,6 +383,18 @@ func (self *Config) checkSelf(cfg IConfig) {
 		self.model = cfg
 	}
 }
+
+// bindCore 把注册方的 core 绑到本模型上，并返回最终生效的 core。
+//
+// 首次绑定生效；已绑定则保持不变（同一个模型被重复注册到不同的 Config 实例时，
+// 以第一次为准而不是来回改绑 —— 改绑会让模型的历史值留在旧 core 里成为孤儿）。
+func (self *Config) bindCore(c *core) *core {
+	if self.core == nil {
+		self.core = c
+	}
+	return self.core
+}
+
 
 func (self *Config) Load() error {
 	if self.model != nil {
@@ -307,8 +416,12 @@ func (self *Config) LoadToModel(model IConfig) error {
 
 	// 若该模型不在配置树的范围内（初次使用或未注册）
 	if !core.fmt.InConfig(model.String()) {
-		err := model.Save() // 持久化其默认值到核里
-		if err != nil {
+		// 「文件里没有这一节，用模型当前值兜底」—— 兜的就是默认值，必须落在
+		// defaults 层。此前这里是裸的 model.Save()，走 SetValue 写进 override 层：
+		// Register 前脚刚把默认值规规矩矩灌进 defaults，后脚这一行又把同一份值
+		// 灌进优先级最高的 override，于是配置文件里的真实值**永远**盖不过启动时
+		// 的默认值。用户改配置没反应且零提示，其隐蔽性正来自这两行的顺序。
+		if err := saveDefaults(core, model); err != nil {
 			return err
 		}
 	} else {
@@ -363,7 +476,14 @@ func (self *Config) SaveFromModel(model IConfig, immed ...bool) error {
 			v = d.Milliseconds()
 		}
 
-		self.SetValue(strings.Join([]string{model.String(), k}, "."), v)
+		key := strings.Join([]string{model.String(), k}, ".")
+		if self.Core().savingDefaults.Load() {
+			// 代码默认值 —— 落在 defaults 层，优先级低于配置文件
+			self.Core().fmt.SetDefault(key, v)
+		} else {
+			// 运行期设定值 —— 落在 override 层，优先级高于配置文件
+			self.SetValue(key, v)
+		}
 	}
 
 	if len(immed) > 0 {

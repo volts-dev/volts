@@ -20,9 +20,8 @@ func WithFileName(fileName string) Option {
 // 保存新配置数据
 func WithConfig(model IConfig) Option {
 	return func(cfg *Config) {
-		err := cfg.SaveFromModel(model)
-		if err != nil {
-			log.Fatal(err)
+		if err := cfg.SaveFromModel(model); err != nil {
+			cfg.Core().errorf("保存配置 %q 失败: %w", model.String(), err)
 		}
 	}
 }

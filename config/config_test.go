@@ -154,7 +154,9 @@ func TestCoverageSuite(t *testing.T) {
 		t.Error("GetFloat64 empty fail")
 	}
 
-	if cfg.GetDuration("test_duration", time.Second) != 100 {
+	// 裸数字按毫秒 —— 与 SaveFromModel 的 d.Milliseconds() 及 withDurationHook 一致。
+	// 这里此前断言的是 `!= 100`（即 100ns），编码的是 GetDuration 按纳秒解释的旧错误行为。
+	if cfg.GetDuration("test_duration", time.Second) != 100*time.Millisecond {
 		t.Error("GetDuration fail")
 	}
 	if cfg.GetDuration("test_duration_empty", time.Second) != time.Second {

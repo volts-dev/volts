@@ -209,14 +209,34 @@ func (self *format) GetTime(key string, defaultValue time.Time) time.Time {
 	return self.v.GetTime(key)
 }
 
+// GetDuration 读取时长配置。
+//
+// 单位约定必须与写入端一致：SaveFromModel 把 time.Duration 落盘为
+// d.Milliseconds()（毫秒整数），withDurationHook 也按毫秒把整数解回 Duration。
+// 此前这里却是 time.Duration(GetInt64(key)) —— **按纳秒解释**，同一份数据经
+// UnmarshalKey 读出 5s、经 GetDuration 读出 5µs，差 100 万倍。
+//
+// 三种形态都接受：带单位字符串（"5s"，人手写配置的首选）、time.Duration、
+// 裸数字（按毫秒，兼容既有配置文件）。
 func (self *format) GetDuration(key string, defaultValue time.Duration) time.Duration {
 	self.RLock()
 	defer self.RUnlock()
 	if !self.v.IsSet(key) {
 		return defaultValue
 	}
-	val := self.v.GetInt64(key)
-	return time.Duration(val)
+
+	switch v := self.v.Get(key).(type) {
+	case string:
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return defaultValue
+		}
+		return d
+	case time.Duration:
+		return v
+	default:
+		return time.Duration(self.v.GetInt64(key)) * time.Millisecond
+	}
 }
 
 func (self *format) GetFloat64(key string, defaultValue float64) float64 {
