@@ -465,7 +465,6 @@ func (self *Config) bindCore(c *core) *core {
 	return self.core
 }
 
-
 func (self *Config) Load() error {
 	if self.model != nil {
 		return self.LoadToModel(self.model)
@@ -499,6 +498,17 @@ func (self *Config) LoadToModel(model IConfig) error {
 		err := core.fmt.UnmarshalKey(model.String(), model)
 		if err != nil {
 			return err
+		}
+
+		// 展开 ${VAR} 环境变量引用。
+		//
+		// 刻意只在**模型**上展开，不回写配置树：配置树里保留原始的 ${VAR} 字面量，
+		// 这样后续任何一次 SaveToFile 都不会把解析出来的密钥明文烤进配置文件。
+		// 外置密钥的意义正在于此 —— 若展开后的值回流到配置树，第一次保存就前功尽弃。
+		if errs := expandEnvRefs(model); len(errs) > 0 {
+			for _, e := range errs {
+				core.errorf("配置 %q 的环境变量引用无法解析: %w", model.String(), e)
+			}
 		}
 	}
 

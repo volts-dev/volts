@@ -34,9 +34,9 @@ type Report struct {
 
 // OrphanSection 是文件里存在、却没有任何已注册模型认领的配置节。
 type OrphanSection struct {
-	Path  string
-	Line  int
-	Keys  int // 该节下的叶子数
+	Path string
+	Line int
+	Keys int // 该节下的叶子数
 }
 
 // IsomorphGroup 是一组字段集合完全相同的配置节。
@@ -61,17 +61,23 @@ type SecretHit struct {
 // 疑似凭据的字段名片段。
 var secretHints = []string{"secret", "password", "passwd", "token", "credential", "access_key", "private_key"}
 
-// isLikelySecret 判断一个字段是否像明文凭据。
+// isLikelySecret 判断一个字段是否是**明文**凭据。
 //
 // 光看字段名会大量误报：access_token_duration_time、password_length、
 // refresh_token_duration_time 都命中了 token / password，但它们是时长和长度。
 // 实测对 kylin 的配置误报率 45%（11 条里 5 条），而一份误报过半的安全提示，
 // 人扫两眼就会连真的一起略过。
 //
-// 加一条「值必须是非空字符串」即可滤净：凭据是字符串，时长和长度是数字。
+// 两条过滤：
+//   - 值必须是非空字符串 —— 凭据是字符串，时长和长度是数字。
+//   - 值不能是 ${VAR} 环境变量引用 —— 那正是已经外置好的写法，再报就是倒过来
+//     催人把它改回明文。
 func isLikelySecret(leaf string, raw any) bool {
 	str, ok := raw.(string)
 	if !ok || str == "" {
+		return false
+	}
+	if hasEnvRef(str) {
 		return false
 	}
 	for _, hint := range secretHints {
@@ -261,6 +267,9 @@ func (self *Report) String() string {
 	fmt.Fprintf(&b, "\n[4] 疑似明文凭据：%d 处\n", len(self.Secrets))
 	if len(self.Secrets) > 0 {
 		b.WriteString("    仅按字段名匹配，只报不改。配置文件通常随代码分发或进入备份。\n")
+		b.WriteString("    外置写法：把值改成 ${VAR}，程序装载时从环境变量取；\n")
+		b.WriteString("    允许缺省的写 ${VAR:-默认值}，未设置且未声明缺省会报错而非留空。\n")
+		b.WriteString("    已写成 ${VAR} 的项不会出现在本清单里。\n")
 		for _, s := range self.Secrets {
 			fmt.Fprintf(&b, "    第 %-5d 行  %s\n", s.Line, s.Path)
 		}

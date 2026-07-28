@@ -23,7 +23,7 @@ func (self *valOuter) Validate() error {
 
 type valInner struct {
 	Config
-	Port int `field:"port"`
+	Port int    `field:"port"`
 	Host string `field:"host"`
 }
 

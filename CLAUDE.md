@@ -220,6 +220,15 @@ Three rules that are easy to get wrong:
   `time.Duration(GetInt64(key))`, i.e. nanoseconds, so the two read paths disagreed by 10⁶.
   Bare numbers are milliseconds; unit-suffixed strings (`"5s"`) are preferred in files.
 
+**Secrets can be externalized.** A config value of the form `${VAR}` is resolved from the
+environment at load time; `${VAR:-default}` declares it optional. An unset `${VAR}` with no
+default is an **error**, never a silent empty string — an empty signing key lets the service
+come up with signature checking degraded to "anyone can forge", which is worse than failing
+to start. Expansion happens on the **model only**: the config tree keeps the raw `${VAR}`
+literal, so no later `SaveToFile` can bake a resolved secret into the file. Values without
+`${}` are untouched, so existing files need no changes. Regression:
+`TestExpandEnvRefs_NotWrittenBackToFile`.
+
 **Diagnostics.** Load errors accumulate (`config.Errors()`) instead of `log.Fatal` — a library
 must not `os.Exit` on the caller's behalf, and vectors registers configs at runtime.
 `service.Start()` is the one place that knows every component has registered, so it reports
