@@ -40,7 +40,7 @@ func TestLint_CatchesTypos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("lint_typo", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&lintCfg{ReadTimeout: 15 * time.Second, MaxRegistry: 500})
 
 	issues := cfg.Lint()
@@ -100,7 +100,7 @@ func TestOrigin_TracksValueSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("lint_origin", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&lintCfg{ReadTimeout: 15 * time.Second, MaxRegistry: 500, Plain: "from_code"})
 
 	// 文件里显式写的 0：IsSet 为真，来源是文件，且带行号
@@ -167,7 +167,7 @@ func TestLint_NoFalsePositiveOnUnregisteredSubsection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("lint_subsection", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&regParent{}) // 只注册 regowner，不注册 regowner.sub
 
 	for _, is := range cfg.Lint() {
@@ -207,7 +207,7 @@ func TestLint_NoFalsePositiveOnNestedStruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("lint_nested", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&NestedModel{})
 
 	for _, is := range cfg.Lint() {

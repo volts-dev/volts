@@ -61,6 +61,18 @@ type (
 		errMu sync.Mutex
 		errs  []error
 
+		// applyMu 串行化**配置层内部**所有「把配置写进模型」的路径：Register、
+		// LoadFromFile、Reload。
+		//
+		// 这三条路径分属不同 goroutine —— Reload 跑在 WithWatcher 的文件监听协程上，
+		// 另两条跑在调用方线程 —— 却写同一批模型对象，-race 实测可复现（watcher 的
+		// Reload 读模型字段 vs LoadFromFile 里 model.Load() 写同一字段）。
+		//
+		// 这把锁**不解决**业务代码直接读模型字段与热重载写入之间的竞态：那些读点
+		// 遍布请求路径（router.Config.Recover 每请求一次…），配置层拦不住，得靠
+		// copy-on-write + accessor 改造读侧。但配置层自己制造的那一半没有理由留着。
+		applyMu sync.Mutex
+
 		// savingDefaults 标记当前这次 Save 灌的是「代码默认值」而非「运行期设定值」。
 		//
 		// 两者必须落在配置系统的不同层：默认值优先级要**低于**配置文件，否则启动时
@@ -284,6 +296,9 @@ func (self *Config) Register(cfg IConfig) {
 	// 缓存到 core
 	core.models.Store(cfgStr, cfg)
 
+	core.applyMu.Lock()
+	defer core.applyMu.Unlock()
+
 	// 把模型当前值作为**默认值**灌进 core（defaults 层）。
 	//
 	// 无条件灌，不再只在「整节不存在时」才灌：配置文件通常只写少数几项，此前
@@ -336,18 +351,6 @@ func (self *Config) StopWatcher() {
 	}
 }
 
-func (self *Config) Reload() {
-	core := self.Core()
-	// 重新加载配置
-	core.models.Range(func(key any, value any) bool {
-		v := value.(IConfig)
-		if err := v.Load(); err != nil {
-			core.errorf("重载配置 %v 失败: %w", key, err)
-		}
-		return true
-	})
-}
-
 // 检测配置路径是否在Config里出现了
 func (self *Config) InConfig(path string) bool {
 	return self.Core().fmt.InConfig(path)
@@ -388,6 +391,7 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 	})
 
 	changed := false
+	core.applyMu.Lock()
 	core.models.Range(func(key any, value any) bool {
 		if v, ok := value.(IConfig); ok {
 			// 如果没有文件提供原始配置，或者该节配置不在文件里
@@ -406,6 +410,7 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 		}
 		return true
 	})
+	core.applyMu.Unlock()
 
 	// 此处刻意**不再**自动回写磁盘。
 	//

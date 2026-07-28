@@ -48,7 +48,7 @@ func TestReport_FindsValueConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("report_conflict", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&repCfg{})
 
 	rep := cfg.ReportAll()
@@ -100,7 +100,7 @@ func TestReport_SecretDetectionIgnoresNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("report_secret", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&repCfg{})
 
 	hits := map[string]bool{}
@@ -148,7 +148,7 @@ func TestReport_FindsOrphanSections(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("report_orphan", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&repCfg{})
 
 	rep := cfg.ReportAll()

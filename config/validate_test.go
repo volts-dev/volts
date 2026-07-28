@@ -77,7 +77,7 @@ func TestValidate_AddsPathAndLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("validate_path", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&valOuter{Timeout: 30})
 
 	err := cfg.ValidateAll()
@@ -120,7 +120,7 @@ func TestValidate_ReportsAllFieldsAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("validate_multi", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&valOuter{Timeout: 30})
 	cfg.Register(&valInner{})
 
@@ -149,7 +149,7 @@ func TestValidate_BottomUp(t *testing.T) {
 	fn := "validate_order.json"
 	defer os.Remove(filepath.Join(AppPath, fn))
 
-	cfg := New("validate_order", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	valOrder = nil
 	cfg.Register(&ordOuter{})
 	cfg.Register(&ordInner{})
@@ -167,7 +167,7 @@ func TestValidate_SkipsModelsWithoutValidator(t *testing.T) {
 	fn := "validate_skip.json"
 	defer os.Remove(filepath.Join(AppPath, fn))
 
-	cfg := New("validate_skip", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.Register(&regChild{Port: 80}) // 没有 Validate 方法
 
 	if err := cfg.ValidateAll(); err != nil {

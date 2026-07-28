@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -36,7 +38,7 @@ func TestRegister_BindsCoreToModel(t *testing.T) {
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	cfg := New("regression_bindcore", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 
 	child := &regChild{Port: 8080}
 	cfg.Register(child)
@@ -92,7 +94,7 @@ func TestSaveToFile_OnlyPersistsDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("regression_diff", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	child := &regChild{Port: 8080} // 纯默认值，没人设定过
 	cfg.Register(child)
 
@@ -139,7 +141,7 @@ func TestLoadFromFile_DoesNotCreateFile(t *testing.T) {
 	defer os.Remove(path)
 	os.Remove(path)
 
-	cfg := New("regression_nocreate", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	child := &regChild{Port: 8080}
 	cfg.Register(child)
 
@@ -166,7 +168,7 @@ func TestLoadFromFile_DoesNotCreateFile(t *testing.T) {
 func TestGetDuration_UnitIsMillisecond(t *testing.T) {
 	fn := "regression_duration.json"
 	defer os.Remove(filepath.Join(AppPath, fn))
-	cfg := New("regression_duration", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 
 	cfg.SetValue("x.timeout", int64(5000))
 	if got := cfg.GetDuration("x.timeout", 0); got != 5*time.Second {
@@ -200,7 +202,7 @@ func TestUnregister_DoesNotWriteFile(t *testing.T) {
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	cfg := New("regression_unregister", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	child := &regChild{Port: 8080}
 	cfg.Register(child)
 
@@ -230,7 +232,7 @@ func TestRegister_CollectsErrorsInsteadOfExiting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("regression_errors", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.ClearErrors()
 
 	child := &regChild{Port: 8080}
@@ -269,7 +271,7 @@ func TestFileOverridesCodeDefaults(t *testing.T) {
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	cfg := New("regression_precedence", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 
 	// 路径一：Register 时文件不存在，默认值必须进 defaults 层
 	parent := &regParent{Value: "code_default"}
@@ -320,7 +322,7 @@ func TestRegister_ContinuesAfterBadModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := New("regression_continue", WithFileName(fn))
+	cfg := newIsolated(t, fn)
 	cfg.ClearErrors()
 
 	child := &regChild{Port: 8080}
@@ -335,3 +337,16 @@ func TestRegister_ContinuesAfterBadModel(t *testing.T) {
 		t.Errorf("坏模型中断了后续模型的装载: parent.Value = %q, want %q", parent.Value, "ok")
 	}
 }
+
+// newIsolated 建一个每次调用都全新的配置实例。
+//
+// New(name) 按 name 复用内存中已有的 core —— 这是设计如此，生产里一个 name 就是一个
+// 逻辑配置实体。但测试必须彼此隔离：复用 core 会把上一轮留在 override 层的值、
+// 已注册的模型一并继承过来，`go test -count=2` 第二轮便开始互相干扰
+// （实测表现为「代码默认值 IsSet 应为假」「未注册的子组件节被误报」等一串假失败）。
+func newIsolated(t *testing.T, fn string) *Config {
+	t.Helper()
+	return New(t.Name()+"#"+strconv.FormatInt(testSeq.Add(1), 10), WithFileName(fn))
+}
+
+var testSeq atomic.Int64
