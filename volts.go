@@ -90,6 +90,16 @@ func (self *service) Start() error {
 		log.Warnf("配置校验未通过：\n%v", err)
 	}
 
+	// 配置体检报告：设 VOLTS_CONFIG_REPORT=1 时打印一次。
+	//
+	// 做成环境变量触发而非常规输出，是因为它专报 Lint 不敢报的东西（整节孤儿、
+	// 同构节、取值分歧），其中相当一部分在惰性注册下是正常现象 —— 天天打印会变成
+	// 噪音。而做成进程内触发而非离线工具，是因为离线工具不知道业务侧注册了哪些
+	// 配置模型，只能把整个业务配置报成「无人认领」。
+	if os.Getenv("VOLTS_CONFIG_REPORT") != "" {
+		log.Info("\n" + config.Inspect().String())
+	}
+
 	for _, fn := range self.config.BeforeStart {
 		if err := fn(); err != nil {
 			return err

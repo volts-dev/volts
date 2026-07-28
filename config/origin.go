@@ -125,6 +125,13 @@ func (self *format) configFile() string {
 	return self.v.ConfigFileUsed()
 }
 
+// rawValue 取某个 key 的当前生效值（不做类型转换），供体检报告展示用。
+func (self *format) rawValue(key string) any {
+	self.RLock()
+	defer self.RUnlock()
+	return self.v.Get(key)
+}
+
 func (self *format) fileLine(key string) (int, bool) {
 	self.RLock()
 	defer self.RUnlock()
