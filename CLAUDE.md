@@ -136,7 +136,7 @@ passes an `Upgrade` request through to an upstream and never parses a frame.
 | `selector/` | Load-balancing strategy over registry nodes, plus per-node failure ejection / circuit breaking (`selector/breaker.go`) |
 | `logger/` | Self-contained leveled logger (writer manager + console writer). **Not** built on zap — `go.uber.org/zap` is pulled in only by `registry/etcd` for clientv3's `LogConfig` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
-| `config/` | Top-level config loading via `github.com/spf13/viper` |
+| `config/` | Config models, load/validate/lint/report. viper is the file codec only — layering, provenance and diff-persistence live in this package (see "Config: the file is a read-only input") |
 
 ### Service Lifecycle
 
@@ -193,6 +193,60 @@ breaker that removes 100% of capacity is worse than the failure it guards agains
 `registry.Service.Equal` decides (via `TRouter.isLocalService`) whether `refresh()` skips a service entirely, so a wrong `true` means **permanently no route**. It compares name, version, node count, and node ids — historically the whole comparison sat inside `if len(a.Nodes) == len(b.Nodes)` and fell through to `return true` when counts differed, which any zombie node (SIGKILL leaves the etcd lease un-revoked, so old+new nodes coexist and the count doubles) turned into "remote service misread as local". Keep the bias toward `false`: a false negative only costs one extra `store()` pass, where `filteSelf` filters precisely.
 
 (The former `handler.Services`/`SetServices` field — once documented here as a data race — is gone: it had no readers and `SetServices` was never called, so the race could not occur. Removed rather than locked.)
+
+### Config: the file is a read-only input
+
+**The config file is never written back automatically.** `Register` seeds a model's current
+values as **defaults** (viper's defaults layer), `LoadFromFile` does not flush, and
+`SaveToFile` persists **only the diff** — values someone actually set at runtime, plus keys
+that were already in the file. `Dump()` is the one exit that emits defaults, for generating
+an editable template.
+
+Three rules that are easy to get wrong:
+
+- **Defaults go to the defaults layer, never to override.** `SetValue` writes viper's
+  *override* layer, which outranks the config file; `SetDefault` writes *defaults*, which the
+  file outranks. Seeding a model's defaults through `SetValue` means the file can never win
+  — the user edits config.json and nothing happens, with no diagnostic. There are **two**
+  seeding paths (`Register`, and `LoadToModel`'s "section missing → `model.Save()`" fallback);
+  fixing only one leaves the symptom identical. Both go through `saveDefaults`.
+  Regression: `TestFileOverridesCodeDefaults`.
+- **Writing defaults back is what made `if cfg.X == 0 { fallback }` dead code.** Once a
+  default lands in the file it *is* user config, and changing the constant stops mattering.
+  kylin's config.json held 453 keys, 400+ of them defaults, with `registry.timeout` copied 15
+  times — which is why raising the etcd timeout from 100ms to 5s had no effect anywhere.
+- **Duration units must match on both sides.** `SaveFromModel` persists
+  `d.Milliseconds()`, `withDurationHook` decodes ints as ms — `GetDuration` used to do
+  `time.Duration(GetInt64(key))`, i.e. nanoseconds, so the two read paths disagreed by 10⁶.
+  Bare numbers are milliseconds; unit-suffixed strings (`"5s"`) are preferred in files.
+
+**Diagnostics.** Load errors accumulate (`config.Errors()`) instead of `log.Fatal` — a library
+must not `os.Exit` on the caller's behalf, and vectors registers configs at runtime.
+`service.Start()` is the one place that knows every component has registered, so it reports
+errors, `Lint()` (unknown keys with spelling suggestions) and `Validate()` there, and prints
+`Inspect()` when `VOLTS_CONFIG_REPORT` is set.
+
+**`Lint` is deliberately conservative; `Report` is not.** Config models register **lazily** —
+a section is only known once code actually builds that component. Lint therefore skips any
+section nothing claims, and only reports keys whose *parent path* is a structure some model
+declared (`server.http` is registered, but `server.http.client` is a sub-component's section
+that the server model never declares). Loosening either rule reintroduced 300+ false
+positives against kylin's config. A check that cries wolf daily gets ignored along with the
+real typos. Whole-section orphans are `Report`'s job instead.
+
+**Never name a `*Config` method after an interface the models might satisfy.** Every config
+model embeds `config.Config`, so methods get promoted onto all of them — naming the
+tree-wide validator `Validate()` made every model "implement" `IValidator` with an inherited
+body that walks all models, i.e. infinite recursion and a stack overflow. Hence `ValidateAll`
+/ `ReportAll` on the type, with plain `config.Validate()` / `config.Inspect()` as package
+functions (those are not promoted). Regression:
+`TestValidate_SkipsModelsWithoutValidator`.
+
+Validation errors carry their own location: models return `config.Invalid("read_timeout", …)`
+with a **relative** field name and the framework prefixes the full path plus file line
+(`config.json:47: server.http.transport.read_timeout: …`). A component cannot know where it
+is mounted — transport may sit under `server.http` or `client.rpc` — so it must not build
+that path itself. Validation runs bottom-up, so a parent may assume its children are valid.
 
 ### Known Issues (tracked in memory)
 
