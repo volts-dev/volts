@@ -47,7 +47,67 @@ var (
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second, // 防止调试断点导致无限挂起
 	}
+
+	// 只对"连接根本没写出去"这一类失败补重放，见 retryStaleIdleConn。
+	reverseProxyRoundTripper http.RoundTripper = retryStaleIdleConn{reverseProxyTransport}
 )
+
+// retryStaleIdleConn 在**可证明安全**的前提下补一次重放：上游重启后，连接池里那条
+// 已被对端关闭的 keep-alive 被选中时，请求会直接失败而不是换条连接重来。
+//
+// ## 为什么 http.Transport 自己不管
+//
+// net/http.persistConn.shouldRetryRequest 有两条路径：
+//
+//	nothingWrittenError    → 看 GetBody（与方法无关）  ✅ POST 也会重试
+//	errServerClosedIdle    → 看 Request.isReplayable   ❌ isReplayable 按方法判定，
+//	                                                      POST/PUT/DELETE 一律 false
+//
+// 第二条是纯粹的方法保守主义：errServerClosedIdle 的语义就是"取连接时发现对端已关，
+// **一个字节都没写出去**"，此时重放不可能造成重复执行。Go 仍然拒绝，是因为它不愿意
+// 对非幂等方法做任何假设。我们知道自己在代理什么，可以放开这一条。
+//
+// ## 为什么**不**用 Idempotency-Key 一把梭
+//
+// 给出站请求打上 Idempotency-Key 头能让 isReplayable 直接返回 true，实测能把失败从
+// 60/300 降到 **0/300** —— 但它同时打开了 transportReadFromServerError 那条路径，
+// 那条的语义是"请求已经写出去了，服务端可能已经处理完才断开"。对本仓的
+// sale / purchase / account / payment 来说，重放 = 重复下单、重复扣款。
+// **宁可失败一次，也不能悄悄执行两次。**
+//
+// ## 剩下的缺口（明确不修）
+//
+// 包装后 60/300 → 48/300，清零的是 closed-idle 那一类；剩下的全是裸 EOF ——
+// 请求已写出、响应未回来，无法区分"没处理"与"处理完才断"。这一档只能靠**业务层
+// 幂等键**解决，代理层无从判断。nginx 的 proxy_next_upstream 默认同样不重放
+// 非幂等请求，原因一样。
+type retryStaleIdleConn struct{ base http.RoundTripper }
+
+func (t retryStaleIdleConn) RoundTrip(req *http.Request) (*http.Response, error) {
+	rsp, err := t.base.RoundTrip(req)
+	if err == nil || req.GetBody == nil || !isServerClosedIdle(err) {
+		return rsp, err
+	}
+	body, gerr := req.GetBody()
+	if gerr != nil {
+		return rsp, err
+	}
+	// Clone 而不是复用 req：原请求已被 Transport 标记消费过。
+	clone := req.Clone(req.Context())
+	clone.Body = body
+	log.Dbgf("http: proxy retrying %s %s — upstream closed the idle connection (nothing was written)",
+		req.Method, req.URL.Path)
+	return t.base.RoundTrip(clone)
+}
+
+// isServerClosedIdle 识别 net/http 的 errServerClosedIdle。
+//
+// 该错误变量**未导出**，也没有可用的哨兵值或类型可以 errors.Is/As，只能匹配文本。
+// 匹配失败的后果是退回现状（不重放），不会误重放，所以这里的脆弱性是安全的一侧。
+// 字符串取自 net/http/transport.go: errServerClosedIdle = errors.New("http: server closed idle connection")。
+func isServerClosedIdle(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "server closed idle connection")
+}
 
 // RpcReverseProxy 是 RPC(CONNECT) 端点的代理占位实现 —— RPC 层的反向代理转发从未
 // 实现过。
@@ -150,10 +210,18 @@ func HttpReverseProxy(ctx *THttpContext) {
 		pr.Out.URL.RawPath = "" // 让 URL 按 Path 重新编码，别留下旧的转义串
 	}
 
-	// 缓冲请求体，使 http.Transport 可以在 stale 连接时自动重试（含 POST/PUT）。
-	// GetBody 是 http.Transport 内部重试的触发条件：有 GetBody 时，transport
-	// 检测到 errServerClosedIdle 后会自动重建连接并重放请求，无需在 ErrorHandler
-	// 里手动 retry（手动 retry 传入的是已消费 Body 的 outgoing request，POST 会丢 body）。
+	// 缓冲请求体，使 http.Transport 能在 stale 连接时重放请求。
+	//
+	// ⚠️ 这里只覆盖 http.Transport 两条重试路径中的**一条**。实测（2026-07-28，
+	// 300 轮 CloseClientConnections）：
+	//
+	//	GET                 失败 0/300    —— 本来就会重试，无需干预
+	//	POST + GetBody      失败 60/300   —— 光有 GetBody **不足以**让 POST 被重试
+	//
+	// 原因在 net/http.persistConn.shouldRetryRequest：只有 nothingWrittenError
+	// 这条路径看 GetBody；另一条 errServerClosedIdle 走的是 Request.isReplayable，
+	// 而它按**方法**判定，POST 一律不可重放（GetBody 有没有都一样）。
+	// 所以下面的 reverseProxyTransport 额外包了 retryStaleIdleConn 补那一条。
 	var rewriteFn func(*httputil.ProxyRequest)
 	if inReq.Body != nil && inReq.ContentLength > 0 && inReq.ContentLength <= maxProxyRetryBody {
 		bodyBytes, err := io.ReadAll(inReq.Body)
@@ -188,7 +256,7 @@ func HttpReverseProxy(ctx *THttpContext) {
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Transport: reverseProxyTransport,
+		Transport: reverseProxyRoundTripper,
 		Rewrite:   rewriteFn,
 		ModifyResponse: func(resp *http.Response) error {
 			// 拿到上游响应即视为节点可达 —— 5xx 是业务语义，不代表节点故障，
