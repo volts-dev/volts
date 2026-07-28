@@ -216,6 +216,25 @@ func New(name string, opts ...Option) *Config {
 	return cfg
 }
 
+// Detach 让该 Config 挂到一个**与全局隔离**的一次性 core 上。
+//
+// 用于「只想 apply 一遍 option、把某几个字段解析出来，不想产生任何注册副作用」的
+// 临时对象。典型场景是各包的 Use 工厂：它们建一个临时 Config 来求出 Addrs 以便
+// 查实例缓存，但 option 里往往含 WithConfigPrefixName —— 那个 option 内部直接
+// Register，于是每调一次 Use 就把一个随即被丢弃的临时对象注册进全局 models。
+// 命中缓存时更糟：后面没有第二次注册去覆盖它，该配置路径便永久指向一个没人持有的
+// 孤儿对象，改它不影响真实例，表现为「配置改了不生效」。
+//
+// 隔离 core 不进 cfgs 注册表、不读文件，随临时对象一起被回收。
+func Detach(cfg *Config) {
+	cfg.core = &core{
+		fmt:      newFormat(),
+		FileName: CONFIG_FILE_NAME,
+		Mode:     MODE_NORMAL,
+		name:     "detached",
+	}
+}
+
 // Errors 返回本配置实例所属 core 上累积的装载期错误。
 func (self *Config) Errors() error {
 	return self.Core().Errors()

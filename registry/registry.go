@@ -3,8 +3,10 @@ package registry
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 )
 
@@ -111,7 +113,13 @@ func Register(name string, creator func(opts ...Option) IRegistry) {
 }
 
 func Use(name string, opts ...Option) IRegistry {
+	// 这个 cfg 只用来把 opts 解析出 Addrs 以便查实例缓存，随后丢弃。必须先与全局
+	// 隔离：opts 里通常含 WithConfigPrefixName，而那个 option 内部直接 Register。
+	// 不隔离的话，每调一次 Use 就把一个即将被丢弃的临时对象注册进全局 models；
+	// 命中缓存时后面又没有第二次注册去覆盖它，该配置路径便永久指向一个没人持有的
+	// 孤儿对象 —— 改那里的配置不会影响真正在跑的 registry 实例。
 	cfg := &Config{Name: name}
+	config.Detach(&cfg.Config)
 	cfg.Init(opts...)
 
 	// 加载存在的服务
@@ -122,7 +130,9 @@ func Use(name string, opts ...Option) IRegistry {
 
 		regName := fmt.Sprintf("%s-%s", cfg.Name, addr)
 		if reg, has := registryHost.Load(regName); has {
-			return reg.(IRegistry)
+			existing := reg.(IRegistry)
+			warnConfigDivergence(regName, cfg, existing.Config())
+			return existing
 		}
 	}
 
@@ -140,6 +150,48 @@ func Use(name string, opts ...Option) IRegistry {
 	}
 
 	return NewNopRegistry()
+}
+
+// warnConfigDivergence 在复用已有实例时，比对调用方期望的配置与实例实际生效的配置。
+//
+// registry 实例按 name-addr 复用，但每个持有者（server / client / router / selector）
+// 都会带着自己那份配置来调 Use。实例只有一份运行期状态，所以**先创建者的配置生效，
+// 后来者的被静默丢弃** —— 后来者的 option 全应用在上面那个随即被丢弃的临时 cfg 上。
+//
+// 于是配置文件里会出现同一个实例的多份配置且取值不一致（kylin 实测 ttl 在 16 个
+// registry 节里有 0 和 60000 两种），而改哪一份生效取决于谁先创建。这类「改了配置
+// 不生效」改对了地方也可能不生效，是最难排查的一种，所以这里必须出声。
+func warnConfigDivergence(regName string, want, got *Config) {
+	diffs := divergence(want, got)
+	if len(diffs) == 0 {
+		return
+	}
+
+	log.Warnf("registry %q 已被复用（同名同地址即同一实例），配置以先创建者 %q 为准；"+
+		"下列来自 %q 的设置不会生效：\n  %s",
+		regName, got.String(), want.String(), strings.Join(diffs, "\n  "))
+}
+
+// divergence 列出调用方期望的配置与实例现有配置之间的差异。
+//
+// 只比对**调用方显式设过**的字段（非零值）：零值意味着调用方没表态，不是「要求设成 0」。
+// 把未表态当成分歧会让每个不传 option 的持有者都触发一次告警，噪音淹没真问题。
+func divergence(want, got *Config) []string {
+	if want == nil || got == nil {
+		return nil
+	}
+
+	var diffs []string
+	if want.Timeout != 0 && want.Timeout != got.Timeout {
+		diffs = append(diffs, fmt.Sprintf("timeout: 期望 %v，实际 %v", want.Timeout, got.Timeout))
+	}
+	if want.TTL != 0 && want.TTL != got.TTL {
+		diffs = append(diffs, fmt.Sprintf("ttl: 期望 %v，实际 %v", want.TTL, got.TTL))
+	}
+	if want.Secure && want.Secure != got.Secure {
+		diffs = append(diffs, fmt.Sprintf("secure: 期望 %v，实际 %v", want.Secure, got.Secure))
+	}
+	return diffs
 }
 
 // NopRegistry as default registry
