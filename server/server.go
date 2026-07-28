@@ -254,6 +254,14 @@ func (self *TServer) Register() error {
 		}
 
 		svc, ok := byName[name]
+		if ok {
+			// 同一个服务名对应多个 group 对象。合并逻辑保证端点不丢，但这件事本身
+			// 值得知道 —— 它多半意味着某处把 TGroup 按值拷贝了（vectors 的
+			// module.NewModule 曾如此，见那里的注释），而共享 GroupConfig 的两份副本
+			// 还会在别的地方分叉（各自的 subscribers map、各自的锁）。
+			log.Warnf("Registry 服务 %q 由多个 group 提供（本次 +%d 个端点）——"+
+				"端点已合并不会丢，但请检查是否有 TGroup 值拷贝", name, len(endpoints))
+		}
 		if !ok {
 			svc = &registry.Service{
 				Name:     name,
