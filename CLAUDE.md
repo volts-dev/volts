@@ -262,14 +262,21 @@ A second, wider audit (security / stability / efficiency / stack) ran 2026-07-20
 `go test -race ./...` clean, `go vet ./...` clean, 3 fuzz targets ~5M execs with no crash.
 See project memory for the full list. Remaining open notes:
 
-- **config hot-reload is racy** (`config.WithWatcher()`): the watcher goroutine calls
-  `UnmarshalKey(model.String(), model)`, which rewrites **every tagged field** of every
-  registered config model in place, while request goroutines read those same fields
-  (`router.Config.Recover` per request, `transport.Config.ReadTimeout` per connection,
-  `selector.Config.BreakerFailures` per Select). vectors enables this in production.
-  Deliberately left unfixed — a correct fix needs a config-layer redesign (copy-on-write
-  + accessor reads), which is scheduled separately. Do not "just add a mutex": the readers
+- **config hot-reload is still racy on the read side** (`config.WithWatcher()`, which
+  vectors enables in production). Reload now decodes into a *copy*, validates it, and
+  writes back **only the fields that actually changed** — so most reloads write nothing at
+  all, an invalid file no longer corrupts a live instance, and the config layer's own
+  write paths (Register / LoadFromFile / Reload) are serialized by `core.applyMu`.
+  What remains unfixed: when a field genuinely changes, that write still races against
+  request goroutines reading the same struct field directly (`router.Config.Recover` per
+  request, `transport.Config.ReadTimeout` per connection, `selector.Config.BreakerFailures`
+  per Select). Closing it needs copy-on-write + accessor reads across every read site —
+  a read-side change, not a config-layer one. Do not "just add a mutex" there: the readers
   are arbitrary business code touching struct fields directly.
+  Reload must keep skipping `field:"-"` when diffing — those are live instance pointers
+  (Logger / Registry / Transport / Router); `UnmarshalKey` never populates them, so the
+  copy holds nil, and diffing them would "detect a change" and null out the running
+  registry and transport. Regression: `TestReload_OnlyWritesChangedFields`.
 - `IClient` interface completeness is a design gap, not a bug. It lacks `NewRequest`
   because HttpClient (`method, url, data`) and RpcClient (`service, method, request`)
   differ semantically — code needing it must hold the concrete type.
