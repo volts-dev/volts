@@ -59,6 +59,16 @@ type (
 		wg         *sync.WaitGroup // graceful exit
 		services   []*registry.Service
 		subscribers map[router.ISubscriber][]broker.ISubscriber
+
+		// registeredAddr 首次注册时**解析出来的**具体地址（如 192.168.1.5:35999），
+		// 仅供注销时精确摘除那条注册项。
+		//
+		// 它不能写回 config.Advertise —— 那是**用户配置**。写回去之后每次续租都会
+		// 复用这个具体地址，于是本机 IP 变了（换网、切 VPN、DHCP 续约）注册信息也
+		// 永远不会自我纠正：调用方按旧地址去拨一个没人在听的 LAN 地址，在 macOS 上
+		// 还会被网络扩展接受后丢弃，表现成 `EOF` 而不是 connection refused，极难定位。
+		// 2026-07-28 一天内因此中断两次，每次只能靠重启恢复。
+		registeredAddr string
 	}
 )
 
@@ -283,8 +293,11 @@ func (self *TServer) Register() error {
 		return nil
 	}
 
-	// set what we're advertising
-	self.config.Advertise = addr
+	// 记下本次实际注册的地址（供注销用）。**不写回 config.Advertise**，
+	// 否则续租时会复用旧地址，换网后再也纠正不回来（见字段注释）。
+	self.Lock()
+	self.registeredAddr = addr
+	self.Unlock()
 
 	if cacheService {
 		self.Lock()
@@ -353,9 +366,17 @@ func (self *TServer) Deregister() error {
 	// check the advertise address first
 	// if it exists then use it, otherwise
 	// use the address
-	if len(config.Advertise) > 0 {
+	// 注销要摘的是**当初注册进去的那条**，所以优先用 registeredAddr；
+	// 它为空（还没注册过）时才回退到配置。
+	self.RLock()
+	regAddr := self.registeredAddr
+	self.RUnlock()
+	switch {
+	case regAddr != "":
+		advt = regAddr
+	case len(config.Advertise) > 0:
 		advt = config.Advertise
-	} else {
+	default:
 		advt = config.Transport.Config().Addrs
 	}
 
