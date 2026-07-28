@@ -369,7 +369,56 @@ for details please read tree.go
 // @method:
 //			API:会映射所有对象符合要求的控制器作为API发布
 //			REST:会映射所有对象符合要求的create, read, update, and delete控制器作为Restful发布
+// Rebind 重新建立 group 与其 config 之间的自指关系。
+//
+// **按值拷贝一个 TGroup 之后必须调用它**，例如把 TGroup 内嵌进自己的类型：
+//
+//	type TModule struct {
+//	    router.TGroup            // 内嵌值
+//	}
+//	mod := &TModule{TGroup: *router.NewGroup(...)}
+//	mod.TGroup.Rebind()          // ← 少了这句，下面的坑就会踩上
+//
+// ## 不调用会怎样
+//
+// NewGroup 里有一句 `cfg.Group = grp` —— config 反过来指回 group 本身。值拷贝复制的
+// 是 config **指针**，于是副本与原件共用同一个 config，而 `config.Group` 仍指向那个
+// 本该被丢弃的原件。结果是同名的两个 group 同时存在：路由注册在副本上，而 server 遍历
+// config 拿到的是原件。
+//
+// 这个 bug 的表现极难指认：server 按 group 逐个注册 endpoint，两个同名 group 后者覆盖
+// 前者，**而 Go 的 map 遍历顺序是随机的** —— 于是同一份代码每次启动注册到 etcd 的
+// endpoint 集合都不一样，时全时缺。前台偶发 404、调用方偶发 NotFound，重启一下又好了。
+//
+// ## 为什么不靠 go vet
+//
+// TGroup 内嵌 sync.RWMutex，`*NewGroup(...)` 是明摆着的锁拷贝，但 vet 的 copylocks
+// **故意放行**这一形态（analysis/passes/copylock：`case *ast.StarExpr:` 遇到操作数是
+// CallExpr 就返回 nil，理由是"函数可能返回指向零值的指针"）。实测最小复现 vet 零输出。
+// 静态检查这条路走不通，只能靠下面的运行期不变量。
+func (self *TGroup) Rebind() {
+	if self.config != nil {
+		self.config.Group = self
+	}
+}
+
+// assertNotCopied 在装配期校验自指不变量，被破坏时**大声报错**而不是随机地少注册路由。
+//
+// 只在路由注册时跑（每个 group 若干次），不在请求路径上 —— 与本仓"在注册期分支，
+// 绝不在请求路径分支"的约定一致。
+func (self *TGroup) assertNotCopied() {
+	if self.config == nil || self.config.Group == nil || self.config.Group == self {
+		return
+	}
+	log.Errf("router: group %q 被按值拷贝过却没有调用 Rebind() —— "+
+		"它与 config 里记录的 group 不是同一个对象。同名 group 会重复出现，server 注册 "+
+		"endpoint 时后者覆盖前者，而 map 遍历顺序随机，表现为每次启动注册到 registry 的 "+
+		"endpoint 时全时缺、调用方偶发 404/NotFound。"+
+		"内嵌 TGroup 的类型请在构造后调用 grp.Rebind()。", self.config.Name)
+}
+
 func (self *TGroup) Url(methods []string, path string, handlers ...any) *route {
+	self.assertNotCopied()
 	return self.addRoute(Normal, LocalHandler, normalizeMethods(methods), &TUrl{Path: self.joinPathPrefix(path)}, handlers[0:1], handlers[1:]...)
 }
 
