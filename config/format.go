@@ -28,6 +28,11 @@ type (
 		// 里的默认值再也不生效。
 		overrideKeys map[string]struct{}
 
+		// lines 记录配置文件里每个叶子路径的行号，由 indexFileLines 建立。
+		// 错误消息靠它给出「config.json:47」这样的位置 —— kylin 的配置里
+		// read_timeout 出现 9 次，没有行号的错误消息定位不了任何东西。
+		lines map[string]int
+
 		// watchOnce / watchStop 管理配置文件监听协程。
 		watchOnce sync.Once
 		watchStop chan struct{}
@@ -40,6 +45,7 @@ func newFormat() *format {
 	return &format{
 		v:            file,
 		overrideKeys: make(map[string]struct{}),
+		lines:        make(map[string]int),
 		watchStop:    make(chan struct{}),
 	}
 }

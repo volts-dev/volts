@@ -180,6 +180,12 @@ func Dump(fileName ...string) error {
 	return defaultConfig.Dump(fileName...)
 }
 
+// Lint 报告默认单例的配置文件里所有未知配置项（拼错的、过时的、没人认领的）。
+// 须在全部组件装配完毕后调用。
+func Lint() []LintIssue {
+	return defaultConfig.Lint()
+}
+
 // New 创建并返回一个新的特定命名配置实体。
 // 通过加载同名空间配置以及支持绑定一系列 Option 以控制加载及缓存策略。
 func New(name string, opts ...Option) *Config {
@@ -259,12 +265,14 @@ func (self *Config) Register(cfg IConfig) {
 	// 缓存到 core
 	core.models.Store(cfgStr, cfg)
 
-	if !self.InConfig(cfgStr) {
-		// 尚未存储该配置：把模型当前值作为**默认值**灌进 core（defaults 层）。
-		// 走 defaults 而非 override，配置文件才能盖得过它。
-		if err := saveDefaults(core, cfg); err != nil {
-			core.errorf("保存配置 %q 的默认值失败: %w", cfgStr, err)
-		}
+	// 把模型当前值作为**默认值**灌进 core（defaults 层）。
+	//
+	// 无条件灌，不再只在「整节不存在时」才灌：配置文件通常只写少数几项，此前
+	// 只要该节存在，模型其余字段的默认值就一个都不进 core —— 于是 GetXxx 查不到
+	// 它们，Origin 也说不出它们的来源。defaults 层优先级最低，灌了也不会盖掉
+	// 文件里的值。
+	if err := saveDefaults(core, cfg); err != nil {
+		core.errorf("保存配置 %q 的默认值失败: %w", cfgStr, err)
 	}
 
 	// 从 core 中装载真实的配置到模型实体
@@ -344,6 +352,9 @@ func (self *Config) LoadFromFile(fileName ...string) error {
 		if err := core.fmt.ReadInConfig(); err != nil {
 			return err
 		}
+		// 建立「叶子路径 -> 行号」索引，供 Origin / Lint 定位用。
+		// viper 把文件解成 map 之后行号就没了，只能自己再走一遍。
+		core.fmt.indexFileLines(filePath)
 	}
 
 	// 校对已在 core.models 里的配置模型。如果名字修改过，重新进行绑定。

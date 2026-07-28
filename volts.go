@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/volts-dev/volts/client"
@@ -68,6 +69,19 @@ func (self *service) Start() error {
 	// config.Errors() 并返回错误。
 	if err := config.Errors(); err != nil {
 		log.Warnf("配置装载期存在错误，相关组件已退回默认值：\n%v", err)
+	}
+
+	// 同一时机报未知配置项：拼错的 key 会被静默忽略，配置改了不生效且毫无提示，
+	// 这是排查成本最高的一类问题。差集的正确性依赖「所有模型都已注册」，而这里
+	// 正是唯一能确定这一点的位置。
+	if issues := config.Lint(); len(issues) > 0 {
+		var b strings.Builder
+		b.WriteString("配置文件存在未知配置项（这些项不会生效）：")
+		for _, is := range issues {
+			b.WriteString("\n  ")
+			b.WriteString(is.String())
+		}
+		log.Warn(b.String())
 	}
 
 	for _, fn := range self.config.BeforeStart {
