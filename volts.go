@@ -7,8 +7,12 @@ import (
 	"syscall"
 
 	"github.com/volts-dev/volts/client"
+	"github.com/volts-dev/volts/config"
+	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/server"
 )
+
+var log = logger.New("Volts")
 
 type (
 
@@ -53,6 +57,19 @@ func (self *service) Config() *Config {
 }
 
 func (self *service) Start() error {
+	// 组件已装配完毕，此时把配置装载期累积的错误汇总报一次。
+	//
+	// config 层不再 log.Fatal（库代码不该替调用方决定退进程），错误改为累积；
+	// 但若无人来取，就等于把 os.Exit 换成了静默 —— 反而更糟。这里是唯一知道
+	// 「所有组件都注册完了」的位置，故由它负责汇总。
+	//
+	// 默认只告警不拒绝启动：坏的往往是某一节业务配置，该组件会退回默认值，
+	// 而整个服务仍然可用。要严格拒绝启动的场景，自行在 BeforeStart 里查
+	// config.Errors() 并返回错误。
+	if err := config.Errors(); err != nil {
+		log.Warnf("配置装载期存在错误，相关组件已退回默认值：\n%v", err)
+	}
+
 	for _, fn := range self.config.BeforeStart {
 		if err := fn(); err != nil {
 			return err
