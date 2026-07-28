@@ -195,8 +195,24 @@ func (self *TServer) Register() error {
 		host = advt
 	}
 
+	// cacheService 决定「本次算出的 service 对象能不能一直复用」。只有当运维**显式配了
+	// 一个具体 IP** 时才成立 —— 那种情况下地址确实是静态的。
+	//
+	// **通配地址不算**。监听成功后 cfg.Address 会被改写成 listener 的地址
+	// （server.go 里的 `cfg.Address = ts.Addr().String()`），对 `:35999` 这种配置来说
+	// 就是 `[::]:35999`，host 取出来是 `::`。而 net.ParseIP("::") 是成功的 —— 于是
+	// 通配地址被误判成"字面 IP"，service 被缓存，此后每轮续租都走早返回、复用首次
+	// 算出来的那个具体 IP。
+	//
+	// 后果：本机 IP 一变（换网、切 VPN、DHCP 续约），注册信息**永远不会自我纠正**，
+	// 30 秒一轮的周期性重注册形同虚设，只能重启进程。2026-07-28 一天之内因此中断三次，
+	// 每次都表现为"所有走 RPC 的端点 500 EOF、纯 HTTP 端点正常"（macOS 上拨一个没人听
+	// 的旧 LAN 地址会被网络扩展接受后丢弃，所以是 EOF 而不是 connection refused），
+	// 三次里有两次一度被怀疑成代码回归。
+	//
+	// IsUnspecified 同时覆盖 `::` 与 `0.0.0.0`。
 	var cacheService bool
-	if ip := net.ParseIP(host); ip != nil {
+	if ip := net.ParseIP(host); ip != nil && !ip.IsUnspecified() {
 		cacheService = true
 	}
 
