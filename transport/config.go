@@ -142,6 +142,22 @@ func (self *Config) Init(opts ...Option) {
 	}
 }
 
+// OnReload 声明传输层配置不支持热重载。
+//
+// 这一节里几乎每一项改了都要重启才可能生效：Addrs / TlsConfig / Secure / EnableACME
+// 决定 listener 怎么建，而 listener 在启动时就已经建好了；改配置文件不会让一个已经
+// 在 :35999 上 Accept 的监听器换到别的端口。
+//
+// ReadTimeout / WriteTimeout 理论上可以热更（每条连接读一次），但它们同时是整个
+// 框架里被读得最多的配置字段（生产代码里 19 处），热更收益是「改超时不用重启」，
+// 代价是这 19 个读点每一个都与重载写入存在数据竞态。改超时本就是运维动作，重启
+// 完全可以接受，所以这里整节退出热重载 —— 竞态直接归零，而不是收窄。
+//
+// 被忽略的变更由框架逐条打印并提示需重启，不会无声无息（见 config/reload.go）。
+func (self *Config) OnReload(next config.IConfig) error {
+	return config.ErrReloadUnsupported
+}
+
 func (self *Config) Load() error {
 	if err := self.Config.Load(); err != nil {
 		return err

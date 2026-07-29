@@ -134,7 +134,15 @@ func (self *Config) ReloadWithChanges() []ReloadChange {
 				// 模型已自行应用；报出清单供观察
 				changes = append(changes, pending...)
 			case errors.Is(err, ErrReloadUnsupported):
-				// 明确声明不支持热更 —— 一个字段都不写，这是零竞态的那条路
+				// 明确声明不支持热更 —— 一个字段都不写，这是零竞态的那条路。
+				//
+				// 但必须告诉人他改了什么被忽略了，否则「改了配置没反应」又回来了 ——
+				// 那正是这一整轮工作在消灭的东西。不支持热更是合理的（监听地址之类
+				// 改了本就要重启），无声无息地忽略不是。
+				for _, c := range pending {
+					log.Printf("config: %s 已在配置文件中改为 %s（原 %s），但该配置不支持热重载，需重启进程才生效",
+						c.Path, c.To, c.From)
+				}
 			default:
 				core.errorf("配置 %q 拒绝本次热重载，保持原配置: %w", path, err)
 			}

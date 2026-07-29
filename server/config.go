@@ -148,6 +148,17 @@ func (self *Config) String() string {
 	return self.Name
 }
 
+// OnReload 声明服务器配置不支持热重载。
+//
+// Address 与 listener 同理：进程启动时就已经绑好端口，改配置文件不会让它换地址。
+// RegisterTTL / RegisterInterval 由后台注册协程按自己的节奏读取，热更它们等于在
+// 一个跑着的 ticker 底下换参数，而收益只是「改注册间隔不用重启」。
+//
+// 被忽略的变更由框架逐条打印并提示需重启（见 config/reload.go）。
+func (self *Config) OnReload(next config.IConfig) error {
+	return config.ErrReloadUnsupported
+}
+
 func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		opt(self)

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,5 +282,37 @@ func TestReload_ModelRejectsChange(t *testing.T) {
 	}
 	if err := cfg.Errors(); err == nil || !strings.Contains(err.Error(), "业务上不接受") {
 		t.Errorf("拒绝原因应被记录: %v", err)
+	}
+}
+
+// TestReload_UnsupportedStillReportsIgnoredChanges 锁定：声明不支持热更时，
+// 被忽略的变更仍要说出来。
+//
+// 不支持热更是合理的（监听地址之类改了本就要重启），无声无息地忽略不是 ——
+// 那就是「改了配置没反应」，正是这一整轮工作在消灭的东西。
+func TestReload_UnsupportedStillReportsIgnoredChanges(t *testing.T) {
+	fn := "reload_unsupported_report.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	write(t, path, `{"rltakeover":{"name":"before"}}`)
+	cfg := newIsolated(t, fn)
+	m := &rlTakeover{rejectAs: ErrReloadUnsupported}
+	cfg.Register(m)
+
+	rewriteAndWatch(t, cfg, path, `{"rltakeover":{"name":"after"}}`)
+	cfg.ReloadWithChanges()
+
+	out := buf.String()
+	if !strings.Contains(out, "rltakeover.name") {
+		t.Errorf("被忽略的变更没有被报出来: %q", out)
+	}
+	if !strings.Contains(out, "需重启") {
+		t.Errorf("提示里应说明需要重启: %q", out)
 	}
 }
