@@ -352,6 +352,10 @@ func TestWebsocketUpgrade_SubprotocolNegotiation(t *testing.T) {
 		{"单个命中", []string{"volts.bus"}, "volts.bus", "volts.bus"},
 		{"服务端未声明", nil, "anything", ""},
 		{"客户端未声明", []string{"a"}, "", ""},
+		// 浏览器的 WebSocket 构造函数不接受自定义请求头，于是子协议列表被用来
+		// 搬运鉴权 token（vectors 的 bus 走这条路）。回选的必须是**哨兵**：
+		// 把客户端第一个请求项原样回去，就等于把 token 写进握手响应头。
+		{"哨兵搬token只回哨兵", []string{"vertex.auth"}, "vertex.auth, eyJhbGciOiJIUzI1NiJ9.payload.sig", "vertex.auth"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
