@@ -1,8 +1,11 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -171,5 +174,111 @@ func TestReload_DoesNotRegisterDecodeCopy(t *testing.T) {
 	}
 	if after := len(cfg.knownSections()); after != before {
 		t.Errorf("重载把解码副本注册进了配置树: %d -> %d", before, after)
+	}
+}
+
+type rlTakeover struct {
+	Config
+	Name string `field:"name"`
+
+	mu       sync.Mutex
+	applied  int
+	rejectAs error
+}
+
+func (self *rlTakeover) String() string { return "rltakeover" }
+
+func (self *rlTakeover) OnReload(next IConfig) error {
+	if self.rejectAs != nil {
+		return self.rejectAs
+	}
+	n, ok := next.(*rlTakeover)
+	if !ok {
+		return errors.New("类型不符")
+	}
+	self.mu.Lock()
+	defer self.mu.Unlock()
+	self.Name = n.Name
+	self.applied++
+	return nil
+}
+
+// TestReload_ModelTakesOverApplication 锁定：实现 IReloadable 的模型自行应用变更，
+// 框架不再直接写它的字段。
+func TestReload_ModelTakesOverApplication(t *testing.T) {
+	fn := "reload_takeover.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	write(t, path, `{"rltakeover":{"name":"before"}}`)
+	cfg := newIsolated(t, fn)
+	m := &rlTakeover{}
+	cfg.Register(m)
+
+	rewriteAndWatch(t, cfg, path, `{"rltakeover":{"name":"after"}}`)
+	changes := cfg.ReloadWithChanges()
+
+	if m.applied != 1 {
+		t.Errorf("OnReload 应被调用一次, got %d", m.applied)
+	}
+	if m.Name != "after" {
+		t.Errorf("模型自行应用后值不对: %q", m.Name)
+	}
+	// 变更清单必须在 OnReload 之前算出来，否则模型应用完就比不出差异了
+	if len(changes) != 1 || changes[0].From != "before" || changes[0].To != "after" {
+		t.Errorf("变更清单不对（应在应用前算）: %+v", changes)
+	}
+}
+
+// TestReload_UnsupportedMeansUntouched 锁定：声明不支持热重载的模型一个字段都不被写。
+//
+// 这是唯一能把竞态降到零的选项 —— 适合那些本就不该热更的配置（监听地址、
+// 数据库连接串等），改了也要重启才生效，热重载去写它们只有坏处。
+func TestReload_UnsupportedMeansUntouched(t *testing.T) {
+	fn := "reload_unsupported.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	write(t, path, `{"rltakeover":{"name":"before"}}`)
+	cfg := newIsolated(t, fn)
+	m := &rlTakeover{rejectAs: ErrReloadUnsupported}
+	cfg.Register(m)
+	m.Name = "pinned"
+
+	rewriteAndWatch(t, cfg, path, `{"rltakeover":{"name":"after"}}`)
+	changes := cfg.ReloadWithChanges()
+
+	if m.Name != "pinned" {
+		t.Errorf("声明不支持热重载的模型被改写了: %q", m.Name)
+	}
+	if len(changes) != 0 {
+		t.Errorf("不该报出任何变更: %+v", changes)
+	}
+	if cfg.Errors() != nil {
+		t.Errorf("ErrReloadUnsupported 是正常声明，不该记为错误: %v", cfg.Errors())
+	}
+}
+
+// TestReload_ModelRejectsChange 锁定：模型返回其他错误时保持原配置并记录错误。
+func TestReload_ModelRejectsChange(t *testing.T) {
+	fn := "reload_reject.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	write(t, path, `{"rltakeover":{"name":"before"}}`)
+	cfg := newIsolated(t, fn)
+	m := &rlTakeover{rejectAs: errors.New("业务上不接受")}
+	cfg.Register(m)
+	m.Name = "kept"
+	cfg.ClearErrors()
+
+	rewriteAndWatch(t, cfg, path, `{"rltakeover":{"name":"after"}}`)
+	cfg.ReloadWithChanges()
+
+	if m.Name != "kept" {
+		t.Errorf("模型拒绝了变更却仍被改写: %q", m.Name)
+	}
+	if err := cfg.Errors(); err == nil || !strings.Contains(err.Error(), "业务上不接受") {
+		t.Errorf("拒绝原因应被记录: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -27,6 +28,42 @@ import (
 //  3. **变更可观测。** 报出哪个字段从什么变成了什么，热更新不再是黑箱。
 //
 // 剩下的窗口是真实存在的：一个字段确实变了时，写入与并发读之间仍无同步。
+
+// ErrReloadUnsupported 由 IReloadable.OnReload 返回，表示该配置不支持热重载。
+//
+// 这是**唯一能把竞态降到零**的选项：框架收到它就一个字段都不写，运行中的模型
+// 完全不被触碰。适合那些本就不该热更的配置 —— 监听地址、数据库连接串、
+// 会话存储后端之类，改了也得重启才生效，热重载去写它们只有坏处。
+var ErrReloadUnsupported = errors.New("该配置不支持热重载")
+
+// IReloadable 由配置模型**可选**实现，用于接管热重载的应用方式。
+//
+// 不实现时，框架按默认方式原地写回发生变化的字段（见 applyChangedFields）——
+// 那条路径与业务代码的并发读之间仍有竞态，配置层堵不住（读点遍布请求路径，
+// 见本文件开头）。实现它之后，「怎样安全地应用一次变更」由最清楚这件事的人决定：
+//
+//	// 一、干脆拒绝热更，框架不碰任何字段（零竞态）
+//	func (self *Config) OnReload(next config.IConfig) error {
+//	    return config.ErrReloadUnsupported
+//	}
+//
+//	// 二、自己用锁/原子操作安全应用（读侧需配合走同一把锁）
+//	func (self *Config) OnReload(next config.IConfig) error {
+//	    n, ok := next.(*Config)
+//	    if !ok {
+//	        return fmt.Errorf("类型不符: %T", next)
+//	    }
+//	    self.mu.Lock()
+//	    defer self.mu.Unlock()
+//	    self.Recover = n.Recover
+//	    return nil
+//	}
+//
+// next 是已解码并**通过校验**的新配置副本；返回其他错误表示拒绝本次变更，
+// 框架保持原配置并把错误记进 config.Errors()。
+type IReloadable interface {
+	OnReload(next IConfig) error
+}
 
 // ReloadChange 描述一次热重载中某个字段的变化。
 type ReloadChange struct {
@@ -87,7 +124,24 @@ func (self *Config) ReloadWithChanges() []ReloadChange {
 			}
 		}
 
-		// 4. 只写真正变化的字段
+		// 4. 应用变更。模型若自己接管（IReloadable），框架不再直接写它的字段。
+		if r, ok := model.(IReloadable); ok {
+			// 变更清单必须在 OnReload **之前**算：模型自行应用之后，model 已经等于
+			// next，那时再比对只会得到空清单。
+			pending := diffFields(model, next, path)
+			switch err := r.OnReload(next); {
+			case err == nil:
+				// 模型已自行应用；报出清单供观察
+				changes = append(changes, pending...)
+			case errors.Is(err, ErrReloadUnsupported):
+				// 明确声明不支持热更 —— 一个字段都不写，这是零竞态的那条路
+			default:
+				core.errorf("配置 %q 拒绝本次热重载，保持原配置: %w", path, err)
+			}
+			return true
+		}
+
+		// 5. 默认路径：只写真正变化的字段
 		changes = append(changes, applyChangedFields(model, next, path)...)
 		return true
 	})
@@ -149,8 +203,17 @@ func copyTaggedFields(dst, src IConfig) {
 	}
 }
 
+// diffFields 列出 next 与 cur 的字段差异，不做任何写入。
+func diffFields(cur, next IConfig, path string) []ReloadChange {
+	return compareFields(cur, next, path, false)
+}
+
 // applyChangedFields 把 next 中与 cur 不同的字段写回 cur，并返回变更清单。
 func applyChangedFields(cur, next IConfig, path string) []ReloadChange {
+	return compareFields(cur, next, path, true)
+}
+
+func compareFields(cur, next IConfig, path string, write bool) []ReloadChange {
 	cv := reflect.ValueOf(cur).Elem()
 	nv := reflect.ValueOf(next).Elem()
 	if cv.Type() != nv.Type() {
@@ -176,7 +239,9 @@ func applyChangedFields(cur, next IConfig, path string) []ReloadChange {
 			From: fmtValue(cf),
 			To:   fmtValue(nf),
 		})
-		cf.Set(nf)
+		if write {
+			cf.Set(nf)
+		}
 	}
 	return changes
 }

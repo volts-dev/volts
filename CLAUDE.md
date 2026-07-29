@@ -286,6 +286,12 @@ See project memory for the full list. Remaining open notes:
   (Logger / Registry / Transport / Router); `UnmarshalKey` never populates them, so the
   copy holds nil, and diffing them would "detect a change" and null out the running
   registry and transport. Regression: `TestReload_OnlyWritesChangedFields`.
+  A model can opt out or take over via `config.IReloadable`: returning
+  `config.ErrReloadUnsupported` makes the framework touch **nothing** (the only way to get
+  the race to zero — right for anything that needs a restart to take effect anyway, like
+  listen addresses or DB connection strings); returning nil means the model applied the
+  change itself under its own lock. The change list is computed *before* `OnReload`, since
+  afterwards the model already equals the new copy and nothing would diff.
 - `IClient` interface completeness is a design gap, not a bug. It lacks `NewRequest`
   because HttpClient (`method, url, data`) and RpcClient (`service, method, request`)
   differ semantically — code needing it must hold the concrete type.
