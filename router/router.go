@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -346,6 +347,45 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 
 		// Match route from the internal tree.
 		route, params := self.tree.Match(r.Method, r.URL.Path)
+
+		// 尾斜杠规范化：`/shop/checkout/` 与 `/shop/checkout` 是同一个页面，但框架
+		// 从不处理尾斜杠——**每条路由都如此**，而地址栏、书签、外链、爬虫随手补一个
+		// 斜杠是常态。
+		//
+		// 症状比"404"更隐蔽：带尾斜杠的路径通常**不是没匹配上**，而是掉进了同层的
+		// 通配路由。真栈实测 `/shop/checkout/` 被 `/shop/{slug}` 接走，商品页拿
+		// "checkout/" 当 slug 解不出 id，回一句 "product not found" ——
+		// 页面明明注册着，用户看到的却是"这个商品不存在"。
+		//
+		// 判据不是"有没有匹配上"，而是**去掉尾斜杠后是不是落到了另一条路由**：
+		//   - 落到另一条（通配 → 静态）  → 说明尾斜杠让它跑偏了，跳到规范写法；
+		//   - 还是同一条（如 /static/a/ 与 /static/a 同属一个通配路由）→ 不动，
+		//     否则每个以斜杠结尾的通配路径都会被无谓地跳一次；
+		//   - 两边都没有                → 老老实实 404。
+		// 只做"去掉"这一个方向：注册侧本来就会把 `/docs/` 规范成 `/docs`，反方向
+		// 再跳会让 `/shop` 被弹去 `/shop/`（那是另一条通配路由）。
+		if len(r.URL.Path) > 1 && strings.HasSuffix(r.URL.Path, "/") {
+			if trimmed := strings.TrimRight(r.URL.Path, "/"); trimmed != "" {
+				alt, _ := self.tree.Match(r.Method, trimmed)
+				if alt != nil && (route == nil || alt.Id() != route.Id()) {
+					u := *r.URL
+					u.Path = trimmed
+					// GET/HEAD 用 301（可缓存的永久跳转，惯例）；其余方法用 308 ——
+					// 308 才保证客户端**不把 POST 改写成 GET**，否则带表单的请求会
+					// 静默丢掉 body 变成一次 GET，用户看到的是"提交没反应"。
+					code := http.StatusMovedPermanently
+					if r.Method != http.MethodGet && r.Method != http.MethodHead {
+						code = http.StatusPermanentRedirect
+					}
+					w.Header().Set("Location", u.RequestURI())
+					w.WriteHeader(code)
+					rsp.ResponseWriter = nil
+					self.respPool.Put(rsp)
+					return
+				}
+			}
+		}
+
 		if route == nil {
 			rsp.WriteHeader(http.StatusNotFound)
 			// 404 也要把 rsp 归还池——否则扫描器/缺失静态资源刷 404 时，每个
@@ -892,3 +932,4 @@ func (self *TRouter) isLocalService(service *registry.Service, locals []*registr
 	}
 	return false
 }
+
