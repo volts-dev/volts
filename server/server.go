@@ -669,10 +669,24 @@ func (self *TServer) Config() *Config {
 	return self.config
 }
 
-// dedupEndpoints 按端点名去重，保留首次出现的顺序。
+// dedupEndpoints 按 **方法+路径** 去重，保留首次出现的顺序。
 //
 // 同名服务的多个 group 合并后可能带来重复项（同一条路由被两处登记）。注册中心对
 // 重复端点没有硬约束，但它会让载荷凭空变大、也让"这个服务到底暴露了什么"难以核对。
+//
+// **不能按 Endpoint.Name 去重**：`RouteToEndpiont` 在 Name 为空时填的是路径，而
+// 同一条路径上不同方法是**两个独立的端点、两个不同的 handler**——
+//
+//	reg.Url([]string{"GET"},  "/web/login", …WebLoginForm)   // 渲染登录页
+//	reg.Url([]string{"POST"}, "/web/login", …WebLoginSubmit) // 提交认证
+//
+// 按 Name 去重会把其中一个整个丢掉，别的进程于是只拿到半条路由，`store()` 据此建出
+// 的代理路由也只有那半边。表现是**登录页打得开、点提交 404**（或反过来，页面本身
+// 404），而且 `TTree.Endpoints()` 走的是按方法分桶的 map，**哪一半活下来取决于 map
+// 的随机迭代序**——同一份代码换次重启症状就变。2026-08-02 真栈实测：kylin 直连
+// `POST /web/login` 是 303，经 websvc / salesvc 转发是 404。
+//
+// 路径为空的端点（RPC 侧有此形态）回落到 Name。
 func dedupEndpoints(eps []*registry.Endpoint) []*registry.Endpoint {
 	if len(eps) < 2 {
 		return eps
@@ -680,10 +694,17 @@ func dedupEndpoints(eps []*registry.Endpoint) []*registry.Endpoint {
 	seen := make(map[string]bool, len(eps))
 	out := eps[:0]
 	for _, e := range eps {
-		if e == nil || seen[e.Name] {
+		if e == nil {
 			continue
 		}
-		seen[e.Name] = true
+		key := strings.Join(e.Method, ",") + " " + e.Path
+		if e.Path == "" {
+			key = e.Name
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		out = append(out, e)
 	}
 	return out
