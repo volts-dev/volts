@@ -626,39 +626,102 @@ func (c *registryCacher) LocalServices() []*Service {
 }
 
 func (c *registryCacher) Register(s *Service, opts ...Option) error {
+	// ★ 先登记本地身份，**再**写注册中心。顺序是关键，不是风格问题。
+	//
+	// IRegistry.Register 一落盘，本进程的 watcher 立刻会收到自己这条创建事件并驱动
+	// router.store()；那里靠 LocalServices() 认"哪些节点是我自己"。若此时本条注册
+	// 还没进 localServices，自己的节点就被当成远端，按它的端点建出一整批指向本进程
+	// 监听端口的反向代理路由 —— 而 TTree.addNode 同路径后写覆盖，本地 handler 当场
+	// 被顶掉，refresh() 之后又把该服务判成 local 直接跳过，坏路由**再没人纠正**。
+	// 真栈症状：kylin 自己托管的模块 `/{service}/static/*` 恒 508（自环护盾），
+	// 装/升级模块取不到数据文件而整体失败；每次重启命中的模块还不一样（是竞态）。
+	//
+	// 提前登记的代价只有一种：注册失败时曾短暂多认了一个"自己"，下面立即回滚。
+	restore := c.trackLocalService(s)
+
 	if err := c.IRegistry.Register(s, opts...); err != nil {
+		restore()
 		return err
 	}
 
 	services, err := c.IRegistry.GetService(s.Name)
 	if err != nil {
+		// 注册本身已成功，本地身份必须留着 —— 回读只是为了补全规范化后的信息。
 		return err
 	}
 
-	c.Lock()
-	defer c.Unlock()
-	var srv = s
 	for _, ss := range services {
 		if ss.Name == s.Name && ss.Version == s.Version {
-			srv = ss
+			// 只取回读结果里**属于本进程**的节点。注册中心是按服务名合并的，
+			// 同名服务的其它进程节点也在里面；整份存进 localServices 会让
+			// filteSelf 把真正的远端节点当成自己剔掉，那个服务就永远没有代理路由。
+			c.trackLocalService(withNodesOf(ss, s))
 			break
 		}
-	}
-
-	var updated bool
-	for i, ls := range c.localServices {
-		if ls.Name == srv.Name && ls.Version == srv.Version {
-			c.localServices[i] = srv
-			updated = true
-			break
-		}
-	}
-
-	if !updated {
-		c.localServices = append(c.localServices, srv)
 	}
 
 	return nil
+}
+
+// trackLocalService 把 s 记入/替换本进程的注册记录（按 name+version），返回一个
+// 把 localServices 还原到调用前状态的函数，供注册失败时回滚。
+func (c *registryCacher) trackLocalService(s *Service) (restore func()) {
+	c.Lock()
+	defer c.Unlock()
+
+	for i, ls := range c.localServices {
+		if ls.Name == s.Name && ls.Version == s.Version {
+			old := ls
+			c.localServices[i] = s
+			return func() {
+				c.Lock()
+				defer c.Unlock()
+				if i < len(c.localServices) && c.localServices[i] == s {
+					c.localServices[i] = old
+				}
+			}
+		}
+	}
+
+	c.localServices = append(c.localServices, s)
+	return func() {
+		c.Lock()
+		defer c.Unlock()
+		for i, ls := range c.localServices {
+			if ls == s {
+				c.localServices = append(c.localServices[:i], c.localServices[i+1:]...)
+				return
+			}
+		}
+	}
+}
+
+// withNodesOf 返回 srv 的浅拷贝，节点收窄为 mine 里出现过的那些（按 node.Id 匹配）。
+// 一个都没匹配上时退回 mine 本身 —— 宁可用自己手上的那份，也不要带上别人的节点。
+func withNodesOf(srv, mine *Service) *Service {
+	ids := make(map[string]struct{}, len(mine.Nodes))
+	for _, n := range mine.Nodes {
+		if n != nil {
+			ids[n.Id] = struct{}{}
+		}
+	}
+
+	cp := *srv
+	nodes := make([]*Node, 0, len(ids))
+	for _, n := range srv.Nodes {
+		if n == nil {
+			continue
+		}
+		if _, hit := ids[n.Id]; hit {
+			nodes = append(nodes, n)
+		}
+	}
+	if len(nodes) == 0 {
+		return mine
+	}
+
+	cp.Nodes = nodes
+	return &cp
 }
 
 func (c *registryCacher) Deregister(s *Service, opts ...Option) error {

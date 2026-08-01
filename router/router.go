@@ -77,6 +77,9 @@ type (
 		exit chan bool
 		// closeOnce guarantees the exit channel is closed exactly once (Close is idempotent).
 		closeOnce sync.Once
+		// shieldedServices 记录已经报过“本地路由优先”护盾的服务名（见 store）。
+		// refresh 每 60s 重跑，不去重就是每分钟一屏同样的告警。
+		shieldedServices sync.Map
 	}
 )
 
@@ -696,6 +699,58 @@ func (self *TRouter) filteSelf(srv *registry.Service, me *selfIdentity) *registr
 	return &service
 }
 
+// filteHttpNodes 返回一个副本，其中**收不了 HTTP 的节点**已被剔除。
+//
+// 同一个服务名下常同时挂着 HTTP 与 RPC 两种节点：vectors 的 http/rpc 两个 server
+// 共用一个 router，于是各自按自己的监听端口注册同名服务，且**两条注册记录带的是
+// 同一份完整端点表**（HTTP 路由 + CONNECT 路由都在里面）。当发现结果里只剩下 RPC
+// 节点时（filteSelf 刚把 HTTP 节点当自己剔掉、或缓存里那一版只收到 rpc 键的事件），
+// 老逻辑照样会按表里的 HTTP 端点建出代理路由 —— 而请求真到来时
+// reverse_proxy.getService 只在 protocol=http/https 的节点里选，选回来的正是本进程
+// 自己的 HTTP 端口，于是 508 自环，本地路由还已经被这条代理路由顶掉了。
+//
+// 判定取宽：只剔除**明确声明了非 http 协议**的节点。没有 metadata 的节点（测试、
+// 老注册记录、别的注册中心后端）一律保留，避免把本来能用的代理路由一起挡掉。
+func filteHttpNodes(srv *registry.Service) *registry.Service {
+	service := *srv // 浅拷贝，勿改缓存里的原对象
+
+	nodes := make([]*registry.Node, 0, len(service.Nodes))
+	for _, n := range service.Nodes {
+		if n == nil {
+			continue
+		}
+		if p, has := n.Metadata["protocol"]; has && p != "" {
+			switch strings.ToLower(p) {
+			case "http", "https":
+			default:
+				continue
+			}
+		}
+		nodes = append(nodes, n)
+	}
+
+	service.Nodes = nodes
+	return &service
+}
+
+// hasLocalRoute 判断 (methods, path) 是否已由本进程的**本地** handler 提供。
+// 按路由模式串精确查（不是拿请求路径去匹配通配），因此只有"同一条路由"才算命中。
+// 认不出 handler 类型时按本地处理：宁可少建一条代理路由，也不冒覆盖本地 handler 的险。
+func (self *TRouter) hasLocalRoute(methods []string, path string) bool {
+	for _, m := range methods {
+		r := self.tree.RouteOf(m, path)
+		if r == nil {
+			continue
+		}
+		for _, id := range r.Handlers() {
+			if h := defaultHandlerManager.Model(id); h == nil || h.Type != ProxyHandler {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // store maps registry services to internal endpoints.
 func (self *TRouter) store(services []*registry.Service) {
 	if len(services) == 0 {
@@ -739,8 +794,11 @@ func (self *TRouter) store(services []*registry.Service) {
 	for _, service := range services {
 		// me 到这里必非 nil（上面已提前返回），无需再判空。
 		service = self.filteSelf(service, me)
+		// 只有能收 HTTP 的节点才配得上 HTTP 代理路由（见 filteHttpNodes）。
+		service = filteHttpNodes(service)
 		if len(service.Nodes) > 0 {
 			var handlerId int
+			var shielded int // 因本地已有路由而跳过的端点数
 			for _, sep := range service.Endpoints {
 				url := &TUrl{
 					Path: sep.Path,
@@ -763,11 +821,46 @@ func (self *TRouter) store(services []*registry.Service) {
 					continue
 				}
 
+				// ★ 本地路由优先：这条路径本进程自己就在服务，绝不拿发现来的代理
+				// 路由去盖它。
+				//
+				// TTree.addNode 对同路径是**后写覆盖**，而代理路由永远晚于本地路由
+				// （本地路由在模块 init 时挂树，代理路由要等 registry watch/refresh），
+				// 所以一旦某条本地路径被判成"远程服务的端点"，本地 handler 就被顶掉，
+				// 且 refresh() 之后会把该服务判成 local 直接跳过，**再没人来纠正**。
+				// 前面的 filteSelf 只在"能认出自己"时管用，而认自己这件事依赖
+				// RegistryCacher.LocalServices() 的填充时机（注册中心先落盘、
+				// localServices 后更新；同进程 http/rpc 两个 server 各持一个 cacher，
+				// 彼此的节点互相不可见）——真栈上确实漏过：kylin 自己托管的
+				// gamification/rating 拿到了指向本进程 :35999 的代理路由，
+				// `/gamification/static/security/*.xml` 恒 508，模块升级取不到数据文件
+				// （core/download 走 /{service}/static/...），整个升级失败。
+				//
+				// 这条护盾与"认不认得出自己"无关：本进程能自己服务的路径，转发出去
+				// 在任何拓扑下都不会更对。
+				if self.hasLocalRoute(sep.Method, sep.Path) {
+					shielded++
+					continue
+				}
+
 				handlerId = generateHandler(ProxyHandler, HttpHandler, []interface{}{HttpReverseProxy}, nil, url, service.Name).Id
 
 				r.handlers = append(r.handlers, handlerId)
 				if err := self.tree.AddRoute(r); err != nil {
 					log.Err(err)
+				}
+			}
+
+			// 每个服务只报一次：refresh 每 60s 重跑一轮，同样的护盾命中会一直重复，
+			// 天天刷屏的告警等于没有告警。首次仍要报 —— 它说明本进程没认出自己的
+			// 注册记录（filteSelf 漏了），是一个值得查的拓扑/时序信号。
+			if shielded > 0 {
+				if _, dup := self.shieldedServices.LoadOrStore(service.Name, struct{}{}); !dup {
+					log.Warnf("router: 服务 %q 有 %d 个端点已由本进程的本地路由提供，未建代理路由。"+
+						"发现结果里混进了本进程自己的节点而 filteSelf 没认出来 —— 常见于同一个 router 挂在多个 server 上"+
+						"（http/rpc 各持一个 RegistryCacher，彼此的注册记录互相不可见）。"+
+						"本地路由已保住；若这些路径本该转发到别的进程，请检查注册中心里的节点归属",
+						service.Name, shielded)
 				}
 			}
 		}

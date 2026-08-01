@@ -253,6 +253,52 @@ func (self *TTree) AddRoute(route *route) error {
 	return nil
 }
 
+// RouteOf 按**路由模式串**精确查找已注册的路由，未注册返回 nil。
+//
+// 与 Match 的区别是判定方向：Match 拿一个具体请求路径去跑通配匹配
+// （"/x/static/a.xml" 命中 "/x/static/{:filepath}"），RouteOf 用与 AddRoute 完全
+// 相同的方式解析模式串再逐层 Equal 定位，因此只有"同一条路由"才算命中。
+// store() 用它判断某个端点是否已由本地 handler 提供 —— 那里拿到的是注册中心里的
+// 模式串，只能按模式串比，不能按请求路径比。
+func (self *TTree) RouteOf(method string, path string) *route {
+	method = strings.ToUpper(method)
+
+	var delimitChar byte = '/'
+	if method == "CONNECT" {
+		delimitChar = '.'
+	}
+
+	self.RLock()
+	defer self.RUnlock()
+
+	root := self.root[method]
+	if root == nil {
+		return nil
+	}
+
+	nodes, err := self.parsePath(path, delimitChar)
+	if err != nil || len(nodes) == 0 {
+		return nil
+	}
+
+	p := root
+	for i := range nodes {
+		var next *treeNode
+		for _, n := range p.Children {
+			if n.Equal(nodes[i]) {
+				next = n
+				break
+			}
+		}
+		if next == nil {
+			return nil
+		}
+		p = next
+	}
+
+	return p.Route
+}
+
 // delete the route
 func (self *TTree) DelRoute(path string, route *route) error {
 	if route == nil {
