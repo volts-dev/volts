@@ -350,3 +350,107 @@ func newIsolated(t *testing.T, fn string) *Config {
 }
 
 var testSeq atomic.Int64
+
+/*
+配置文件必须能从**工作目录**找到，而不只是可执行文件旁边。
+
+`AppPath` 是可执行文件所在目录，对部署好的服务是对的；但 `go test` 把测试二进制编到
+临时目录里跑，于是包目录下那份 config.json **一次都没被读过**。这不是报错，是每个
+配置模型都停在代码默认值上 —— vectors 那边 storage 的测试因此拿到空 bucket_name，
+报出来的却是 OSS SDK 的 "bucket name len is between [3-63], now is 0"，没有任何东西
+指回"配置没加载"。整整一批 config.json 是摆设，而没人知道。
+
+回落只在「可执行文件旁边没有」时发生，所以正常部署零影响。
+*/
+func TestLoadFromFile_FallsBackToWorkingDir(t *testing.T) {
+	fn := "regression_cwd_fallback.json"
+
+	// 放在工作目录（go test 下就是包目录），**不放** AppPath。
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwdPath := filepath.Join(cwd, fn)
+	if err := os.WriteFile(cwdPath, []byte(`{"regowner":{"value":"from_cwd"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(cwdPath)
+
+	// 前置条件：AppPath 下确实没有同名文件，否则这个用例证明不了任何事。
+	if _, err := os.Stat(filepath.Join(AppPath, fn)); err == nil {
+		t.Skipf("AppPath 下已存在 %s，本用例无法区分两条路径", fn)
+	}
+
+	cfg := newIsolated(t, fn)
+	model := &regParent{Value: "code_default"}
+	cfg.Register(model)
+
+	if err := cfg.LoadFromFile(); err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if got := cfg.GetString("regowner.value", "<none>"); got != "from_cwd" {
+		t.Errorf("core 没读到工作目录里的配置: got %q, want %q", got, "from_cwd")
+	}
+	if model.Value != "from_cwd" {
+		t.Errorf("模型没拿到工作目录里的配置: got %q, want %q", model.Value, "from_cwd")
+	}
+}
+
+// 可执行文件旁边有就用那份 —— 回落不能反过来抢走正常部署的配置。
+func TestLoadFromFile_AppPathWinsOverWorkingDir(t *testing.T) {
+	fn := "regression_apppath_wins.json"
+
+	appPathFile := filepath.Join(AppPath, fn)
+	if err := os.WriteFile(appPathFile, []byte(`{"regowner":{"value":"from_apppath"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(appPathFile)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cwd != AppPath {
+		cwdFile := filepath.Join(cwd, fn)
+		if err := os.WriteFile(cwdFile, []byte(`{"regowner":{"value":"from_cwd"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(cwdFile)
+	}
+
+	cfg := newIsolated(t, fn)
+	model := &regParent{Value: "code_default"}
+	cfg.Register(model)
+	if err := cfg.LoadFromFile(); err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if model.Value != "from_apppath" {
+		t.Errorf("回落抢走了 AppPath 的配置: got %q, want %q", model.Value, "from_apppath")
+	}
+}
+
+// LoadFromFile 的 fileName 参数此前被整个忽略：签名收了它，函数体只用 core.FileName。
+func TestLoadFromFile_HonoursExplicitFileName(t *testing.T) {
+	fn := "regression_explicit_name.json"
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cwd, fn)
+	if err := os.WriteFile(path, []byte(`{"regowner":{"value":"explicit"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+
+	// 故意用别的文件名建，再靠参数切过去。
+	cfg := newIsolated(t, "regression_not_this_one.json")
+	model := &regParent{Value: "code_default"}
+	cfg.Register(model)
+
+	if err := cfg.LoadFromFile(fn); err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if model.Value != "explicit" {
+		t.Errorf("显式文件名被忽略: got %q, want %q", model.Value, "explicit")
+	}
+}

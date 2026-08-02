@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -355,16 +356,51 @@ func (self *Config) InConfig(path string) bool {
 	return self.Core().fmt.InConfig(path)
 }
 
+// resolveConfigPath 定位配置文件：先看可执行文件旁边，找不到再看**工作目录**。
+//
+// 绝对路径原样返回。
+//
+// 为什么需要回落：`AppPath` 是可执行文件所在目录，对部署好的服务是对的，但
+// `go test` 把测试二进制编到临时目录（/var/folders/.../b001/）里跑 —— 于是包目录下
+// 那份 config.json **一次都没有被读过**。表现不是报错，是每个配置模型都停在代码默认
+// 值上：vectors 那边 storage 的测试因此拿到空的 bucket_name，报的却是
+// "bucket name len is between [3-63], now is 0"，一路指向 OSS SDK，没有任何东西
+// 指回配置没加载。db 配置碰巧没暴露，只因为它的测试脚手架把连接参数又硬写了一份。
+//
+// 回落只在「可执行文件旁边没有」时发生，所以对正常部署零影响：那里有文件就用那里的。
+func resolveConfigPath(fileName string) string {
+	if filepath.IsAbs(fileName) {
+		return fileName
+	}
+	if p := filepath.Join(AppPath, fileName); utils.FileExists(p) {
+		return p
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if p := filepath.Join(cwd, fileName); utils.FileExists(p) {
+			return p
+		}
+	}
+	// 两处都没有：仍返回 AppPath 下的路径，让后续的 AutoCreateFile / SaveToFile
+	// 写在原来的位置，行为与此前一致。
+	return filepath.Join(AppPath, fileName)
+}
+
 // LoadFromFile 尝试从文件系统加载配置。
 // 并会将已注册的配置模型与加载的数据文件进行校对。
 // 未出现在文件里的配置模型，以其自身当前值作为默认值补全（只进内存，不写磁盘）。
 func (self *Config) LoadFromFile(fileName ...string) error {
 	core := self.Core()
 
+	// 传进来的文件名此前**被整个忽略**：签名收了 fileName，函数体却只用
+	// core.FileName。于是 config.Load("other.json") 读的仍然是 config.json，
+	// 且没有任何提示。
+	if len(fileName) > 0 && fileName[0] != "" {
+		core.FileName = fileName[0]
+	}
 	if core.FileName == "" {
 		core.FileName = CONFIG_FILE_NAME
 	}
-	filePath := filepath.Join(AppPath, core.FileName)
+	filePath := resolveConfigPath(core.FileName)
 	core.fmt.SetConfigFile(filePath)
 
 	// 如果文件存在，先载入文件所有内容
