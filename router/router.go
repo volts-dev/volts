@@ -348,6 +348,18 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 		}
 		rsp.Connect(w)
 
+		// 路由匹配前的路径改写(多语言 URL 前缀:/fr/shop → /shop,前缀记为 "/fr")。
+		// 必须在 tree.Match 之前——middleware 是装配期挂到 handler 链上的，匹配已经
+		// 发生过了，那时再改路径没有意义。摘下来的前缀经 ctx.PathPrefix() 交给
+		// handler，重定向与链接生成由上层拼回去。见 PathRewriter 的类型注释。
+		var pathPrefix string
+		if self.config.PathRewriter != nil {
+			if newPath, stripped := self.config.PathRewriter(r.URL.Path); stripped != "" && newPath != "" {
+				pathPrefix = stripped
+				r.URL.Path = newPath
+			}
+		}
+
 		// Match route from the internal tree.
 		route, params := self.tree.Match(r.Method, r.URL.Path)
 
@@ -372,7 +384,10 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 				alt, _ := self.tree.Match(r.Method, trimmed)
 				if alt != nil && (route == nil || alt.Id() != route.Id()) {
 					u := *r.URL
-					u.Path = trimmed
+					// 前缀必须拼回去：PathRewriter 摘掉的是语言前缀，跳到去前缀的
+					// 路径会把语言静默丢掉——`/fr/shop/checkout/` 跳去 `/shop/checkout`
+					// 后用户看到的是默认语言，而且这条 301 会被缓存。
+					u.Path = pathPrefix + trimmed
 					// GET/HEAD 用 301（可缓存的永久跳转，惯例）；其余方法用 308 ——
 					// 308 才保证客户端**不把 POST 改写成 GET**，否则带表单的请求会
 					// 静默丢掉 body 变成一次 GET，用户看到的是"提交没反应"。
@@ -421,6 +436,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			ctx.Template = template.Default()
 		}
 		ctx.reset(rsp, r)
+		ctx.pathPrefix = pathPrefix // reset 之后赋值：reset 会清掉它
 		ctx.setPathParams(params)
 
 		// Execute the routing chain.

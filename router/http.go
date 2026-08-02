@@ -87,6 +87,7 @@ type (
 		data         *TParamsSet // 数据缓存在各个Controler间调用
 		methodParams *TParamsSet //map[string]string // Post Get 传递回来的参数
 		pathParams   *TParamsSet //map[string]string // Url 传递回来的参数
+		pathPrefix   string      // 被 PathRewriter 摘掉的路径前缀(多语言 "/fr")，见 PathPrefix()
 		//body         *TContentBody
 
 		// 模板
@@ -677,6 +678,9 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THtt
 	self.data = nil                      // 清空
 	self.pathParams = nil
 	self.methodParams = nil
+	// 必须清:context 是按路由池化复用的，上一轮请求带 /fr 前缀而这一轮不带时，
+	// 残留的前缀会让链接生成和重定向凭空多出一门语言。router 在 reset 之后才赋值。
+	self.pathPrefix = ""
 	self.request = req
 	self.response = rw
 	self.ResponseWriter = rw
@@ -686,6 +690,15 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THtt
 	self.handlerIndex = 0 // -- 提示目前控制器Index
 	self.isDone = false   // -- 已经提交过
 	self.hijacked = false // -- 上一轮若被 WebSocket 接管，取出复用时必须清掉
+}
+
+// PathPrefix 返回被 PathRewriter 在路由匹配前摘掉的路径前缀（多语言场景下形如
+// "/fr"），没有改写时为空串。
+//
+// handler 看到的 Request().URL.Path 已经是**去前缀**的路径（这正是让所有模块的路由
+// 注册不必改动的原因）。需要生成对外链接或重定向时必须把它拼回去，否则跳转会掉语言。
+func (self *THttpContext) PathPrefix() string {
+	return self.pathPrefix
 }
 
 // Hijacked 返回连接是否已被接管（WebSocket 升级成功）。为真时 router 不再写响应，

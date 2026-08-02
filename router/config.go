@@ -23,6 +23,21 @@ var (
 type (
 	Option func(*Config)
 
+	// PathRewriter 在**路由匹配之前**改写请求路径,返回改写后的路径与被摘掉的前缀。
+	// 不改写时返回 ("", "") 或让 stripped 为空。
+	//
+	// 存在的理由是多语言 URL 前缀(/fr/shop → /shop + "/fr"):路由匹配发生在
+	// middleware 之前(middleware 是装配期挂到 handler 链上的),所以中间件根本没
+	// 机会在匹配前动路径。若不在这里摘掉前缀,每个前台模块都得把自己的路由再注册
+	// 一份 /{lang}/... —— 路由表和注册到 registry 的端点表双倍膨胀,而且根部的
+	// 单段通配会抢走所有二级路径(/company/team 被读成 lang=company + /team)。
+	//
+	// 约束:
+	//   - 必须是纯函数且够快,它在每个 HTTP 请求的最前面执行,不允许查库/加锁;
+	//   - 不要在这里做重定向决策,只摘前缀。前缀会经 THttpContext.PathPrefix()
+	//     交给 handler,重定向/链接生成由上层拼回去。
+	PathRewriter func(path string) (newPath, stripped string)
+
 	Config struct {
 		config.Config    `field:"-"`
 		Name             string                   `field:"-"` // config name/path in config file
@@ -34,6 +49,7 @@ type (
 		Registry         registry.IRegistry       `field:"-"`
 		RegistryCacher   registry.IRegistryCacher `field:"-"` // registry cache
 		RecoverHandler   func(IContext)           `field:"-"`
+		PathRewriter     PathRewriter             `field:"-"` // 路由匹配前的路径改写(多语言 URL 前缀),见类型注释
 
 		// mapping to config file
 		Recover                   bool     `field:"recover"`
@@ -198,6 +214,13 @@ func WithRecover(on bool) Option {
 func WithRecoverHandler(handler func(IContext)) Option {
 	return func(cfg *Config) {
 		cfg.RecoverHandler = handler
+	}
+}
+
+// WithPathRewriter 装上路由匹配前的路径改写钩子(多语言 URL 前缀),见 PathRewriter。
+func WithPathRewriter(fn PathRewriter) Option {
+	return func(cfg *Config) {
+		cfg.PathRewriter = fn
 	}
 }
 
