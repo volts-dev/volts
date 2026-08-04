@@ -122,6 +122,27 @@ func HttpReverseProxy(ctx *THttpContext) {
 		return
 	}
 
+	// 被 PathRewriter 摘掉的前缀必须原样转发给上游。
+	//
+	// PathRewriter 在**路由匹配之前**改写 r.URL.Path（多语言 /fr/shop → /shop），而
+	// SetURL 拼的正是这个改写后的路径 —— 于是网关转发出去的是 /shop，上游进程再也无从
+	// 得知本次请求带过语言。真机实测:经网关请求 /fr 拿到的是**英文页**，上游甚至回了
+	// 一个"已按浏览器语言评估过"的 cookie，因为在它看来这就是一次无前缀请求。
+	//
+	// 更坏的是它随语言而异:不在 91 门常量表里的 url_code（website 把 zh_CN 播成 zh）
+	// 网关认不出、原样转发，上游自己剥得好好的 —— 于是 /zh 正常而 /fr 掉语言，
+	// 看起来像"某一门语言坏了"，而不是"网关吃掉了前缀"。
+	//
+	// 与尾斜杠 301 把前缀拼回去（见 TRouter.ServeHTTP）是同一条规矩:**谁摘的谁负责还**。
+	langPrefix := ctx.PathPrefix()
+	restorePrefix := func(pr *httputil.ProxyRequest) {
+		if langPrefix == "" {
+			return
+		}
+		pr.Out.URL.Path = proxyPathWithPrefix(pr.Out.URL.Path, rp.Path, langPrefix)
+		pr.Out.URL.RawPath = "" // 让 URL 按 Path 重新编码，别留下旧的转义串
+	}
+
 	// 缓冲请求体，使 http.Transport 可以在 stale 连接时自动重试（含 POST/PUT）。
 	// GetBody 是 http.Transport 内部重试的触发条件：有 GetBody 时，transport
 	// 检测到 errServerClosedIdle 后会自动重建连接并重放请求，无需在 ErrorHandler
@@ -136,6 +157,7 @@ func HttpReverseProxy(ctx *THttpContext) {
 		inReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		rewriteFn = func(pr *httputil.ProxyRequest) {
 			pr.SetURL(rp)
+			restorePrefix(pr)
 			pr.Out.Host = rp.Host
 			pr.SetXForwarded()
 			// 累计反代跳数，供下游（含本进程自己）的跳数护盾封顶转发环。
@@ -150,6 +172,7 @@ func HttpReverseProxy(ctx *THttpContext) {
 	} else {
 		rewriteFn = func(pr *httputil.ProxyRequest) {
 			pr.SetURL(rp)
+			restorePrefix(pr)
 			pr.Out.Host = rp.Host
 			pr.SetXForwarded()
 			// 累计反代跳数，供下游（含本进程自己）的跳数护盾封顶转发环。
@@ -182,6 +205,22 @@ func HttpReverseProxy(ctx *THttpContext) {
 	}
 
 	proxy.ServeHTTP(ctx.Response(), inReq)
+}
+
+// proxyPathWithPrefix 把被 PathRewriter 摘掉的前缀拼回上游路径。
+//
+// outPath 是 SetURL 拼好的结果（upstreamBase + 本次请求路径），upstreamBase 是上游服务
+// 地址里的路径部分。前缀要插在**请求路径那一段**之前，而不是整个 URL 最前面——上游若挂
+// 在子路径上（service = http://h/api），拼成 /fr/api/... 会直接 404。
+func proxyPathWithPrefix(outPath, upstreamBase, langPrefix string) string {
+	if langPrefix == "" {
+		return outPath
+	}
+	base := strings.TrimSuffix(upstreamBase, "/")
+	if base != "" && strings.HasPrefix(outPath, base) {
+		return base + langPrefix + strings.TrimPrefix(outPath, base)
+	}
+	return langPrefix + outPath
 }
 
 // getService returns the service for this request from the selector.
