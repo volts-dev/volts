@@ -213,10 +213,28 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	// 初始化 transport
 	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
 
-	// 初始化 registry
-	reg := registry.Use(cfg.RegistryType, registry.Addrs(cfg.RegistryHost...))
+	// 初始化 registry。
+	//
+	// **调用方显式给了实例就用它，绝不按 RegistryHost 再解析一遍。**
+	// RegistryHost 存在共享的配置路径 `client.default` 下（Config.String() 只按
+	// Name/PrefixName 取路径，而绝大多数客户端都用默认名），于是同进程里**先**创建
+	// 的那个客户端写进去的地址，会被**后**创建的每一个同路径客户端继承——哪怕后者
+	// 明确用 WithRegistry/WithEtcdRegistry 传了另一个实例进来。
+	//
+	// 症状是静默连错注册中心：2026-08-06 实测，一个进程用 VECTORS_ETCD_ADDRS 指到
+	// 127.0.0.1:12379 起了整套隔离环境，registry 实例也确实绑在 12379 上，但这行
+	// 把它换成了按 RegistryHost=["127.0.0.1"]（缺端口→默认 2379）解析出来的那个，
+	// 于是 /api/load_views 这类内部 RPC 全部打到了**另一套环境**的进程上。不报错、
+	// 有正常响应（同一个库），只是答话的是别人的二进制——查了很久才定位到这里。
+	reg := cfg.Registry
+	if reg == nil {
+		reg = registry.Use(cfg.RegistryType, registry.Addrs(cfg.RegistryHost...))
+	}
 	if reg != nil {
 		cfg.Registry = reg
+		// 回填成实例的真实地址：RegistryHost 是给配置/诊断看的，让它继续显示一个
+		// 与真实连接不符的值，就是下一次同样难查的起点。
+		cfg.RegistryHost = reg.Config().Addrs
 		cfg.Selector = selector.New(
 			selector.WithConfigPrefixName(cfg.String()), // 配置路径
 			selector.Registry(cfg.Registry),
