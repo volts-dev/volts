@@ -68,6 +68,13 @@ func RouteToEndpiont(r *route) *registry.Endpoint {
 	if op, ok := r.meta.(*Operation); ok && op != nil {
 		ep.Description = op.Summary // 作为 OpenAPI operation 的 summary
 		ep.Tags = op.Tags
+		// 自由标记先落，框架自用的 "description" 后写，后者权威。
+		for k, v := range op.Meta {
+			if ep.Metadata == nil {
+				ep.Metadata = map[string]string{}
+			}
+			ep.Metadata[k] = v
+		}
 		if op.Description != "" {
 			// 长描述经 Metadata 透传（Endpoint 无独立字段），builder 映射到 operation.description
 			if ep.Metadata == nil {
@@ -127,6 +134,32 @@ func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, 
 	}
 
 	return r
+}
+
+// WithOp 给已注册的路由补 OpenAPI 元信息/自由标记，供 TGroup.Url 这类
+// 非泛型注册链式使用：
+//
+//	grp.Url([]string{"GET"}, "/shop", ctrl.Shop).
+//	    WithOp(router.OpMeta("list_as_website_content", "Shop"))
+//
+// TGroup.Api 走 buildOp 在注册期建好 meta，无需本方法。已有 meta 时在其上叠加，
+// 不丢反射出来的 Request/Response。addRoute 可能返回 nil（重复注册等），故容忍
+// nil receiver，让调用方不必每次判空。
+func (self *route) WithOp(opts ...OpOption) *route {
+	if self == nil {
+		return nil
+	}
+	self.Lock()
+	defer self.Unlock()
+	op, _ := self.meta.(*Operation)
+	if op == nil {
+		op = &Operation{}
+	}
+	for _, fn := range opts {
+		fn(op)
+	}
+	self.meta = op
+	return self
 }
 
 func (self *route) Id() int {

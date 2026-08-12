@@ -76,6 +76,11 @@ type Operation struct {
 	Tags        []string
 	Request     *registry.Value
 	Response    *registry.Value
+	// Meta 是路由的自由标记，随 RouteToEndpiont 并进 registry.Endpoint.Metadata，
+	// 因而经注册中心对**所有**服务可见——这是跨进程读取路由声明的唯一通道
+	// （单进程里路由表就是全局的，微服务下注册中心的 endpoints 才是）。
+	// 键名由使用方自定；框架自身只占用 "description"（见 RouteToEndpiont）。
+	Meta map[string]string
 }
 
 // OpOption 配置 Operation。
@@ -84,6 +89,16 @@ type OpOption func(*Operation)
 func OpSummary(s string) OpOption     { return func(o *Operation) { o.Summary = s } }
 func OpDescription(s string) OpOption { return func(o *Operation) { o.Description = s } }
 func OpTags(tags ...string) OpOption  { return func(o *Operation) { o.Tags = append(o.Tags, tags...) } }
+
+// OpMeta 给路由挂一条自由标记，见 Operation.Meta。
+func OpMeta(key, value string) OpOption {
+	return func(o *Operation) {
+		if o.Meta == nil {
+			o.Meta = map[string]string{}
+		}
+		o.Meta[key] = value
+	}
+}
 
 // buildOp 反射 I/O 类型并应用选项（注册期一次）。
 func buildOp[I, O any](opts ...OpOption) *Operation {
