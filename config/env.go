@@ -171,3 +171,17 @@ func hasEnvRef(s string) bool {
 	// $${ 是转义，不算引用
 	return !(i > 0 && s[i-1] == '$')
 }
+
+// ExpandValue 展开单个字符串里的 ${VAR} / ${VAR:-默认值} 引用，规则与配置文件
+// 那条路（expandEnvRefs）完全一致。
+//
+// 存在的理由：密钥不止能写在配置文件里。vectors 把第三方登录的 client_secret 存进
+// 数据库的 sys.config_parameter（设置面板可改），而库里同样应该允许只存 `${VAR}`
+// 这个引用、把真值留在环境变量 —— 值不进数据库也就不进备份和从库。
+// 两处若各写一份展开实现，同一个字面量迟早在两处含义不同；导出这一个入口，规则
+// 只有一份。
+func ExpandValue(s string) (string, error) { return expandString(s) }
+
+// HasEnvRef 报告一个字符串是否含 ${VAR} 引用（`$${` 转义不算）。
+// 调用方据此决定「这个值要不要展开」，例如回显到设置面板时保留原始引用而不是真值。
+func HasEnvRef(s string) bool { return hasEnvRef(s) }
