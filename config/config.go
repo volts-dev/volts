@@ -547,9 +547,26 @@ func (self *Config) LoadToModel(model IConfig) error {
 		}
 	}
 
-	// 保存时如果尚未注册该模型则连带注册
+	// 尚未登记的模型在这里补一条 —— 但**只补登记，绝不回调 Register**。
+	//
+	// Register 的结构是「先 Store，再 applyMu.Lock()，然后 cfg.Load()」，而
+	// cfg.Load() 正是走到本函数。所以这一行有可能是**在 applyMu 已被本 goroutine
+	// 持有的情况下**执行的；此处再调 Register，就是对同一把非重入互斥量二次
+	// Lock —— 当场自死锁，并把后面所有等 applyMu 的 goroutine 一起堵死。
+	//
+	// 2026-08-22 真栈：vectors 同时升级 4 个模块，4 个下载各自构造 HttpClient
+	// （sync.Pool 一起 miss）→ transport.newConfig → config.Register，其中一个
+	// 踩中递归，另外 6 个排在它后面。表现是升级停在 5% "Prefetching module
+	// data..." 永不推进，**一条错误日志都没有**，前端进度条转到 15 分钟超时。
+	// 回归：client/concurrent_new_client_test.go。
+	//
+	// 补登记足够了：defaults 两条路都已经灌过 —— 从 Register 进来时它自己刚
+	// saveDefaults 过这个模型，独立调用时上面的 `!InConfig` 分支也会 saveDefaults。
 	if _, has := core.models.Load(model.String()); !has {
-		self.Register(model)
+		if c, ok := model.(iConfig); ok {
+			c.bindCore(core)
+		}
+		core.models.Store(model.String(), model)
 	}
 	return nil
 }
