@@ -225,7 +225,26 @@ func (self *THttpContext) WriteStream(data interface{}) error {
 
 // TODO 改为Route Params
 // 如果返回 nil 代表 Url 不含改属性
+// PathParams 返回 URL 里 `{name}` 占位符解析出来的参数集。
+//
+// **永远不返回 nil。** 路由上没有占位符时 setPathParams 不会建这个集合
+// （`if len(p) > 0`），而 reset 每轮都把它置回 nil —— 于是同一个池化 context
+// 先服务一条带占位符的路由、再服务一条不带的，`ctx.PathParams().FieldByName(x)`
+// 就是空指针崩溃。崩的是 nil 接收者上的 getFieldsIndex，栈里只看得见调用方那一行，
+// 看不出「这条路由没有路径参数」才是原因。
+//
+// 而且它**跟请求顺序有关**：新建的 context 在构造函数里已经有一个空集合，
+// 所以进程刚起来时同一条路由是好的，跑一阵子拿到复用的 context 才崩。
+// 2026-08-25 真栈踩到：`POST /mailing/confirm_unsubscribe`（退订确认按钮提交的
+// 那个地址，路由上没有占位符）稳定 500，而同一个 handler 服务的
+// `GET /mailing/{mailing_id}/unsubscribe` 一切正常。
+//
+// 空集合的 FieldByName 会返回一个 IsValid=false 的空字段，取值是零值 ——
+// 正是调用方期待的「没有这个参数」。
 func (self *THttpContext) PathParams() *TParamsSet {
+	if self.pathParams == nil {
+		self.pathParams = NewParamsSet(self)
+	}
 	return self.pathParams
 }
 

@@ -192,7 +192,12 @@ func (self *TRpcContext) Data() *TParamsSet {
 	return self.data
 }
 
+// PathParams 同 THttpContext.PathParams：**永远不返回 nil**，理由见那边的说明
+// （没有占位符的路由 + 池化复用 = 空指针崩溃，且与请求顺序有关）。
 func (self *TRpcContext) PathParams() *TParamsSet {
+	if self.pathParams == nil {
+		self.pathParams = NewParamsSet(self)
+	}
 	return self.pathParams
 }
 
