@@ -74,6 +74,14 @@ The serialize type is **one attacker-controlled byte on the wire** (HTTP side: `
 2. **Route-level** — `Url(methods, path, mainCtrl, mid1, mid2)`; `handlers[0]` is the controller, `handlers[1:]` are middlewares. Getting this order backwards reports `reflect: call of reflect.Value.NumField on interface Value`, which names nothing relevant.
 3. **Controller embedding (DI)** — `RegisterMiddleware` only records a constructor by name; binding happens by embedding the middleware type in the controller struct. `handler.init` asserts against the controller **value**, so middleware methods must use **value receivers** — pointer receivers silently fail to bind.
 
+**Value receivers are a router-wide rule, not just a middleware one.** Registering a
+struct controller (`Url(methods, path, ctrl)`) dereferences it first —
+`if kind == reflect.Ptr { ctrlType = ctrlType.Elem() }` in `router/group.go` — and then
+walks `ctrlType.NumMethod()`. A value type's method set excludes pointer-receiver
+methods, so `func (c *Ctrl) Foo(ctx)` is **never registered**. Callers see
+`rpc status NotFound: server returned no detail` — a message that names neither the
+controller nor the method.
+
 Execution order: global → route-level → embedded → main controller.
 
 Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
