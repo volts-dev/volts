@@ -1,4 +1,4 @@
-module github.com/volts-dev/volts/ja3
+module github.com/volts-dev/volts/core/ja3
 
 go 1.27
 
@@ -37,4 +37,4 @@ require (
 )
 
 // 开发期指回上级工作树；volts 发布后改为具体版本。
-replace github.com/volts-dev/volts => ../
+replace github.com/volts-dev/volts => ../..

@@ -15,7 +15,7 @@ import (
 	vlog "github.com/volts-dev/volts/logger"
 
 	// 空导入即注册 JA3 拨号实现；缺了它 transport.Dial 会返回 ErrJa3NotRegistered
-	_ "github.com/volts-dev/volts/ja3"
+	_ "github.com/volts-dev/volts/core/ja3"
 )
 
 var log = vlog.New("ja3-test")

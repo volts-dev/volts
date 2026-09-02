@@ -9,7 +9,7 @@ import (
 
 // JA3（TLS 指纹伪装）的挂载点。
 //
-// 实现放在独立子模块 github.com/volts-dev/volts/ja3 里，本包只保留注册表。
+// 实现放在独立子模块 github.com/volts-dev/volts/core/ja3 里，本包只保留注册表。
 // 这么切的理由：
 //   - JA3 依赖 github.com/refraction-networking/utls —— 一个用途是**模仿其他
 //     客户端的 TLS 指纹**的库。绝大多数用 volts 写业务服务的人不需要它，却会
@@ -18,7 +18,7 @@ import (
 //
 // 用法：需要 JA3 的程序空导入子模块即可自动注册
 //
-//	import _ "github.com/volts-dev/volts/ja3"
+//	import _ "github.com/volts-dev/volts/core/ja3"
 //
 // 未导入却设置了 JA3 指纹时，Dial 会返回 ErrJa3NotRegistered —— 明确报错，
 // 而不是**静默退回普通 TLS**：后者会让指纹伪装悄悄失效，调用方以为自己伪装了。
@@ -41,7 +41,7 @@ type Ja3DialFunc func(rawConn net.Conn, serverName string, cfg *tls.Config, ja3 
 
 // ErrJa3NotRegistered 表示设置了 JA3 指纹但没有导入实现子模块。
 var ErrJa3NotRegistered = errors.New(
-	"transport: 设置了 JA3 指纹但未注册实现 —— 请导入 _ \"github.com/volts-dev/volts/ja3\"")
+	"transport: 设置了 JA3 指纹但未注册实现 —— 请导入 _ \"github.com/volts-dev/volts/core/ja3\"")
 
 var (
 	ja3Mu   sync.RWMutex
@@ -75,7 +75,7 @@ func ja3Dialer() Ja3DialFunc {
 //
 // ★ 它存在的意义是让上层**不必依赖 utls**：拿 dialer 只需要 import 本包（volts
 // 已经在依赖树里了），启用则是在 main 里空导入一次
-// `_ "github.com/volts-dev/volts/ja3"`。这样 JA3 的可选性一路保持到最上层，
+// `_ "github.com/volts-dev/volts/core/ja3"`。这样 JA3 的可选性一路保持到最上层，
 // 而不是每个想用指纹的仓都被迫把 utls 写进自己的 go.mod。
 //
 // 返回 nil 时**不要静默退回普通 TLS** —— 那会让伪装悄悄失效而调用方以为自己

@@ -136,7 +136,7 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 		}
 
 		if dialCfg.Ja3.Ja3 != "" {
-			// JA3 指纹伪装的实现在独立子模块 volts/ja3 里（见 ja3_hook.go）。
+			// JA3 指纹伪装的实现在独立子模块 core/ja3 里（见 ja3_hook.go）。
 			// 未注册时**明确报错**而不是静默退回普通 TLS —— 后者会让伪装悄悄失效，
 			// 调用方还以为自己伪装了。
 			dial := ja3Dialer()

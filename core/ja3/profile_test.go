@@ -2,6 +2,7 @@ package ja3
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -98,6 +99,44 @@ func TestChrome133HasModernSignals(t *testing.T) {
 	if !hasPQ {
 		t.Error("没有后量子曲线 X25519MLKEM768 —— Chrome 124 起默认发")
 	}
+}
+
+// TestChromeShufflesExtensions —— Chrome 106 起**每条连接都把扩展打乱顺序**。
+//
+// 这条守的是"预置指纹比 JA3 串强"的一个具体理由：JA3 是按扩展顺序拼出来的，所以
+// 真 Chrome 的 JA3 **每次连接都不一样**，而一个固定的 JA3 串反倒成了"不是 Chrome"
+// 的证据。乱序丢了（utls 升级、换错 ClientHelloID）不会有任何报错 —— 只会让我们
+// 每次都发同一个指纹。
+//
+// 真栈上看得见：同一个身份连打两次 tls.peet.ws，ja3_hash 是两个值，而 JA4（排过序）
+// 稳定不变。
+func TestChromeShufflesExtensions(t *testing.T) {
+	p, ok := LookupProfile("chrome_133")
+	if !ok {
+		t.Fatal("chrome_133 没登记")
+	}
+
+	order := func() string {
+		spec, err := p.Spec()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b strings.Builder
+		for _, ext := range spec.Extensions {
+			fmt.Fprintf(&b, "%T,", ext)
+		}
+		return b.String()
+	}
+
+	// 洗牌是随机的，理论上可能连着洗出同一个顺序 —— 试几次，全都一样才算没洗。
+	first := order()
+	for i := 0; i < 8; i++ {
+		if order() != first {
+			return // 洗过了
+		}
+	}
+	t.Error("连取 9 次扩展顺序完全相同 —— Chrome 的逐连接乱序没了，" +
+		"我们会每次都发同一个 JA3，而真 Chrome 不会")
 }
 
 // TestProfileUserAgentsMatchFamily —— UA 与指纹必须自洽。

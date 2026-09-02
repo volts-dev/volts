@@ -144,6 +144,7 @@ passes an `Upgrade` request through to an upstream and never parses a frame.
 | `selector/` | Load-balancing strategy over registry nodes, plus per-node failure ejection / circuit breaking (`selector/breaker.go`) |
 | `logger/` | Self-contained leveled logger (writer manager + console writer). **Not** built on zap — `go.uber.org/zap` is pulled in only by `registry/etcd` for clientv3's `LogConfig` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
+| `core/outbound/` | Outbound HTTP for scraping **third-party** sites — browser identity rotation (TLS fingerprint + UA + client hints + proxy exit). See "Outbound: talking to strangers" |
 | `config/` | Config models, load/validate/lint/report. viper is the file codec only — layering, provenance and diff-persistence live in this package (see "Config: the file is a read-only input") |
 
 ### Service Lifecycle
@@ -336,10 +337,10 @@ See project memory for the full list. Remaining open notes:
   work (route match, context pool, ~19 allocs, ~2µs) drowns out anything the dispatch loop
   does — use the 50-middleware case, `-count=5`, and compare medians.
 
-### Optional Submodule: JA3
+### Optional Submodule: `core/ja3`
 
-`ja3/` is a **separate Go module** (`github.com/volts-dev/volts/ja3`) holding the TLS
-fingerprint-spoofing implementation. The main module deliberately does not depend on it,
+`core/ja3/` is a **separate Go module** (`github.com/volts-dev/volts/core/ja3`) holding the
+TLS fingerprint-spoofing implementation. The main module deliberately does not depend on it,
 and therefore does not depend on `github.com/refraction-networking/utls` — a library whose
 purpose is mimicking other clients' TLS fingerprints, which most people writing business
 services do not need but would otherwise compile into every binary and have flagged in
@@ -348,15 +349,87 @@ compliance scans.
 Enable it with a blank import:
 
 ```go
-import _ "github.com/volts-dev/volts/ja3"
+import _ "github.com/volts-dev/volts/core/ja3"
 ```
 
-`transport` keeps only the hook (`transport/ja3_hook.go`): the `Ja3` config struct (plain
-strings), a dialer registry, and `INegotiatedProtocol` so `client` can read the ALPN result
-without asserting a concrete TLS type. Setting a JA3 fingerprint **without** importing the
-submodule returns `transport.ErrJa3NotRegistered` rather than silently falling back to
-ordinary TLS — a silent fallback would leave the caller believing they were disguised.
+**Prefer a preset name over a JA3 string.** `Dial(conn, host, cfg, "chrome_133")` uses
+utls's byte-exact ClientHello; a JA3 string is only ever an approximation, because JA3
+records extension **ids** and not their contents — and GREASE, Chrome's per-connection
+extension shuffling, the post-quantum key share and ALPS all live in the contents.
+Measured (`tls.peet.ws`): the preset yields JA4 `t13d1516h2_8daaf6152771_…` (Chrome's real
+cipher hash); a hand-copied JA3 string yields `t13d3112h2_e8f1e7e78f70_…` — 31 ciphers where
+Chrome sends 15, i.e. a client that is *nobody*, and therefore rarer than Go's own default.
+The dispatch is by shape: a JA3 string always has exactly four commas; anything else is
+looked up as a preset name, and an unknown name is an error that lists the valid ones.
 
-The JA3 integration tests live in the submodule (`ja3/client_integration_test.go`); they
-cannot stay in the main module, since importing the submodule from there would both create
-a module cycle and drag utls back into the main dependency tree.
+**Rebuilding a ClientHello may only restore what the string contains — never invent.**
+A GREASE key_share added to a string whose curve list has no GREASE violates RFC 8446
+§4.2.8 (no key_share for a group absent from supported_groups). Go's own TLS server does
+not check this, so httptest stays green; Akamai does, and answers `illegal parameter` —
+an error that names neither extension. Guards must therefore be **structural assertions**
+over the spec (`TestKeyShareIsSubsetOfSupportedGroups`), not a successful handshake.
+`boundary_live_test.go` (`VOLTS_JA3_LIVE=1`) handshakes every preset against Akamai,
+Cloudflare and Google — that is the only thing that answers "does this fingerprint work".
+
+`transport` keeps two things: the hook (`transport/ja3_hook.go` — the `Ja3` config struct,
+the dialer registry, `Ja3Dialer()` for callers building their own `DialTLSContext`, and
+`INegotiatedProtocol` so callers can read ALPN without asserting a concrete TLS type), and
+the **metadata registry** (`transport/fingerprint.go` — each fingerprint's name, browser
+family and self-consistent User-Agents). Metadata needs no utls, so keeping it in the main
+module lets upper layers enumerate identities, pair UA with fingerprint, and branch on
+family — without writing utls into their own go.mod. Setting a fingerprint **without**
+importing the submodule returns `transport.ErrJa3NotRegistered` rather than silently
+falling back to ordinary TLS — a silent fallback would leave the caller believing they
+were disguised.
+
+The JA3 integration tests live in the submodule (`core/ja3/client_integration_test.go`);
+they cannot stay in the main module, since importing the submodule from there would both
+create a module cycle and drag utls back into the main dependency tree.
+
+### Outbound: talking to strangers
+
+`core/outbound/` is the HTTP client for scraping **third-party** sites. `client/` calls
+*your own* services (discovery, balancing, breakers, RPC codecs); this one calls people who
+do not know you and have no obligation to cooperate, so the question shifts from "how do I
+find it" to "why would it answer me". Both share transport's dialing and fingerprint
+registry; nothing above that is common, so they stay separate.
+
+```go
+cli := outbound.Client()   // a plain *http.Client from here on
+```
+
+An identity is **fingerprint + UA + client hints + exit IP**, pinned together at pool build
+time, each with **its own connection pool** — sharing one `http.Transport` would let a
+connection that handshook as mac Chrome carry a request whose UA says win Chrome, and two
+identities on one TLS connection is more recognisable than no disguise at all. UA comes
+from the fingerprint and `sec-ch-ua` is **derived from the UA**, so there is no opportunity
+to mistype either; family decides whether client hints are sent at all (Chromium only —
+Firefox sends `Sec-Fetch-*` but no hints, Safari sends neither).
+
+Four rules that are easy to get wrong:
+
+- **One exit means one identity.** Rotating six browser identities out of a single IP,
+  each polling the same endpoints on the same schedule, is *more* machine-like than one
+  stable identity — real people behind one exit do not behave identically. Identity count
+  follows proxy count; rotation needs proxies to mean anything.
+- **A configured proxy is never silently bypassed.** `allow_direct` defaults to false:
+  when every proxy is unusable the request fails with `ErrNoUsableProxy` instead of going
+  out on the host's own IP. People configure proxies precisely so the far end does not see
+  that IP; a silent fallback quietly does the opposite, with no trace.
+- **ALPN must be probed explicitly.** `http.Transport` reads ALPN by type-asserting
+  `*tls.Conn`; a utls connection is not one, so the transport speaks HTTP/1.1 no matter what
+  the peer selected — and an h2 peer receiving HTTP/1.1 bytes produces an error
+  indistinguishable from "the site changed its response format".
+- **HTTP/2 fingerprints cannot be matched, and half-matching is worse than not trying.**
+  Go's SETTINGS are `2:0;4:4194304;5:1048576;6:10485760|1073741824|0|a,m,p,s`; Chrome 133 is
+  `1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`. Setting 5 is one Chrome never sends
+  and Go always does, the order differs, and the pseudo-header order is hardcoded in
+  `encodeHeaders`. Tuning the reachable knobs turns the **most common fingerprint in the
+  world** into a unique one — from hiding in a crowd to being the only sender. So none of
+  them are tuned.
+
+Disguise failure is **completely silent**: drop the `core/ja3` blank import and everything
+still compiles, tests pass and requests return 200 — they just go out as Go. Any service
+relying on it needs a wiring guard asserting `outbound.Status()` reports no
+`no-fingerprint` identity.
+

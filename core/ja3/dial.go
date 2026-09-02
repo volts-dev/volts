@@ -7,7 +7,7 @@
 //
 // 用法：空导入即自动注册
 //
-//	import _ "github.com/volts-dev/volts/ja3"
+//	import _ "github.com/volts-dev/volts/core/ja3"
 //
 //	cli, _ := client.NewHttpClient(client.WithJa3("chrome_133", userAgent))
 //
