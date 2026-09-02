@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -460,5 +461,154 @@ func TestEachIdentityHasItsOwnConnectionPool(t *testing.T) {
 	}
 	if ports[0] == ports[1] {
 		t.Fatal("两个身份用了同一条连接 —— 连接池被共享了")
+	}
+}
+
+// ---------------------------------------------------------------- SetProxies
+
+// TestSetProxies_ReplacesPoolAtRuntime —— 界面上改完代理要**立刻**生效。
+func TestSetProxies_ReplacesPoolAtRuntime(t *testing.T) {
+	defer restoreRuntimeProxies()
+
+	r := &rotator{}
+	r.once.Do(func() {})
+
+	if err := r.setProxies([]string{"socks5://127.0.0.1:1080", "socks5://127.0.0.1:1081"}); err != nil {
+		t.Fatalf("setProxies: %v", err)
+	}
+	r.mu.Lock()
+	got := len(r.personas)
+	direct := r.allDirect
+	r.mu.Unlock()
+	if got != 2 {
+		t.Fatalf("常备身份数 = %d，想要 2（一个出口一个身份）", got)
+	}
+	if direct {
+		t.Fatal("配了代理却认为是直连")
+	}
+
+	// 撤销覆盖 → 回到 config.json（本测试里是空的）→ 直连一个身份。
+	if err := r.setProxies(nil); err != nil {
+		t.Fatalf("setProxies(nil): %v", err)
+	}
+	r.mu.Lock()
+	got, direct = len(r.personas), r.allDirect
+	r.mu.Unlock()
+	if !direct {
+		t.Fatalf("撤销覆盖后应回到直连，得到 %d 个非直连身份", got)
+	}
+}
+
+// TestSetProxies_KeepsOldPoolOnFailure —— 新列表全不可用时，**不能**把正在工作的
+// 出口换掉。换上一个空池子等于把出站整个掐掉，而这只是一次保存失败。
+func TestSetProxies_KeepsOldPoolOnFailure(t *testing.T) {
+	defer restoreRuntimeProxies()
+
+	old := cfg.AllowDirect
+	cfg.AllowDirect = false
+	defer func() { cfg.AllowDirect = old }()
+
+	r := &rotator{}
+	r.once.Do(func() {})
+	if err := r.setProxies([]string{"socks5://127.0.0.1:1080"}); err != nil {
+		t.Fatalf("setProxies: %v", err)
+	}
+	r.mu.Lock()
+	before := r.personas
+	r.mu.Unlock()
+
+	// 一个协议都不认识的列表 → resolveProxies 一个都建不起来 → ErrNoUsableProxy。
+	err := r.setProxies([]string{"vmess://nope", "hysteria2://nope"})
+	if !errors.Is(err, ErrNoUsableProxy) {
+		t.Fatalf("想要 ErrNoUsableProxy，得到 %v", err)
+	}
+	r.mu.Lock()
+	after := r.personas
+	r.mu.Unlock()
+	if len(after) != len(before) || (len(after) > 0 && after[0] != before[0]) {
+		t.Fatal("建池失败之后旧身份池被换掉了 —— 一次失败的保存把出站掐了")
+	}
+	// 覆盖值也要还原，否则下一次重建会用上那个坏列表。
+	if p := runtimeProxies.Load(); p == nil || len(*p) != 1 {
+		t.Fatalf("失败后没有还原运行时覆盖：%v", p)
+	}
+}
+
+// TestSetProxies_EmptyMeansDirect —— 空列表是"界面上一个都没启用"，等价于直连；
+// 它与"配了但全建不起来"是两件不同的事（后者要 ErrNoUsableProxy）。
+func TestSetProxies_EmptyMeansDirect(t *testing.T) {
+	defer restoreRuntimeProxies()
+
+	old := cfg.AllowDirect
+	cfg.AllowDirect = false
+	defer func() { cfg.AllowDirect = old }()
+
+	r := &rotator{}
+	r.once.Do(func() {})
+	if err := r.setProxies([]string{}); err != nil {
+		t.Fatalf("空列表不该报错，得到 %v", err)
+	}
+	r.mu.Lock()
+	direct := r.allDirect
+	r.mu.Unlock()
+	if !direct {
+		t.Fatal("空列表应当是直连")
+	}
+}
+
+// TestSetProxies_AcceptsSsUrl —— ss/ssr 的 URL 必须能一路走到身份池里。
+// 这条钉的是 transport.NewProxyDialer 的分派：少了它，机场订阅里的节点会被
+// "跳过一个坏代理"那条路静默丢掉，池子看着建好了，其实一个出口都没有。
+func TestSetProxies_AcceptsSsUrl(t *testing.T) {
+	defer restoreRuntimeProxies()
+
+	r := &rotator{}
+	r.once.Do(func() {})
+	if err := r.setProxies([]string{
+		"ss://aes-256-gcm:secret@1.2.3.4:8388#HK01",
+		"ssr://5.6.7.8:9000?method=chacha20-ietf&password=x&protocol=origin&obfs=http_simple",
+	}); err != nil {
+		t.Fatalf("setProxies: %v", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.personas) != 2 {
+		t.Fatalf("常备身份数 = %d，想要 2", len(r.personas))
+	}
+	for _, p := range r.personas {
+		if p.out == nil {
+			t.Fatal("ss/ssr 的节点没有变成代理出口（被当成坏代理跳过了）")
+		}
+		// 标签会进日志。口令不能出现在里面。
+		if strings.Contains(p.label, "secret") || strings.Contains(p.label, "password=x") {
+			t.Fatalf("身份标签里带着口令：%s", p.label)
+		}
+	}
+}
+
+func restoreRuntimeProxies() { runtimeProxies.Store(nil) }
+
+// TestRedactProxy_SsHidesCredentialsAndKeepsName —— ss/ssr 的凭据**整条**不能印。
+//
+// ★ 它们的凭据不在 `@` 前面：标准写法是 `ss://<一大段 base64>#节点名`，那段
+// base64 里就是 method:password@host:port。按 `@` 打码的老写法对它完全无效
+// （找不到 @ 就原样返回），于是口令进了日志、进了工单、进了截图。
+func TestRedactProxy_SsHidesCredentialsAndKeepsName(t *testing.T) {
+	cases := []struct{ in, wantOut, mustNotContain string }{
+		{"ss://YWVzLTI1Ni1nY206aHVudGVyMg@1.2.3.4:8388#HK01", "ss://***#HK01", "YWVzLTI1Ni1nY206aHVudGVyMg"},
+		{"ss://aes-256-gcm:hunter2@1.2.3.4:8388", "ss://***", "hunter2"},
+		{"ssr://1.2.3.4:80?method=x&password=s3cret#%F0%9F%87%AD%F0%9F%87%B0+HK", "ssr://***#🇭🇰 HK", "s3cret"},
+		// 老路径不能被改坏
+		{"socks5://user:pw@gw:1080", "socks5://***@gw:1080", "pw@"},
+		{"http://gw:8080", "http://gw:8080", "\x00"},
+	}
+	for _, c := range cases {
+		got := RedactProxy(c.in)
+		if got != c.wantOut {
+			t.Errorf("RedactProxy(%q) = %q，想要 %q", c.in, got, c.wantOut)
+		}
+		if strings.Contains(got, c.mustNotContain) {
+			t.Errorf("RedactProxy(%q) = %q —— 里面还有凭据 %q", c.in, got, c.mustNotContain)
+		}
 	}
 }

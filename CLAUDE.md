@@ -137,7 +137,7 @@ passes an `Upgrade` request through to an upstream and never parses a frame.
 | `router/` | Radix-tree routing, handler reflection, middleware pipeline, HTTP/RPC context, reverse proxy, static files |
 | `server/` | Lifecycle management (Start/Stop), registry integration, broker subscriptions, transport wiring |
 | `client/` | Outbound HTTP and RPC calls, service discovery via selector, retry logic |
-| `transport/` | Wire-level HTTP and TCP transports, TLS/ACME, message framing with CRC32 |
+| `transport/` | Wire-level HTTP and TCP transports, TLS/ACME, message framing with CRC32, proxy dialers (HTTP CONNECT / SOCKS5 / Shadowsocks / ShadowsocksR) |
 | `codec/` | Serialization adapters (JSON via stdlib encoding/json, MsgPack, Protobuf, Gob, bytes) |
 | `registry/` | Service registration/discovery — Consul, ETCD, mDNS, or in-memory backends |
 | `broker/` | Pub/sub messaging — HTTP or in-memory backends |
@@ -374,6 +374,15 @@ See project memory for the full list. Remaining open notes:
   every TCP connect — `net.DialTimeout` to `192.0.2.1` (RFC 5737, unroutable) succeeds in
   0.01s. Tests hitting public endpoints must classify the *request* error instead
   (see `client/http_client_test.go:skipIfNetworkError`).
+- **Measuring a proxy on this machine measures Clash, not the proxy.** A local Clash/mihomo
+  in TUN mode intercepts every outbound TCP — *including a dial to a literal IP* — and
+  re-routes it by its own rules, so "these nodes fail" may mean "mihomo tunnelled our
+  handshake through a second hop". The tell is a local address in `198.18.0.0/15`; the proof
+  is mihomo's own connection table
+  (`curl --unix-socket /tmp/verge/verge-mihomo.sock http://localhost/connections`), which
+  names the chain it picked. `transport/ss_live_test.go` (`VOLTS_SS_LIVE_NODES=<file>`) is
+  the real judgment: it prints the **exit IP** per node, so a working proxy is visible as a
+  different IP rather than as a 200 that direct traffic would also produce.
 - `transport/message_fuzz_test.go` holds the fuzz targets; deep runs with
   `gotip test -run=XXX -fuzz=FuzzMessageDecode -fuzztime=10m ./transport/`.
 - **Measure before calling something an optimization.** `router/handler_bench_test.go`
@@ -466,7 +475,33 @@ delta-seconds and HTTP-date), still capped at `cooldownMax`.
 "the site is actually down", and the response cannot tell them apart — treating it as a
 block multiplies traffic to an already-struggling peer by `maxAttempts`.
 
-Five rules that are easy to get wrong:
+**Proxies can be swapped at runtime, and they may be `ss://` / `ssr://`.**
+`outbound.SetProxies(urls)` replaces the list and rebuilds the pool; `nil` drops the
+override (back to config.json), an empty slice means "nothing configured" (= direct), and a
+**failed build keeps the old pool** — refusing the change is better than swapping in an
+empty pool that silently kills every exit. A caller must push the proxies the operator
+*enabled*, never the ones that last *tested green*: filtering on health makes one network
+blip empty the list, and "configured a proxy" quietly becomes "direct", which is exactly
+what `allow_direct=false` exists to prevent.
+
+`transport.NewProxyDialer` speaks `http`/`https`/`socks5` **plus `ss` and `ssr`**
+(`transport/ss_proxy.go`), because the proxies people actually buy in the Chinese market
+come as airport subscriptions whose nodes are ss/ssr — supporting only http/socks5 makes a
+subscription import land 149 nodes of which **0** are usable. The line is drawn at ss
+(AEAD + stream ciphers) and ssr with `protocol=origin`, `obfs=plain|http_simple` — that tier
+is really just classic shadowsocks plus an HTTP-shaped header, whereas `auth_chain_*` is a
+second stateful protocol machine and hysteria2/tuic need a whole QUIC stack. Everything else
+**errors and names the protocol**; guessing "let us try it as origin" builds a connection
+that then silently drops every packet server-side. Layer order is load-bearing —
+`payload → [SS cipher] → [SSR obfs] → TCP`, obfs wrapping the *ciphertext* — and CFB is
+**not symmetric** (encrypter one way, decrypter the other; sharing one still "connects",
+then every byte is wrong). `TestSsRoundTrip` runs every cipher against an in-process fake
+server for exactly these "connects fine, data is garbage" failures.
+
+`RedactProxy` blanks ss/ssr URLs **entirely** (keeping only the `#name`): their credentials
+are not in front of the `@`, so the old `@`-based redaction left passwords in the log.
+
+Six rules that are easy to get wrong:
 
 - **One exit means one identity — but only in steady state.** Rotating six browser
   identities out of a single IP, each polling the same endpoints on the same schedule, is

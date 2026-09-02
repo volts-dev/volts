@@ -122,9 +122,11 @@ package outbound
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/volts-dev/volts/config"
@@ -244,6 +246,11 @@ func Client() *http.Client {
 func Status() []string {
 	r := Client().Transport.(*rotator)
 	r.once.Do(r.build)
+
+	// ★ 加锁读：SetProxies 会在运行期整体换掉这两个切片（见 setProxies）。
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.buildErr != nil {
 		return []string{"出站不可用: " + r.buildErr.Error()}
 	}
@@ -258,6 +265,69 @@ func Status() []string {
 	return out
 }
 
+// SetProxies 用**运行时**的代理列表替换配置文件里那一份，并立刻重建身份池。
+//
+// 存在的理由：代理是"哪些出口能用"的日常运维，而 config.json 改一次要重启进程 ——
+// 一个必须重启才能换出口的功能，在被限速的当天没有任何用处。上层（例如
+// connect_components 的「出站代理」设置页）在启动时与每次改动后调它一次。
+//
+// 语义：
+//
+//   - urls 为 nil ⇒ **撤销**覆盖，回到 config.json 的 outbound.proxies。
+//   - urls 为空切片 ⇒ 覆盖成"一个代理都没有"，即直连（与配置文件里留空等价）。
+//     ★ 上层要推的是**启用**的节点，不是**测通**的节点：把测速失败的过滤掉，
+//     一次全网抖动就会让列表变空，于是"配了代理"悄悄变成"直连"，而 allow_direct
+//     的整个用意就是不让这件事发生。能不能连由轮换与冷却去处理。
+//   - 返回错误时**旧池子原样保留**。新列表一个都建不起来（且 allow_direct=false）
+//     时，让正在工作的出口继续工作，比换上一个空池子把出站全掐掉要好；错误交给
+//     调用方显示给人看。
+func SetProxies(urls []string) error {
+	r := Client().Transport.(*rotator)
+	r.once.Do(r.build)
+	return r.setProxies(urls)
+}
+
+// setProxies 建新池子 → 换上 → 关掉旧池子的空闲连接。
+func (r *rotator) setProxies(urls []string) error {
+	var next *[]string
+	if urls != nil {
+		cp := append([]string(nil), urls...)
+		next = &cp
+	}
+
+	// ★ 先落覆盖值再 buildPersonas —— resolveProxies 读的就是它。失败时要还原，
+	// 否则一次失败的保存会把覆盖值留在一个"下次重建才会生效"的半吊子状态。
+	prev := runtimeProxies.Swap(next)
+	active, reserve, err := buildPersonas(cfg)
+	if err != nil {
+		runtimeProxies.Store(prev)
+		return err
+	}
+
+	r.mu.Lock()
+	old := r.all()
+	r.personas, r.reserves = active, reserve
+	r.allDirect = allDirect(r.all())
+	r.buildErr = nil
+	r.next, r.nextRsv = 0, 0
+	r.warned = false // 换了一批出口，"没有代理"那句警告值得再说一次
+	r.mu.Unlock()
+
+	// ★ 关掉旧身份的空闲连接。不关的话，被换下去的代理上那几条 keep-alive 会
+	// 一直挂到 IdleConnTimeout —— 人在界面上"停用"了一个节点，而它还在往外发。
+	for _, p := range old {
+		p.closeIdle()
+	}
+
+	labels := make([]string, 0, len(active))
+	for _, p := range active {
+		labels = append(labels, p.label)
+	}
+	log.Dbgf("出站代理已更新：常备 %d 个（%s），备用 %d 个",
+		len(active), strings.Join(labels, ", "), len(reserve))
+	return nil
+}
+
 // rotator 是按身份轮换的 RoundTripper。
 //
 // 池子**惰性构建**（首次请求时），不在 init 里：config.json 是由进程启动流程装载
@@ -270,8 +340,12 @@ type rotator struct {
 	buildErr error
 
 	// allDirect 池子里一个代理都没有 —— 换身份换不掉 IP，第一次被挡时要说出来。
+	//
+	// ★ warned 是个受 mu 保护的 bool，不是 sync.Once：SetProxies 换了一批出口之后
+	// 这句话值得重说一次，而"重置一个 sync.Once"就是往别的 goroutine 正在 Do 的
+	// 那个对象上赋值 —— -race 下必炸的那种写法。
 	allDirect bool
-	warnOnce  sync.Once
+	warned    bool
 
 	mu      sync.Mutex
 	next    int
@@ -280,8 +354,8 @@ type rotator struct {
 
 func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.once.Do(r.build)
-	if r.buildErr != nil {
-		return nil, r.buildErr
+	if err := r.err(); err != nil {
+		return nil, err
 	}
 
 	var (
@@ -365,7 +439,16 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // attempts 一次请求最多试几个身份：身份不够就别虚张声势地重试同一个。
 func (r *rotator) attempts() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return min(maxAttempts, len(r.personas)+len(r.reserves))
+}
+
+// err 读建池错误。与 personas 一样受 mu 保护 —— setProxies 会清掉它。
+func (r *rotator) err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.buildErr
 }
 
 // replayable —— 换个身份重发这次请求安全吗？
@@ -410,14 +493,17 @@ func retryAfter(rsp *http.Response, now time.Time) time.Duration {
 // 说一次就够（配置问题，不是事件），但必须说：一个已经在轮换指纹的功能没起作用，
 // 而原因在配置里而不是代码里 —— 不说的话只能靠猜。
 func (r *rotator) warnIfDirect(code int) {
-	if !r.allDirect {
+	r.mu.Lock()
+	if !r.allDirect || r.warned {
+		r.mu.Unlock()
 		return
 	}
-	r.warnOnce.Do(func() {
-		log.Warnf("被对方挡回 HTTP %d 后换了身份，但**出口 IP 没变** —— "+
-			"没有配 outbound.proxies 时能轮换的只有 TLS 指纹与 UA。"+
-			"若对方是按 IP 限速，换多少个指纹都不会有效果。", code)
-	})
+	r.warned = true
+	r.mu.Unlock()
+
+	log.Warnf("被对方挡回 HTTP %d 后换了身份，但**出口 IP 没变** —— "+
+		"没有配 outbound.proxies 时能轮换的只有 TLS 指纹与 UA。"+
+		"若对方是按 IP 限速，换多少个指纹都不会有效果。", code)
 }
 
 // pick 取下一个身份：先在常备里轮转，跳过冷却中的；常备全在冷却里才动用备用。
@@ -458,6 +544,7 @@ func nextAvailable(ps []*persona, start int, now time.Time) (*persona, int) {
 	return nil, start
 }
 
+// all 返回常备 + 备用。**调用方必须已持有 r.mu。**
 func (r *rotator) all() []*persona {
 	out := make([]*persona, 0, len(r.personas)+len(r.reserves))
 	out = append(out, r.personas...)
@@ -602,10 +689,22 @@ func preferDefault(fps []*transport.Fingerprint) []*transport.Fingerprint {
 	return fps
 }
 
+// runtimeProxies 是 SetProxies 落下的运行时覆盖；nil = 没有覆盖，用配置文件的。
+var runtimeProxies atomic.Pointer[[]string]
+
+// effectiveProxies 返回这一轮建池要用的代理列表，以及它是不是来自运行时覆盖。
+func effectiveProxies(c *Config) []string {
+	if p := runtimeProxies.Load(); p != nil {
+		return *p
+	}
+	return c.Proxies
+}
+
 // resolveProxies 建代理拨号器，**至少一个元素**（nil 表示直连）。
 func resolveProxies(c *Config) ([]*proxyEndpoint, error) {
+	configured := effectiveProxies(c)
 	var out []*proxyEndpoint
-	for _, raw := range c.Proxies {
+	for _, raw := range configured {
 		u := strings.TrimSpace(raw)
 		if u == "" {
 			continue
@@ -621,11 +720,11 @@ func resolveProxies(c *Config) ([]*proxyEndpoint, error) {
 	}
 
 	if len(out) == 0 {
-		if len(c.Proxies) > 0 && !c.AllowDirect {
+		if len(configured) > 0 && !c.AllowDirect {
 			return nil, ErrNoUsableProxy
 		}
-		if len(c.Proxies) > 0 {
-			log.Warnf("配置的 %d 个代理一个都不可用，按 allow_direct=true 退回直连 —— 出站会带上本机的真实 IP", len(c.Proxies))
+		if len(configured) > 0 {
+			log.Warnf("配置的 %d 个代理一个都不可用，按 allow_direct=true 退回直连 —— 出站会带上本机的真实 IP", len(configured))
 		}
 		out = append(out, nil) // 直连
 	}
@@ -633,7 +732,27 @@ func resolveProxies(c *Config) ([]*proxyEndpoint, error) {
 }
 
 // RedactProxy 去掉代理 URL 里的密码再印。日志会进文件、进工单、进截图。
+//
+// ★★ ss/ssr **整条都不能印**。它们的凭据不在 `@` 前面 —— 标准写法是
+// `ss://<一大段 base64>#节点名`，那段 base64 里就是 `method:password@host:port`。
+// 按 `@` 打码的老写法对它完全无效：`@` 找不到就原样返回，于是口令进了日志。
+// 这里只保留能对人有用的部分：协议 + 节点名（`#` 后面那段是机场起的名字，
+// 不是凭据），主机名也一并隐去 —— 它同样是这条订阅的身份。
 func RedactProxy(raw string) string {
+	if scheme, rest, ok := strings.Cut(raw, "://"); ok {
+		switch strings.ToLower(scheme) {
+		case "ss", "ssr":
+			if _, tag, found := strings.Cut(rest, "#"); found && tag != "" {
+				// 节点名是 URL 转义过的（机场爱用 emoji 和空格）。这一行是这个
+				// 功能最主要的诊断出口，印一串 %F0%9F%87%AD 等于没印。
+				if un, err := url.QueryUnescape(tag); err == nil && un != "" {
+					tag = un
+				}
+				return scheme + "://***#" + tag
+			}
+			return scheme + "://***"
+		}
+	}
 	at := strings.LastIndex(raw, "@")
 	if at < 0 {
 		return raw

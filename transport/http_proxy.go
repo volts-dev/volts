@@ -13,6 +13,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 
 	"golang.org/x/net/http2"
@@ -60,6 +61,18 @@ type (
 // proxyUrlStr must provide Scheme and Host, may provide credentials and port.
 // Example: https://username:password@golang.org:443
 func NewProxyDialer(proxyURLStr string, UserAgent string) (proxy.Dialer, error) {
+	// ss/ssr 在 url.Parse 之前分流。
+	//
+	// ★ 它们的"标准"写法是 `ss://<一大段 base64>#节点名` —— 整个凭据、主机、端口
+	// 都在那段 base64 里，url.Parse 会把它当成 Host，于是下面按 Scheme 分派的
+	// 逻辑一个字都用不上。实现见 ss_proxy.go。
+	if scheme, rest, ok := strings.Cut(proxyURLStr, "://"); ok {
+		switch strings.ToLower(scheme) {
+		case "ss", "ssr":
+			return newShadowsocksDialer(strings.ToLower(scheme), rest)
+		}
+	}
+
 	proxyURL, err := url.Parse(proxyURLStr)
 	if err != nil {
 		return nil, err
@@ -103,7 +116,10 @@ func NewProxyDialer(proxyURLStr string, UserAgent string) (proxy.Dialer, error) 
 	case "":
 		return nil, errors.New("specify scheme explicitly (https://)")
 	default:
-		return nil, errors.New("scheme " + proxyURL.Scheme + " is not supported")
+		// ★ 列出支持的协议。订阅里最常见的 vmess/vless/trojan/hysteria2 都会走到
+		// 这里，而一句光秃秃的 "not supported" 会让人以为是 URL 写错了。
+		return nil, errors.New("scheme " + proxyURL.Scheme + " is not supported; " +
+			"supported: http, https, socks5, ss, ssr")
 	}
 
 	client := &connectDialer{
