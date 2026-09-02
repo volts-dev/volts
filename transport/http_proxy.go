@@ -79,9 +79,27 @@ func NewProxyDialer(proxyURLStr string, UserAgent string) (proxy.Dialer, error) 
 		if proxyURL.Port() == "" {
 			proxyURL.Host = net.JoinHostPort(proxyURL.Host, "443")
 		}
-	case "socks5":
-		{
+	case "socks5", "socks5h":
+		// ★ SOCKS5 走的是**另一条**路：它不是 HTTP CONNECT，下面那个 connectDialer
+		// 一个字节都用不上（它的 DialContext 只认 http/https，遇到 socks5 会走到
+		// default 分支返回 "scheme socks5 is not supported"）。
+		//
+		// 这里原本是个空的 case 块 —— 于是 socks5 在这个 switch 里"被接受"，
+		// 拿回一个 connectDialer，**每一次拨号**都失败在一句说它不被支持的错误上。
+		// 声称支持却在运行期报不支持，比一开始就拒绝更难查：调用方看着自己写的
+		// socks5:// URL 被 NewProxyDialer 接受了，只能去怀疑代理服务器。
+		//
+		// socks5h 是 curl 的写法（h = 由代理解析域名）。x/net 的 SOCKS5 拨号器
+		// **本来就**把主机名原样交给代理解析，两者行为一致，所以一并认。
+		if proxyURL.Port() == "" {
+			proxyURL.Host = net.JoinHostPort(proxyURL.Host, "1080")
 		}
+		var auth *proxy.Auth
+		if proxyURL.User != nil && proxyURL.User.Username() != "" {
+			password, _ := proxyURL.User.Password()
+			auth = &proxy.Auth{User: proxyURL.User.Username(), Password: password}
+		}
+		return proxy.SOCKS5("tcp", proxyURL.Host, auth, proxy.Direct)
 	case "":
 		return nil, errors.New("specify scheme explicitly (https://)")
 	default:
