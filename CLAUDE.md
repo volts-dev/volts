@@ -451,12 +451,40 @@ from the fingerprint and `sec-ch-ua` is **derived from the UA**, so there is no 
 to mistype either; family decides whether client hints are sent at all (Chromium only —
 Firefox sends `Sec-Fetch-*` but no hints, Safari sends neither).
 
-Four rules that are easy to get wrong:
+**Being refused is not a transport error.** A 403 arrives over a connection that worked:
+TCP connected, TLS handshook, the peer answered. To `http.RoundTripper` that is a *success*,
+so without special handling a blocked identity keeps hammering the same endpoint with the
+same fingerprint forever — which is precisely the case the disguise exists for. Statuses in
+`RotateOnStatus` (default 403 + 429) therefore mean "this identity is blocked": cool it
+down, **drop its idle connections** (WAF verdicts often bind to the connection/session, so
+keeping it warm makes the cooldown meaningless), and retry on the next identity. When every
+attempt is refused the **last response is handed back verbatim** — the caller needs to see
+the 403 itself, not a rewritten error. 429's `Retry-After` outranks our own backoff (both
+delta-seconds and HTTP-date), still capped at `cooldownMax`.
 
-- **One exit means one identity.** Rotating six browser identities out of a single IP,
-  each polling the same endpoints on the same schedule, is *more* machine-like than one
-  stable identity — real people behind one exit do not behave identically. Identity count
-  follows proxy count; rotation needs proxies to mean anything.
+503 is deliberately **not** in the default list: it is both Cloudflare's challenge page and
+"the site is actually down", and the response cannot tell them apart — treating it as a
+block multiplies traffic to an already-struggling peer by `maxAttempts`.
+
+Five rules that are easy to get wrong:
+
+- **One exit means one identity — but only in steady state.** Rotating six browser
+  identities out of a single IP, each polling the same endpoints on the same schedule, is
+  *more* machine-like than one stable identity — real people behind one exit do not behave
+  identically. So the *active* identity count follows proxy count. The leftover fingerprints
+  are not discarded: they become **reserves**, picked only when every active identity is
+  cooling. Once you have been refused, "looking natural" has already failed, and the choice
+  is between an identity that is certainly blocked and one that might not be. Naming
+  `profiles` explicitly means "these exact ones" — all active, no reserves.
+- **Rotation cannot change the IP.** With no proxy configured all identities share one exit,
+  so an IP-based limiter is unaffected by any amount of fingerprint rotation. The first
+  block logs this once (`warnIfDirect`) rather than letting someone watch a feature that is
+  "already rotating" and guess why nothing improves.
+- **Replay needs `GetBody`, not just an idempotent method.** A refusal means the peer never
+  processed the request, so replaying is *semantically* safe — but `Body` is a one-shot
+  reader, and retrying without rewinding silently sends an **empty** request whose symptom
+  ("the peer says the parameters are wrong") points nowhere near the cause. `http.NewRequest`
+  fills `GetBody` for bytes/strings bodies; anything else is not retried.
 - **A configured proxy is never silently bypassed.** `allow_direct` defaults to false:
   when every proxy is unusable the request fails with `ErrNoUsableProxy` instead of going
   out on the host's own IP. People configure proxies precisely so the far end does not see

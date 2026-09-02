@@ -166,12 +166,11 @@ func TestBuildPersonasPairsByIndex(t *testing.T) {
 	}
 	proxies := []*proxyEndpoint{nil, nil, nil}
 
-	// 3 个出口 × 2 个指纹 = 3 个身份（max），不是 6 个：笛卡尔积会让同一个出口 IP
+	// 3 个出口 × 2 个指纹 = 3 个身份，不是 6 个：笛卡尔积会让同一个出口 IP
 	// 以多个指纹出现，那正是这个包想避免的自相矛盾。
-	n := max(len(fps), len(proxies))
-	var got []*persona
-	for i := 0; i < n; i++ {
-		got = append(got, newPersona(fps[i%len(fps)], i, proxies[i%len(proxies)]))
+	got, reserve := assemble(fps, proxies, false)
+	if len(reserve) != 0 {
+		t.Errorf("指纹比出口少，不该有备用身份，得到 %d 个", len(reserve))
 	}
 	if len(got) != 3 {
 		t.Fatalf("身份数 = %d, 想要 3", len(got))
@@ -192,18 +191,23 @@ func TestBuildPersonasPairsByIndex(t *testing.T) {
 // 同一个 IP 上出现好几个浏览器身份、各自每几分钟查同一批东西，比一个稳定的身份
 // **更**像程序 —— 真实世界里同一个出口后面的人不会做一模一样的事。
 func TestSingleExitGetsSingleIdentity(t *testing.T) {
-	ps, err := buildPersonas(&Config{}) // 无代理、无 profiles
+	ps, reserve, err := buildPersonas(&Config{}) // 无代理、无 profiles
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ps) != 1 {
-		t.Fatalf("单出口建了 %d 个身份，想要 1", len(ps))
+		t.Fatalf("单出口建了 %d 个常备身份，想要 1", len(ps))
+	}
+	// 本测试进程没有注册任何指纹，所以剩下的可用指纹是 0 个，备用也就是 0 个。
+	// 备用身份该有几个由 TestReservesAreTheLeftoverFingerprints 验。
+	if len(reserve) != 0 {
+		t.Fatalf("没有多余的指纹却建了 %d 个备用身份", len(reserve))
 	}
 }
 
 // TestMultipleProxiesGetMultipleIdentities —— 反过来，有几个出口就该有几个身份。
 func TestMultipleProxiesGetMultipleIdentities(t *testing.T) {
-	ps, err := buildPersonas(&Config{
+	ps, _, err := buildPersonas(&Config{
 		Proxies: []string{"socks5://127.0.0.1:1080", "socks5://127.0.0.1:1081", "http://127.0.0.1:8080"},
 	})
 	if err != nil {
@@ -217,13 +221,12 @@ func TestMultipleProxiesGetMultipleIdentities(t *testing.T) {
 // TestExplicitProfilesOverrideSingleIdentity —— 在单 IP 上强行轮换指纹是个需要
 // 说明理由的选择，显式配 profiles 就能拿到。
 func TestExplicitProfilesOverrideSingleIdentity(t *testing.T) {
-	// 本测试进程没有注册任何指纹（没空导入 core/ja3），所以这里只能验证
-	// "显式配置这条路不会被单出口规则吃掉"这一半。
+	// 本测试进程没有注册任何指纹（没空导入 core/ja3），所以这里绕开配置解析、
+	// 直接把假指纹喂给配对规则本身。
 	fps := []*transport.Fingerprint{{Name: "a"}, {Name: "b"}}
-	proxies := []*proxyEndpoint{nil}
-	n := max(len(fps), len(proxies))
-	if n != 2 {
-		t.Fatalf("显式两个指纹应当得到 2 个身份，得到 %d", n)
+	got, _ := assemble(fps, []*proxyEndpoint{nil}, true)
+	if len(got) != 2 {
+		t.Fatalf("显式两个指纹应当得到 2 个身份，得到 %d", len(got))
 	}
 }
 
@@ -246,7 +249,7 @@ func TestPreferDefaultPutsChrome133First(t *testing.T) {
 // 多半正是为了不让对方看见自己的 IP，静默直连把这件事悄悄反过来做了，而且没有任何
 // 迹象。
 func TestProxyConfiguredButUnusableRefusesDirect(t *testing.T) {
-	_, err := buildPersonas(&Config{
+	_, _, err := buildPersonas(&Config{
 		Proxies:     []string{"ftp://nope", "://也不是个URL"},
 		AllowDirect: false,
 	})
@@ -256,7 +259,7 @@ func TestProxyConfiguredButUnusableRefusesDirect(t *testing.T) {
 }
 
 func TestProxyUnusableFallsBackOnlyWhenAllowed(t *testing.T) {
-	ps, err := buildPersonas(&Config{Proxies: []string{"ftp://nope"}, AllowDirect: true})
+	ps, _, err := buildPersonas(&Config{Proxies: []string{"ftp://nope"}, AllowDirect: true})
 	if err != nil {
 		t.Fatalf("allow_direct=true 时不该失败: %v", err)
 	}

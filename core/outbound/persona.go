@@ -3,6 +3,7 @@ package outbound
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -273,22 +274,72 @@ func (p *persona) markSuccess() {
 
 // markFailure 让本身份冷却一段时间，连续失败则指数退避（上限 cooldownMax）。
 func (p *persona) markFailure(base time.Duration) {
-	if base <= 0 {
-		base = 30 * time.Second
-	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failures++
+	p.until = time.Now().Add(backoff(base, p.failures))
+}
 
+// markBlocked —— 对方明确把我们挡回来了（403/429…），不是网络故障。
+//
+// 与 markFailure 只差一点：对方若在 Retry-After 里说了要等多久，就听它的 ——
+// 那是**它自己**给出的解封时间，比任何退避曲线都准。仍然受 cooldownMax 封顶，
+// 理由见 retryAfter 的注释。
+//
+// 失败计数照样加：Retry-After 到期后若还是被挡，退避得能自己长上去。
+func (p *persona) markBlocked(base, retryAfter time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.failures++
 
+	d := retryAfter
+	if d <= 0 {
+		d = backoff(base, p.failures)
+	} else if d > cooldownMax {
+		d = cooldownMax
+	}
+	p.until = time.Now().Add(d)
+}
+
+// backoff 第 n 次连续失败该冷却多久：base 起步，每次翻倍，封顶 cooldownMax。
+func backoff(base time.Duration, n int) time.Duration {
+	if base <= 0 {
+		base = 30 * time.Second
+	}
 	d := base
-	for i := 1; i < p.failures && d < cooldownMax; i++ {
+	for i := 1; i < n && d < cooldownMax; i++ {
 		d *= 2
 	}
 	if d > cooldownMax {
 		d = cooldownMax
 	}
-	p.until = time.Now().Add(d)
+	return d
+}
+
+// closeIdle 扔掉本身份池子里的空闲连接。
+//
+// 被挡回来之后必须做这件事：风控的判定常常绑在**连接/会话**上，而不是每个请求
+// 重新算一次。留着那条已经被打上标记的连接，冷却结束后的第一个请求还是从它出去，
+// 冷却就白等了。
+//
+// ALPN 的探测结果不必扔 —— 用什么协议是站点的属性，与是哪条连接无关。
+func (p *persona) closeIdle() {
+	p.h1.CloseIdleConnections()
+	if p.h2 != nil {
+		p.h2.CloseIdleConnections()
+	}
+}
+
+// status 给 Status() 用的一行描述：身份名，外加还要冷却多久。
+//
+// 冷却是"为什么现在出去的不是它"的唯一解释，不印出来的话诊断端点会显示一个
+// 看着健康、实际一个请求都不承担的身份。
+func (p *persona) status(now time.Time) string {
+	end := p.cooldownEnd()
+	if now.Before(end) {
+		return fmt.Sprintf("%s —— 冷却中，还剩 %s", p.label, end.Sub(now).Round(time.Second))
+	}
+	return p.label
 }
 
 // canonicalAddr 把 URL 变成 host:port，补上 scheme 的默认端口。

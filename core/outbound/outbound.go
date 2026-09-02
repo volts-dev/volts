@@ -58,13 +58,42 @@
 // 的指纹 —— 从"混在人群里"变成"世界上只有你在发"。半吊子的伪装比不伪装更显眼。
 // 要真的做 h2 指纹，得换一个能完全控制帧的 HTTP/2 栈，那是另一个量级的依赖。
 //
+// # 被挡回来之后：403/429 换一个身份重试
+//
+// 网络错误（连不上、握手失败）与**被拒绝**是两件不同的事，而后者才是伪装真正
+// 要面对的：TCP 通了、TLS 握完了、HTTP 也答了 —— 只是答的是 403。站在
+// http.RoundTripper 的角度这是一次**成功**的往返，所以不做特殊处理的话，
+// 一个被风控挡住的身份会带着同一套指纹、同一个 IP 一遍遍地撞上去。
+//
+// 所以 RotateOnStatus 里的状态码被当作"这个身份被挡了"：让它进冷却、**扔掉它
+// 池子里的空闲连接**（风控的判定常常绑在连接/会话上，留着那条连接冷却就白等了），
+// 换下一个身份重发。全部试完还是被挡，就把**最后那个响应**原样交给调用方 ——
+// 它需要看见 403 本身，而不是一句被改写过的错误。
+//
+// 429 的 Retry-After 优先于我们自己的退避：对方说的等待时间比猜的准。
+//
+// ★★ **没有配代理时，换身份换不掉 IP。** 对方若是按 IP 限速，轮换指纹不会有
+// 任何效果 —— 这一点在第一次被挡时会记一条 WARN 说出来，而不是让人对着一个
+// "已经在轮换了"的功能猜为什么没用。
+//
+// # 常备身份与备用身份
+//
+// 上面那条"一个出口一个身份"是**稳态**的规矩：一个真人不会每五分钟换一次浏览器。
+// 但一旦被挡，"看起来自然"这件事已经失败了，此时的选择只剩下"继续用一个确定
+// 不通的身份"和"换一个还有机会的"。
+//
+// 于是多出来的指纹不丢掉，而是作为**备用身份**留着：平时一次都不用（稳态仍然是
+// 一个出口一个身份），只有常备的全在冷却里时才顶上。显式配了 profiles 就没有
+// 备用 —— 那是"我就要这几个"的明确意图。
+//
 // # 配置
 //
 //	"outbound": {
 //	  "profiles": ["chrome_133", "firefox_120"],
 //	  "proxies": ["socks5://127.0.0.1:1086", "http://user:${PROXY_PASS}@gw:8080"],
 //	  "allow_direct": false,
-//	  "cooldown": 30000
+//	  "cooldown": 30000,
+//	  "rotate_on_status": [403, 429]
 //	}
 //
 // 代理密码写 `${PROXY_PASS}` 从环境变量取（config 包的能力）—— 配置文件要进备份
@@ -93,6 +122,7 @@ package outbound
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -133,8 +163,29 @@ type (
 
 		// Cooldown 一个身份连续失败后的冷却起点（之后指数退避，上限 5 分钟）。
 		Cooldown time.Duration
+
+		// RotateOnStatus 哪些状态码算"这个身份被挡了"：让它冷却并换一个身份重发。
+		//
+		// 默认 403（Forbidden，风控拒绝最常见的形态）与 429（Too Many Requests）。
+		//
+		// ★ **503 不在默认里。** 它既是 Cloudflare 挑战页的状态码，也是"站点真的
+		// 挂了"的状态码，而这两者在响应里分不开。把它算作被挡，会在对方本就吃力
+		// 的时候把请求量乘以 maxAttempts —— 明确知道自己面对的是挑战页时再配上。
+		//
+		// 置空 = 关掉这个行为，只在网络错误时换身份。
+		RotateOnStatus []int
 	}
 )
+
+// rotatesOn 判一个状态码算不算"被挡"。
+func (c *Config) rotatesOn(code int) bool {
+	for _, s := range c.RotateOnStatus {
+		if s == code {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	// cooldownMax 是冷却的上限。再长就等于把一个身份永久踢出去 —— 而代理挂掉
@@ -150,9 +201,10 @@ const (
 )
 
 var cfg = &Config{
-	prefix:      "outbound",
-	AllowDirect: false,
-	Cooldown:    30 * time.Second,
+	prefix:         "outbound",
+	AllowDirect:    false,
+	Cooldown:       30 * time.Second,
+	RotateOnStatus: []int{http.StatusForbidden, http.StatusTooManyRequests},
 }
 
 func init() { config.Register(cfg) }
@@ -195,9 +247,13 @@ func Status() []string {
 	if r.buildErr != nil {
 		return []string{"出站不可用: " + r.buildErr.Error()}
 	}
-	out := make([]string, 0, len(r.personas))
+	now := time.Now()
+	out := make([]string, 0, len(r.personas)+len(r.reserves))
 	for _, p := range r.personas {
-		out = append(out, p.label)
+		out = append(out, p.status(now))
+	}
+	for _, p := range r.reserves {
+		out = append(out, "备用 "+p.status(now))
 	}
 	return out
 }
@@ -209,11 +265,17 @@ func Status() []string {
 // 包之间的 init 顺序没有保证。
 type rotator struct {
 	once     sync.Once
-	personas []*persona
+	personas []*persona // 常备：一个出口一个，稳态只用这些
+	reserves []*persona // 备用：只在常备全被挡住时顶上，见包注释
 	buildErr error
 
-	mu   sync.Mutex
-	next int
+	// allDirect 池子里一个代理都没有 —— 换身份换不掉 IP，第一次被挡时要说出来。
+	allDirect bool
+	warnOnce  sync.Once
+
+	mu      sync.Mutex
+	next    int
+	nextRsv int
 }
 
 func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -222,40 +284,143 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, r.buildErr
 	}
 
-	var firstErr error
-	for attempt := 0; attempt < min(maxAttempts, len(r.personas)); attempt++ {
+	var (
+		firstErr error
+		// blocked 是最近一次被挡回的响应。全部身份都被挡时它就是要交还给调用方的
+		// 那个 —— 在此之前每换一次身份都要把上一个关掉，否则每次被挡就漏一条连接。
+		blocked *http.Response
+	)
+	release := func() {
+		if blocked != nil {
+			blocked.Body.Close()
+			blocked = nil
+		}
+	}
+
+	for attempt := 0; attempt < r.attempts(); attempt++ {
 		// ctx 已经没了就不必再换身份重试 —— 换谁都来不及，而且会把一条"超时"
 		// 掩盖成"三个代理都连不上"。
 		if err := req.Context().Err(); err != nil {
+			if blocked != nil {
+				return blocked, nil // 已经拿到的答复比一句 ctx 超时有用
+			}
 			if firstErr != nil {
 				return nil, firstErr
 			}
 			return nil, err
 		}
 
+		// 重发前把 body 倒回去。改的是**副本** —— RoundTripper 的契约是不得修改
+		// 传进来的 Request，调用方（乃至 http.Client 的重定向逻辑）还持有它。
+		attemptReq := req
+		if attempt > 0 && req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				break
+			}
+			attemptReq = req.Clone(req.Context())
+			attemptReq.Body = body
+		}
+
 		p := r.pick()
-		rsp, err := p.roundTrip(req)
-		if err == nil {
+		rsp, err := p.roundTrip(attemptReq)
+
+		switch {
+		case err != nil:
+			p.markFailure(cfg.Cooldown)
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Dbgf("出站身份 %s 失败（第 %d 次尝试）: %v", p.label, attempt+1, err)
+
+		case cfg.rotatesOn(rsp.StatusCode):
+			// 对方答了，答的是"不行"。这在 RoundTripper 眼里是一次成功的往返，
+			// 不特殊处理的话这个身份会带着同一套指纹一遍遍撞上去。
+			p.markBlocked(cfg.Cooldown, retryAfter(rsp, time.Now()))
+			p.closeIdle()
+			r.warnIfDirect(rsp.StatusCode)
+			log.Dbgf("出站身份 %s 被挡回 HTTP %d（第 %d 次尝试），换一个身份", p.label, rsp.StatusCode, attempt+1)
+			release()
+			blocked = rsp
+
+		default:
 			p.markSuccess()
+			release()
 			return rsp, nil
 		}
-		p.markFailure(cfg.Cooldown)
-		if firstErr == nil {
-			firstErr = err
-		}
-		log.Dbgf("出站身份 %s 失败（第 %d 次尝试）: %v", p.label, attempt+1, err)
 
-		// RoundTrip 拿到 error 就意味着**没有**响应，请求没被对方处理过，重放是
-		// 安全的 —— 但只在没有 body 的情况下：body 是个只能读一次的 Reader，
-		// 第二次拨号时它已经空了，重放会静默发出一个空请求。
-		if req.Body != nil || req.GetBody != nil {
+		if !replayable(req) {
 			break
 		}
+	}
+
+	if blocked != nil {
+		return blocked, nil
 	}
 	return nil, firstErr
 }
 
-// pick 取下一个身份：轮转，跳过冷却中的。
+// attempts 一次请求最多试几个身份：身份不够就别虚张声势地重试同一个。
+func (r *rotator) attempts() int {
+	return min(maxAttempts, len(r.personas)+len(r.reserves))
+}
+
+// replayable —— 换个身份重发这次请求安全吗？
+//
+// 语义上总是安全的：RoundTrip 返回错误意味着请求没被对方处理过，而被 403/429
+// 挡回来意味着对方看了头就拒了，同样没有处理。问题只在**能不能**：Body 是个
+// 一次性的 Reader，第二次拨号时它已经空了，重发会静默送出一个空请求 ——
+// 除非 GetBody 在（http.NewRequest 对 bytes/strings/文件之外的 body 会自己填好
+// 它），那就能重新要一份。
+func replayable(req *http.Request) bool {
+	return req.Body == nil || req.GetBody != nil
+}
+
+// retryAfter 读 Retry-After 头，读不到就回 0（用我们自己的退避）。
+//
+// 对方说的等待时间比我们猜的准：猜短了立刻再吃一次拒绝，猜长了白白停掉一个出口。
+// 两种写法都认 —— 秒数（"120"）与 HTTP 日期。
+//
+// ★ 仍然受 cooldownMax 封顶（在 markBlocked 里）：一个出故障的或被劫持的响应
+// 不该能把一个身份停掉一整天。对方真要我们等更久，下一次拒绝会让退避自己长上去。
+func retryAfter(rsp *http.Response, now time.Time) time.Duration {
+	v := strings.TrimSpace(rsp.Header.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+// warnIfDirect —— 池子里一个代理都没有时，"换了身份"这件事换不掉 IP。
+//
+// 说一次就够（配置问题，不是事件），但必须说：一个已经在轮换指纹的功能没起作用，
+// 而原因在配置里而不是代码里 —— 不说的话只能靠猜。
+func (r *rotator) warnIfDirect(code int) {
+	if !r.allDirect {
+		return
+	}
+	r.warnOnce.Do(func() {
+		log.Warnf("被对方挡回 HTTP %d 后换了身份，但**出口 IP 没变** —— "+
+			"没有配 outbound.proxies 时能轮换的只有 TLS 指纹与 UA。"+
+			"若对方是按 IP 限速，换多少个指纹都不会有效果。", code)
+	})
+}
+
+// pick 取下一个身份：先在常备里轮转，跳过冷却中的；常备全在冷却里才动用备用。
 //
 // ★ 全部在冷却时**不返回 nil**，而是挑冷却最早到期的那个照样用。一个把 100% 出口
 // 都摘掉的熔断器，比它要防的故障更糟（同 volts selector 里那条"全部熔断就全放回"）。
@@ -264,38 +429,60 @@ func (r *rotator) pick() *persona {
 	defer r.mu.Unlock()
 
 	now := time.Now()
+	if p, next := nextAvailable(r.personas, r.next, now); p != nil {
+		r.next = next
+		return p
+	}
+	if p, next := nextAvailable(r.reserves, r.nextRsv, now); p != nil {
+		r.nextRsv = next
+		return p
+	}
+
 	var soonest *persona
-	for i := 0; i < len(r.personas); i++ {
-		p := r.personas[(r.next+i)%len(r.personas)]
-		if p.available(now) {
-			r.next = (r.next + i + 1) % len(r.personas)
-			return p
-		}
+	for _, p := range r.all() {
 		if soonest == nil || p.cooldownEnd().Before(soonest.cooldownEnd()) {
 			soonest = p
 		}
 	}
-	r.next = (r.next + 1) % len(r.personas)
 	return soonest
 }
 
+// nextAvailable 从 start 开始找第一个不在冷却里的，并返回下一轮的起点。
+func nextAvailable(ps []*persona, start int, now time.Time) (*persona, int) {
+	for i := 0; i < len(ps); i++ {
+		p := ps[(start+i)%len(ps)]
+		if p.available(now) {
+			return p, (start + i + 1) % len(ps)
+		}
+	}
+	return nil, start
+}
+
+func (r *rotator) all() []*persona {
+	out := make([]*persona, 0, len(r.personas)+len(r.reserves))
+	out = append(out, r.personas...)
+	return append(out, r.reserves...)
+}
+
 func (r *rotator) build() {
-	personas, err := buildPersonas(cfg)
+	active, reserve, err := buildPersonas(cfg)
 	if err != nil {
 		r.buildErr = err
 		log.Errf("出站客户端不可用: %v", err)
 		return
 	}
-	r.personas = personas
+	r.personas, r.reserves = active, reserve
 
-	labels := make([]string, 0, len(personas))
-	for _, p := range personas {
+	r.allDirect = allDirect(r.all())
+	labels := make([]string, 0, len(active))
+	for _, p := range active {
 		labels = append(labels, p.label)
 	}
-	log.Dbgf("出站身份池 %d 个: %s", len(personas), strings.Join(labels, ", "))
+	log.Dbgf("出站身份池 %d 个: %s（另有 %d 个备用身份，只在被挡回时启用）",
+		len(active), strings.Join(labels, ", "), len(reserve))
 }
 
-// buildPersonas 把配置摊成一组身份。
+// buildPersonas 把配置摊成常备身份与备用身份。
 //
 // 配对规则是**按下标轮着配**，不是笛卡尔积：3 个指纹 × 4 个代理得到 4 个身份，
 // 不是 12 个。笛卡尔积的问题是同一个出口 IP 会以多个指纹出现 —— 那正是这个包
@@ -304,34 +491,55 @@ func (r *rotator) build() {
 // UA 也跟着下标走：第 n 个身份用该指纹的第 n 条 UA（不同平台）。于是"两个身份
 // 用同一个指纹但不同平台"是自然发生的，而不必额外配置。
 //
-// ★★ **没有代理时默认只建一个身份。**
+// ★★ **常备身份数 = 出口数。**
 //
 // 这条反直觉，但想一遍就清楚：轮换的价值在于让对方**以为是不同的人**，而"不同的
 // 人"首先意味着不同的 IP。同一个 IP 上出现 6 个浏览器身份，各自每 5 分钟查同一批
 // 型号 —— 那比一个稳定的身份**更**像程序，因为真实世界里同一个出口后面的 6 个人
-// 不会做一模一样的事。
+// 不会做一模一样的事。所以有几个代理就建几个身份，只有一个出口（直连）就一个。
 //
-// 所以：有几个代理就建几个身份（一个出口一个身份，各自自洽）；只有一个出口
-// （直连）就一个身份。要在单 IP 上强行轮换指纹，显式配 profiles 即可 —— 那是
-// 一个需要说明理由的选择，不该是默认。
-func buildPersonas(c *Config) ([]*persona, error) {
+// ★★ **剩下的指纹不丢，留作备用身份**（见包注释）。上面那条是稳态的规矩，而
+// 一旦被 403/429 挡回来，"看起来自然"已经失败了，此时继续用一个确定不通的身份
+// 才是唯一确定没有结果的选择。备用身份平时一次都不会被 pick 到。
+//
+// 显式配了 profiles 就全部是常备、没有备用 —— 那是"我就要这几个"的明确意图，
+// 不该被单出口规则吃掉，也不该有它没点名的身份在背后顶上。
+func buildPersonas(c *Config) (active, reserve []*persona, err error) {
 	fps := resolveFingerprints(c)
 	proxies, err := resolveProxies(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// 单出口 + 没有显式点名指纹 → 只留一个身份，理由见上。
-	if len(proxies) == 1 && proxies[0] == nil && len(c.Profiles) == 0 && len(fps) > 1 {
-		fps = fps[:1]
-	}
+	active, reserve = assemble(fps, proxies, len(c.Profiles) > 0)
+	return active, reserve, nil
+}
 
-	n := max(len(fps), len(proxies))
-	out := make([]*persona, 0, n)
+// assemble 是上面那套配对规则本身，与配置解析分开只为能拿假指纹直接验它。
+//
+// explicit = 调用方显式点名了 profiles。
+func assemble(fps []*transport.Fingerprint, proxies []*proxyEndpoint, explicit bool) (active, reserve []*persona) {
+	n := len(proxies)
+	if explicit && len(fps) > n {
+		n = len(fps)
+	}
 	for i := 0; i < n; i++ {
-		out = append(out, newPersona(fps[i%len(fps)], i, proxies[i%len(proxies)]))
+		active = append(active, newPersona(fps[i%len(fps)], i, proxies[i%len(proxies)]))
 	}
-	return out, nil
+	for i := n; i < len(fps); i++ {
+		reserve = append(reserve, newPersona(fps[i], i, proxies[i%len(proxies)]))
+	}
+	return active, reserve
+}
+
+// allDirect 池子里一个代理都没有 —— 换身份换不掉 IP。
+func allDirect(ps []*persona) bool {
+	for _, p := range ps {
+		if p.out != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveFingerprints 返回要用的指纹，**至少一个元素**（nil 表示"不伪装"）。
