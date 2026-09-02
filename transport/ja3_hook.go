@@ -68,6 +68,22 @@ func ja3Dialer() Ja3DialFunc {
 	return ja3Dial
 }
 
+// Ja3Dialer 返回已注册的 JA3 握手实现；没有注册则返回 nil。
+//
+// 给**本包之外**要自己拼 TLS 连接的调用方用 —— 典型是把指纹伪装塞进一个标准
+// net/http 的 Transport（`DialTLSContext`），那条路不经过 Dial。
+//
+// ★ 它存在的意义是让上层**不必依赖 utls**：拿 dialer 只需要 import 本包（volts
+// 已经在依赖树里了），启用则是在 main 里空导入一次
+// `_ "github.com/volts-dev/volts/ja3"`。这样 JA3 的可选性一路保持到最上层，
+// 而不是每个想用指纹的仓都被迫把 utls 写进自己的 go.mod。
+//
+// 返回 nil 时**不要静默退回普通 TLS** —— 那会让伪装悄悄失效而调用方以为自己
+// 伪装了。要么报错（同 ErrJa3NotRegistered），要么明确地按"不伪装"走。
+func Ja3Dialer() Ja3DialFunc {
+	return ja3Dialer()
+}
+
 // INegotiatedProtocol 由完成了 ALPN 协商的 TLS 连接实现。
 //
 // 用于替代对具体 TLS 实现类型的断言：调用方只关心"协商出了什么协议"，
