@@ -106,6 +106,13 @@ func newConfig(opts ...Option) *Config {
 	if cfg.Broker == nil {
 		if bk := broker.Use(cfg.BrokerType, broker.WithConfigPrefixName(cfg.String()), broker.Addrs(cfg.BrokerHost)); bk != nil {
 			cfg.Init(WithBroker(bk))
+
+			// 把它定为进程默认 broker：只有 server 这份会被注入真 registry
+			// （WithRegistry 那条路）并在 Start 里被 Start()。库代码拿的是
+			// broker.Default() —— 不认领的话它们拿到的是另一个实例，registry
+			// 停在 Nop、端口没监听，发布静默丢消息、订阅收不到任何东西。
+			// 调用方要自带 broker，在 volts.New 之后再 SetDefault 一次即可。
+			broker.SetDefault(bk)
 		}
 	}
 

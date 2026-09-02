@@ -67,13 +67,21 @@ type (
 
 var (
 	DefaultAddress = "127.0.0.1:0"
+
+	// DefaultBroadcastVersion 是「广播订阅」在 registry 里的版本号标记。
+	//
+	// 订阅方把它写进 registry.Service.Version，发布方靠比对这个字符串决定
+	// 「投给全部节点」还是「按 queue group 随机投一个」。因此它是**跨进程契约**：
+	// 集群里所有进程必须用同一个值，改它等于分裂集群（改了的进程发的消息，
+	// 没改的进程会当成 queue 组员只收到一部分）。
+	DefaultBroadcastVersion = "broadcast"
 )
 
 func NewConfig(opts ...Option) *Config {
 	cfg := &Config{
 		//Config: config.Default(),
 		Name:             "default",
-		BroadcastVersion: "broadcast",
+		BroadcastVersion: DefaultBroadcastVersion,
 		RegisterTTL:      time.Minute,
 		RegisterInterval: time.Second * 30,
 	}

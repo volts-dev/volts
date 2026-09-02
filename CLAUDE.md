@@ -193,6 +193,51 @@ Two rules that are easy to get wrong:
 When every node of a service is tripped the filter **fails open** and returns them all: a
 breaker that removes 100% of capacity is worse than the failure it guards against.
 
+### Broker: one instance per process
+
+`broker.Use(name, opts...)` caches instances. The key is the **resolved** backend name
+(an empty or unregistered name falls back to `http`), plus `name-addr` when the caller
+supplied a real address. A caller with no usable address gets the bare-name slot — which
+is how `broker.Default()` and a `server` with no `BrokerHost` come to hold the *same*
+object. That sharing is load-bearing, not an optimization:
+
+- **Only the server's broker is given a real registry** (`server/config.go`'s
+  `WithRegistry` → `cfg.Broker.Init(broker.WithRegistry(r))`). A second instance keeps the
+  `NopRegistry` it was born with, whose `GetService` returns `(nil, nil)` — so `Publish`
+  iterates an empty node list, sends nothing, and **returns nil**. Both sides' logs stay
+  clean; the only symptom is "the UI didn't update", which looks exactly like "the business
+  event never fired". `server` therefore also calls `broker.SetDefault(bk)`, since library
+  code reaches the bus through `broker.Default()`.
+- **Only the server's broker is `Start()`ed**, so only it has a listening port. Subscribing
+  on an unstarted broker would register a node whose port is `0`; `httpBroker.Subscribe`
+  now `Start()`s first (it is idempotent) rather than publishing an unreachable address.
+- A port of `0` is not an identity (`usableAddr`): `DefaultAddress` is `127.0.0.1:0` and
+  `WithBroker` copies `bk.Address()` back into `cfg.BrokerHost`, so once that value lands in
+  config.json the next boot would look like an "addressed" call and split the process again.
+
+Sharing has a cost to know: the first `Stop()` closes the broker for every holder, and
+`Address()` is read during a later server's assembly — hence the exit goroutine's address
+restore must happen **under the lock and before the `ch` handshake**, or a `Close`→`Start`
+sequence overwrites the newly bound address with `127.0.0.1:0`.
+
+**Broadcast is a cross-process string contract.** A subscription without a queue registers
+`registry.Service.Version = config.BroadcastVersion` (default `broadcast`, i.e.
+`broker.DefaultBroadcastVersion`), and the publisher decides fan-out-to-all vs. pick-one by
+comparing that string, so both sides must read one source — `httpBroker.broadcastVersion()`.
+They used not to: the publisher compared a package var `"volts.http.broadcast"`, so **every**
+broadcast subscription fell into the queue-group branch and went to one random node. It is
+invisible in-process, because all subscriptions of one broker share a single `node.Id` and
+one POST fans out to every local handler — which is why `TestConcurrentSubBroker` stayed
+green. Regressions: `broker/http/broadcast_test.go`, `broker/use_instance_test.go`.
+
+Still true after those fixes, and the reason to pick topics carefully: delivery is
+**at-most-once** (`event.Ack()` is a no-op and `SubscribeConfig.AutoAck` is unimplemented),
+the retry backlog is 64 messages in the publisher's memory and truncates the *newest* first,
+`Publish` is fire-and-forget and never checks the response status, and
+`httpSubscriber.Topic()` / `Config()` / `Unsubscribe()` are stubs (a subscription cannot be
+cancelled). Use it for cache-invalidation-shaped signals — the message carries a key and the
+receiver re-reads the source of truth — not for messages that must not be lost.
+
 ### Registry-Driven Route Updates
 
 `router/router.go:store()` is called on Registry watch events and periodic refresh (every 60s) to update proxy routes pointing to discovered services. Discovered nodes that resolve to **this process itself** are dropped by `filteSelf` (matched by `node.Id` **or** `addr.LocalFormat`-normalized address, so a same-address / different-id node from a `Debug()` port collision is still caught); otherwise a self-referential proxy route would replace the local handler and loop back into `127.0.0.1:<own port>` until ephemeral ports exhaust (`connect: can't assign requested address`). `router/reverse_proxy_loopguard.go` is the registry-independent runtime backstop: a hop-depth header caps any forwarding cycle, and a self-address short-circuit (via `http.LocalAddrContextKey`) refuses to dial the process's own listen port. That short-circuit matches loopback **and** any local NIC address — the registry stores NIC addresses (`192.168.x.x:35999`), and when `LocalFormat`'s fold-to-loopback misses (10s IP cache vs. a network switch, or a zombie node advertising a stale IP) a loopback-only check is bypassed entirely.

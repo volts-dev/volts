@@ -59,7 +59,6 @@ type (
 var (
 	DefaultSubPath   = "/_sub"
 	serviceName      = "volts.http.broker"
-	broadcastVersion = "volts.http.broadcast"
 	registerTTL      = time.Minute
 	registerInterval = time.Second * 30
 )
@@ -165,6 +164,21 @@ func New(opts ...broker.Option) broker.IBroker {
 
 func (self *httpBroker) String() string {
 	return self.config.Name
+}
+
+// broadcastVersion 返回「广播」在 registry 里的版本号标记。
+//
+// 发布端（Publish 里的 switch）和订阅端（Subscribe 写 Service.Version）**必须走
+// 同一个取值口**。此前两边各有一份：订阅端写 config.BroadcastVersion（默认
+// "broadcast"），发布端却比对包变量 broadcastVersion（"volts.http.broadcast"）。
+// 两者永不相等，于是每一条广播订阅都掉进 default 分支被当成 queue group，
+// **随机投给一个节点** —— 默认配置下 Publish 从来没有真正广播过，且没有任何报错。
+// 回归：TestPublish_BroadcastReachesAllNodes。
+func (self *httpBroker) broadcastVersion() string {
+	if v := self.config.BroadcastVersion; v != "" {
+		return v
+	}
+	return broker.DefaultBroadcastVersion
 }
 
 func (self *httpBroker) Init(opts ...broker.Option) error {
@@ -345,10 +359,21 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 		//}
 
 		// close transport listener
-		ch <- ts.Close()
+		cerr := ts.Close()
 
-		// swap back address
+		// 还原为配置里的地址（Start 时被换成了实际绑定到的那个），好让下一次
+		// Start 重新绑定。两件事都要在 ch 之前做完：
+		//   1. **必须持锁**。Address() 在 RLock 下读它，而 broker 现在是进程级
+		//      共享实例（broker.Use 的裸名缓存），Close 之后仍会被下一台 server
+		//      装配时读到 —— 锁外写就是 -race 里那条 WARNING。
+		//   2. **必须早于 ch 的握手**。Close() 阻塞在 <-ch，收到就返回；若还原
+		//      发生在其后，一次 Close→Start 的重启序列会把新绑定的地址覆盖回
+		//      "127.0.0.1:0"，之后 Subscribe 就往 registry 里注册一个 :0 的节点。
+		self.Lock()
 		self.address = addr
+		self.Unlock()
+
+		ch <- cerr
 	}, func(err error) { log.Err(err.Error()) })
 
 	// set cache
@@ -482,7 +507,7 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 
 			switch service.Version {
 			// broadcast version means broadcast to all nodes
-			case broadcastVersion:
+			case self.broadcastVersion():
 				var success bool
 
 				// publish to all nodes
@@ -532,6 +557,13 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 }
 
 func (self *httpBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.ISubscriber, error) {
+	// 订阅前必须先监听。未 Start 时 self.address 还是 DefaultAddress（端口 0），
+	// 注册进 registry 的就是一个 ":0" 的节点：发布方照常 POST 过去、照常失败，
+	// 而 Publish 是 fire-and-forget，两端都不会有任何日志。Start 幂等，已启动直接返回。
+	if err := self.Start(); err != nil {
+		return nil, err
+	}
+
 	var err error
 	var host, port string
 	scfg := broker.NewSubscribeOptions(opts...)
@@ -567,7 +599,7 @@ func (self *httpBroker) Subscribe(topic string, handler broker.Handler, opts ...
 	// check for queue group or broadcast queue
 	version := scfg.Queue
 	if len(version) == 0 {
-		version = self.config.BroadcastVersion
+		version = self.broadcastVersion()
 	}
 
 	service := &registry.Service{
