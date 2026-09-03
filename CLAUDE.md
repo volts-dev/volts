@@ -501,7 +501,23 @@ server for exactly these "connects fine, data is garbage" failures.
 `RedactProxy` blanks ss/ssr URLs **entirely** (keeping only the `#name`): their credentials
 are not in front of the `@`, so the old `@`-based redaction left passwords in the log.
 
-Six rules that are easy to get wrong:
+**Concurrent requests on one line are a signal in themselves.** A line is an identity —
+fingerprint + UA + exit IP. Two requests in flight on one line means either a second TCP
+connection (h1) or a second stream (h2), i.e. one browser on one IP issuing several
+unrelated requests in the same millisecond. So each identity carries a gate of capacity 1
+(`MaxPerIdentity`): a request that cannot get a slot **waits** rather than going out on an
+identity that is already busy. Parallelism is not cancelled, it is redirected onto other
+lines — which is also the right way to add throughput: add an exit, don't widen the gate.
+The slot is held until the **response body is closed**, not until headers arrive (the
+connection is still transferring when headers come back, so releasing early lets the next
+request overlap after all); `maxSlotHold` is the leak valve for a caller that forgets
+`Body.Close()`, because turning a leaked connection into a permanently wedged line would
+be a worse failure than the one being prevented. `outbound.Concurrency()` reports
+lines × gate, so a caller's own worker pool can be sized to it — a pool wider than that
+just queues, and that queueing is charged to the caller's own ctx, which turns "we
+oversubscribed" into what looks like "the peer timed out".
+
+Seven rules that are easy to get wrong:
 
 - **One exit means one identity — but only in steady state.** Rotating six browser
   identities out of a single IP, each polling the same endpoints on the same schedule, is
@@ -511,6 +527,11 @@ Six rules that are easy to get wrong:
   cooling. Once you have been refused, "looking natural" has already failed, and the choice
   is between an identity that is certainly blocked and one that might not be. Naming
   `profiles` explicitly means "these exact ones" — all active, no reserves.
+- **Reserves cover *blocked*, never merely *busy*.** Falling through to a reserve because
+  the active is mid-request would put two identities on one exit simultaneously — which is
+  the "same IP, several browsers" pattern this package argues against. A busy active is
+  worth waiting for; a blocked one is not. Regression:
+  `TestBusyActivesDoNotPromoteReserves`.
 - **Rotation cannot change the IP.** With no proxy configured all identities share one exit,
   so an IP-based limiter is unaffected by any amount of fingerprint rotation. The first
   block logs this once (`warnIfDirect`) rather than letting someone watch a feature that is

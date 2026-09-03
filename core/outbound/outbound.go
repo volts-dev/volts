@@ -76,6 +76,25 @@
 // 任何效果 —— 这一点在第一次被挡时会记一条 WARN 说出来，而不是让人对着一个
 // "已经在轮换了"的功能猜为什么没用。
 //
+// # 同一条线路上不并行
+//
+// 一条**线路** = 一个身份 = 指纹 + UA + 出口 IP。同一条线路上同时在飞多个请求，
+// 是最容易招来拒绝的形态之一：h1 会为第二个请求另拨一条 TCP 连接，h2 会在同一
+// 条连接上开第二条流 —— 对方看到的都是"同一个浏览器、同一个 IP，在同一毫秒里
+// 发出了几个互不相关的请求"。真人不会这样用浏览器，而这恰恰是很容易统计的信号。
+//
+// 所以每个身份有一个容量为 1 的闸门（MaxPerIdentity 可调）：占不到位置的请求
+// **去等**，而不是从同一个身份上再发一个。并发不是被取消了，而是被引到别的线路
+// 上去 —— 有几个代理就有几条线路，它们之间照常并行。这也是"加并发"的正确做法：
+// 加一个出口，而不是把闸门开大。
+//
+// ★ 位置留到**响应体关闭**才放，不是拿到响应头就放：响应头回来时那条连接还在
+// 传 body，此刻放行下一个请求，对方看到的仍然是两个重叠的请求。代价是忘了
+// Close(Body) 的调用方会堵住一条线路 —— maxSlotHold 到点强行放开兜底。
+//
+// ★ 没有代理时只有一条线路，于是**所有出站请求都串行**。这是有意的：一个出口
+// 上的并发本来就无处可藏。嫌慢就把轮询周期调长，或者配一个代理出口。
+//
 // # 常备身份与备用身份
 //
 // 上面那条"一个出口一个身份"是**稳态**的规矩：一个真人不会每五分钟换一次浏览器。
@@ -93,7 +112,8 @@
 //	  "proxies": ["socks5://127.0.0.1:1086", "http://user:${PROXY_PASS}@gw:8080"],
 //	  "allow_direct": false,
 //	  "cooldown": 30000,
-//	  "rotate_on_status": [403, 429]
+//	  "rotate_on_status": [403, 429],
+//	  "max_per_identity": 1
 //	}
 //
 // 代理密码写 `${PROXY_PASS}` 从环境变量取（config 包的能力）—— 配置文件要进备份
@@ -120,7 +140,10 @@
 package outbound
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -176,8 +199,24 @@ type (
 		//
 		// 置空 = 关掉这个行为，只在网络错误时换身份。
 		RotateOnStatus []int
+
+		// MaxPerIdentity 同一个身份上允许**同时在飞**的请求数。默认 1，即同一条
+		// 线路上的请求串行发出。见包注释「同一条线路上不并行」。
+		//
+		// ★ 调大它就是在把那件招来拒绝的事又做回去。会需要调的只有一种情况：
+		// 明确知道对方不介意并发，而串行让采集赶不上周期 —— 那也该先把
+		// 周期调长，或者加一个代理出口（多一条线路才是真正的加并发）。
+		MaxPerIdentity int
 	}
 )
+
+// slots 每个身份的并发闸门容量。0（没配）当 1。
+func (c *Config) slots() int {
+	if c.MaxPerIdentity > 0 {
+		return c.MaxPerIdentity
+	}
+	return 1
+}
 
 // rotatesOn 判一个状态码算不算"被挡"。
 func (c *Config) rotatesOn(code int) bool {
@@ -200,13 +239,30 @@ const (
 	// 试太多只会把这一次请求的预算耗光而不换来任何信息 —— 三个身份都连不上，
 	// 第四个大概率也一样，那是网络或对方的问题，不是身份的问题。
 	maxAttempts = 3
+
+	// idlePoll 等一个身份空出来时的重试间隔。
+	//
+	// 释放会主动通知（r.idle），这个轮询只是**兜底**：冷却到期没有事件可通知
+	// （它是一个时刻，不是一个动作），而丢一次通知就等于把一个请求挂到 ctx 超时。
+	idlePoll = 50 * time.Millisecond
 )
+
+// maxSlotHold 一个位置最多被占多久。
+//
+// ★ 这是**泄漏阀，不是策略**。位置在响应体关闭时才释放（见 slotBody），于是
+// 一个忘了 Close 的调用方会把整条线路永久堵死 —— 在只有一个身份的部署里就是
+// 整个出站永久堵死。原本忘关 Body 只泄漏一条连接，不该被本包升级成停摆。
+// 到点强行放掉，宁可退回并发也不要卡死。
+//
+// 是变量只为让测试能把它调短，生产路径上没有任何地方改它。
+var maxSlotHold = 2 * time.Minute
 
 var cfg = &Config{
 	prefix:         "outbound",
 	AllowDirect:    false,
 	Cooldown:       30 * time.Second,
 	RotateOnStatus: []int{http.StatusForbidden, http.StatusTooManyRequests},
+	MaxPerIdentity: 1,
 }
 
 func init() { config.Register(cfg) }
@@ -263,6 +319,27 @@ func Status() []string {
 		out = append(out, "备用 "+p.status(now))
 	}
 	return out
+}
+
+// Concurrency 报告本客户端**真正允许**同时在飞的出站请求数：常备线路数 × 每条
+// 线路的闸门容量。
+//
+// 存在的理由：调用方普遍有自己的工作池（"同时侦测几个站点"），而闸门让那个数字
+// 不再等于实际并发 —— 池子开 4 而只有 1 条线路时，3 个 worker 只是在排队，
+// 且这段排队**算在调用方自己的 ctx 里**，于是一个本来够用的超时会变成"对方超时"，
+// 而真正的原因在我们这边。用这个数去定池子大小，两边就对齐了。
+//
+// ★ 它会变：SetProxies 换一批出口之后线路数就变了。别在启动时读一次存起来。
+func Concurrency() int {
+	r := Client().Transport.(*rotator)
+	r.once.Do(r.build)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.buildErr != nil || len(r.personas) == 0 {
+		return 1
+	}
+	return len(r.personas) * cfg.slots()
 }
 
 // SetProxies 用**运行时**的代理列表替换配置文件里那一份，并立刻重建身份池。
@@ -347,6 +424,11 @@ type rotator struct {
 	allDirect bool
 	warned    bool
 
+	// idle 有身份放开位置时被通知一次（缓冲 1，非阻塞发）。等位置的 goroutine
+	// 靠它立刻醒来，而不是干等一个轮询周期。build 里建；nil 也是安全的
+	// （select 在 nil channel 上不会选中），只是退化成纯轮询。
+	idle chan struct{}
+
 	mu      sync.Mutex
 	next    int
 	nextRsv int
@@ -399,11 +481,24 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 			attemptReq.Body = body
 		}
 
-		p := r.pick()
+		// 占住一条线路。等不到位置时 ctx 已经到期，与"对方不回话"是两件事，
+		// acquire 的错误里说清了是哪一件。
+		p, done, err := r.acquire(req.Context())
+		if err != nil {
+			if blocked != nil {
+				return blocked, nil
+			}
+			if firstErr != nil {
+				return nil, firstErr
+			}
+			return nil, err
+		}
+
 		rsp, err := p.roundTrip(attemptReq)
 
 		switch {
 		case err != nil:
+			done()
 			p.markFailure(cfg.Cooldown)
 			if firstErr == nil {
 				firstErr = err
@@ -413,6 +508,7 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 		case cfg.rotatesOn(rsp.StatusCode):
 			// 对方答了，答的是"不行"。这在 RoundTripper 眼里是一次成功的往返，
 			// 不特殊处理的话这个身份会带着同一套指纹一遍遍撞上去。
+			done()
 			p.markBlocked(cfg.Cooldown, retryAfter(rsp, time.Now()))
 			p.closeIdle()
 			r.warnIfDirect(rsp.StatusCode)
@@ -423,6 +519,15 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 		default:
 			p.markSuccess()
 			release()
+			// ★ 位置**留到响应体关闭**才放，不是拿到响应头就放。响应头回来时
+			// 这条连接还在传 body：此刻放行下一个请求，h1 会另拨一条连接、h2 会
+			// 开第二条流 —— 对方看到的仍然是同一个身份上的两个并发请求，闸门就
+			// 白关了。兜底见 maxSlotHold。
+			if rsp.Body != nil {
+				rsp.Body = holdSlot(rsp.Body, done)
+			} else {
+				done()
+			}
 			return rsp, nil
 		}
 
@@ -434,7 +539,35 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 	if blocked != nil {
 		return blocked, nil
 	}
+	if firstErr == nil {
+		// 走到这里而一次都没试过，只可能是身份池是空的。**返回 (nil, nil) 会让
+		// net/http 自己 panic**，那时候堆栈里已经没有本包了。
+		firstErr = errors.New("core/outbound: 身份池是空的，一个请求都发不出去")
+	}
 	return nil, firstErr
+}
+
+// holdSlot 把"放开线路上的位置"绑到响应体的关闭上，并加一道超时兜底。
+func holdSlot(body io.ReadCloser, done func()) io.ReadCloser {
+	timer := time.AfterFunc(maxSlotHold, done)
+	return &slotBody{
+		ReadCloser: body,
+		done: func() {
+			timer.Stop()
+			done()
+		},
+	}
+}
+
+type slotBody struct {
+	io.ReadCloser
+	done func()
+}
+
+// Close 先放位置再关 body：关 body 可能报错，而位置无论如何都得放开。
+func (b *slotBody) Close() error {
+	defer b.done()
+	return b.ReadCloser.Close()
 }
 
 // attempts 一次请求最多试几个身份：身份不够就别虚张声势地重试同一个。
@@ -506,42 +639,113 @@ func (r *rotator) warnIfDirect(code int) {
 		"若对方是按 IP 限速，换多少个指纹都不会有效果。", code)
 }
 
-// pick 取下一个身份：先在常备里轮转，跳过冷却中的；常备全在冷却里才动用备用。
+// acquire 选一个身份**并占住它在那条线路上的位置**，占不到就等。
+//
+// 等待是这个功能的全部意义：拿不到位置意味着这个身份上已经有一个请求在飞，
+// 而"再从同一个身份发一个"正是要禁掉的事。等不到就让 ctx 说了算 —— 但错误里
+// 必须说出等的是什么，否则调用方只看到一句 context deadline exceeded，
+// 与"对方不回话"分不开。
+func (r *rotator) acquire(ctx context.Context) (*persona, func(), error) {
+	start := time.Now()
+	for {
+		if p, done := r.take(time.Now()); p != nil {
+			return p, done, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf("core/outbound: 等了 %s 也没等到空闲的出站身份"+
+				"（同一个身份上的请求是串行发出的，见 outbound 包注释）: %w",
+				time.Since(start).Round(time.Millisecond), ctx.Err())
+		case <-r.idle:
+		case <-time.After(idlePoll):
+		}
+	}
+}
+
+// take 试一次：先在常备里轮转，跳过冷却中的与正忙的；常备取不到才动用备用。
+// 取到时返回一个**只放一次**的释放函数；一个都取不到回 (nil, nil)。
 //
 // ★ 全部在冷却时**不返回 nil**，而是挑冷却最早到期的那个照样用。一个把 100% 出口
 // 都摘掉的熔断器，比它要防的故障更糟（同 volts selector 里那条"全部熔断就全放回"）。
-func (r *rotator) pick() *persona {
+// 但这条 fail-open 只对**冷却**成立，不对**忙**成立：忙不是容量被摘掉，是"这条线路
+// 上已经有一个请求"，等一下就有 —— 为它 fail-open 等于把闸门拆了。
+func (r *rotator) take(now time.Time) (*persona, func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := time.Now()
-	if p, next := nextAvailable(r.personas, r.next, now); p != nil {
+	if p, next := takeFrom(r.personas, r.next, now); p != nil {
 		r.next = next
-		return p
-	}
-	if p, next := nextAvailable(r.reserves, r.nextRsv, now); p != nil {
-		r.nextRsv = next
-		return p
+		return p, r.releaser(p)
 	}
 
+	// ★ 常备里还有没在冷却的（只是忙）—— 等它，别动用备用。备用是"常备被挡住了"
+	// 的例外，不是"常备正忙"的例外：为了一时的忙就把备用拉进来，稳态立刻退回成
+	// "同一个 IP 上轮换多个指纹"，而那正是这个包论证过的、比不轮换更可疑的做法。
+	if anyAvailable(r.personas, now) {
+		return nil, nil
+	}
+
+	if p, next := takeFrom(r.reserves, r.nextRsv, now); p != nil {
+		r.nextRsv = next
+		return p, r.releaser(p)
+	}
+	if anyAvailable(r.reserves, now) {
+		return nil, nil
+	}
+
+	// 全在冷却里：挑冷却最早到期、且还空着的那个。
 	var soonest *persona
 	for _, p := range r.all() {
+		if p.busy() {
+			continue
+		}
 		if soonest == nil || p.cooldownEnd().Before(soonest.cooldownEnd()) {
 			soonest = p
 		}
 	}
-	return soonest
+	if soonest != nil && soonest.tryAcquire() {
+		return soonest, r.releaser(soonest)
+	}
+	return nil, nil
 }
 
-// nextAvailable 从 start 开始找第一个不在冷却里的，并返回下一轮的起点。
-func nextAvailable(ps []*persona, start int, now time.Time) (*persona, int) {
+// anyAvailable 这批里还有没有不在冷却里的（忙不忙不算）。**调用方须持有 r.mu。**
+func anyAvailable(ps []*persona, now time.Time) bool {
+	for _, p := range ps {
+		if p.available(now) {
+			return true
+		}
+	}
+	return false
+}
+
+// takeFrom 从 start 开始占住第一个既不在冷却里、又还空着的身份。
+func takeFrom(ps []*persona, start int, now time.Time) (*persona, int) {
 	for i := 0; i < len(ps); i++ {
 		p := ps[(start+i)%len(ps)]
-		if p.available(now) {
+		if p.available(now) && p.tryAcquire() {
 			return p, (start + i + 1) % len(ps)
 		}
 	}
 	return nil, start
+}
+
+// releaser 返回本次占位的释放函数。
+//
+// ★ 必须**每次占位一个**，不能做成 p.release() 那样的方法：闸门容量大于 1 时，
+// 一个多放了一次的调用方会把别人的位置也放掉，于是并发悄悄变成 N+1。sync.Once
+// 让重复调用（slotBody.Close 与 maxSlotHold 兜底会一起触发）是安全的。
+func (r *rotator) releaser(p *persona) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-p.sem
+			select {
+			case r.idle <- struct{}{}:
+			default: // 已经有一个未被取走的通知，够了
+			}
+		})
+	}
 }
 
 // all 返回常备 + 备用。**调用方必须已持有 r.mu。**
@@ -552,6 +756,8 @@ func (r *rotator) all() []*persona {
 }
 
 func (r *rotator) build() {
+	r.idle = make(chan struct{}, 1)
+
 	active, reserve, err := buildPersonas(cfg)
 	if err != nil {
 		r.buildErr = err
@@ -598,23 +804,23 @@ func buildPersonas(c *Config) (active, reserve []*persona, err error) {
 		return nil, nil, err
 	}
 
-	active, reserve = assemble(fps, proxies, len(c.Profiles) > 0)
+	active, reserve = assemble(fps, proxies, len(c.Profiles) > 0, c.slots())
 	return active, reserve, nil
 }
 
 // assemble 是上面那套配对规则本身，与配置解析分开只为能拿假指纹直接验它。
 //
-// explicit = 调用方显式点名了 profiles。
-func assemble(fps []*transport.Fingerprint, proxies []*proxyEndpoint, explicit bool) (active, reserve []*persona) {
+// explicit = 调用方显式点名了 profiles；slots = 每条线路的并发闸门容量。
+func assemble(fps []*transport.Fingerprint, proxies []*proxyEndpoint, explicit bool, slots int) (active, reserve []*persona) {
 	n := len(proxies)
 	if explicit && len(fps) > n {
 		n = len(fps)
 	}
 	for i := 0; i < n; i++ {
-		active = append(active, newPersona(fps[i%len(fps)], i, proxies[i%len(proxies)]))
+		active = append(active, newPersona(fps[i%len(fps)], i, proxies[i%len(proxies)], slots))
 	}
 	for i := n; i < len(fps); i++ {
-		reserve = append(reserve, newPersona(fps[i], i, proxies[i%len(proxies)]))
+		reserve = append(reserve, newPersona(fps[i], i, proxies[i%len(proxies)], slots))
 	}
 	return active, reserve
 }

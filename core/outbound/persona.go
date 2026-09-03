@@ -45,6 +45,11 @@ type (
 		h1 *http.Transport
 		h2 *http2.Transport
 
+		// sem 是这条线路上的**并发闸门**，容量 = 允许同时在飞的请求数（默认 1）。
+		// 拿不到位置的请求去等，而不是从同一个身份上再拨一条连接出去 —— 理由见
+		// 包注释「同一条线路上不并行」。
+		sem chan struct{}
+
 		mu       sync.Mutex
 		protos   map[string]string // addr → ALPN 协商结果
 		failures int
@@ -53,12 +58,17 @@ type (
 )
 
 // newPersona 建一个身份。index 决定用该指纹的第几条 UA（不同平台）。
-func newPersona(fp *transport.Fingerprint, index int, out *proxyEndpoint) *persona {
+// slots 是这条线路上允许同时在飞的请求数，<1 一律当 1。
+func newPersona(fp *transport.Fingerprint, index int, out *proxyEndpoint, slots int) *persona {
+	if slots < 1 {
+		slots = 1
+	}
 	p := &persona{
 		fp:     fp,
 		ua:     fp.UserAgent(index), // fp 为 nil 时返回空串，见 Fingerprint.UserAgent
 		out:    out,
 		protos: map[string]string{},
+		sem:    make(chan struct{}, slots),
 	}
 	p.label = personaLabel(fp, p.ua, out)
 
@@ -249,6 +259,24 @@ func (p *persona) setProto(addr, proto string) {
 	p.protos[addr] = proto
 }
 
+// tryAcquire 占住这条线路上的一个位置；占不到说明已经有请求在飞，回 false。
+//
+// 用带缓冲的 channel 而不是计数器 + 条件变量：占位与判满在这里是**同一个动作**，
+// 分成两步就有 TOCTOU —— 两个 goroutine 同时看到"空闲"然后一起发出去，而这正是
+// 要禁掉的那件事。
+func (p *persona) tryAcquire() bool {
+	select {
+	case p.sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// busy 这条线路上是不是已经满了。只用于挑身份时的偏好，不作为占位的判据
+// （那是 tryAcquire 的事）。
+func (p *persona) busy() bool { return len(p.sem) >= cap(p.sem) }
+
 func (p *persona) available(now time.Time) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -330,14 +358,19 @@ func (p *persona) closeIdle() {
 	}
 }
 
-// status 给 Status() 用的一行描述：身份名，外加还要冷却多久。
+// status 给 Status() 用的一行描述：身份名，外加它现在为什么不接活。
 //
-// 冷却是"为什么现在出去的不是它"的唯一解释，不印出来的话诊断端点会显示一个
-// 看着健康、实际一个请求都不承担的身份。
+// 两种"不接活"要分开印：**冷却中**是被挡或失败之后的惩罚（要等），**使用中**是
+// 这条线路上已经有一个请求在飞（不必等太久）。看到一排"使用中"说明并发被闸门
+// 挡住了 —— 那是设计如此，不是故障；看到一排"冷却中"才是真出事了。
+// 不印的话诊断端点会显示一个看着健康、实际一个请求都不承担的身份。
 func (p *persona) status(now time.Time) string {
 	end := p.cooldownEnd()
 	if now.Before(end) {
 		return fmt.Sprintf("%s —— 冷却中，还剩 %s", p.label, end.Sub(now).Round(time.Second))
+	}
+	if p.busy() {
+		return p.label + " —— 使用中"
 	}
 	return p.label
 }

@@ -168,7 +168,7 @@ func TestRetryAfterIgnoresGarbage(t *testing.T) {
 }
 
 func TestMarkBlockedHonorsRetryAfter(t *testing.T) {
-	p := newPersona(nil, 0, nil)
+	p := newPersona(nil, 0, nil, 1)
 	before := time.Now()
 	p.markBlocked(30*time.Second, 2*time.Minute) // 退避第一次只有 30s
 	if d := p.cooldownEnd().Sub(before); d < 119*time.Second || d > 121*time.Second {
@@ -180,7 +180,7 @@ func TestMarkBlockedHonorsRetryAfter(t *testing.T) {
 // 劫持的响应不该能把一个身份永久踢出去。它真要我们等更久，下一次拒绝会让退避自己
 // 长上来。
 func TestMarkBlockedCapsRetryAfter(t *testing.T) {
-	p := newPersona(nil, 0, nil)
+	p := newPersona(nil, 0, nil, 1)
 	before := time.Now()
 	p.markBlocked(30*time.Second, 24*time.Hour)
 	if d := p.cooldownEnd().Sub(before); d > cooldownMax+time.Second {
@@ -200,22 +200,22 @@ func TestReservesOnlyUsedWhenActivesAreBlocked(t *testing.T) {
 	r.reserves = []*persona{labelled("R0"), labelled("R1")}
 
 	for i := 0; i < 5; i++ {
-		if got := r.pick(); got != r.personas[0] {
+		if got := pick(t, r); got != r.personas[0] {
 			t.Fatalf("第 %d 次就动用了备用身份 %s", i+1, got.label)
 		}
 	}
 
 	r.personas[0].markFailure(time.Minute)
-	if got := r.pick(); got != r.reserves[0] {
+	if got := pick(t, r); got != r.reserves[0] {
 		t.Fatalf("常备冷却后取到 %s，想要 R0", got.label)
 	}
-	if got := r.pick(); got != r.reserves[1] {
+	if got := pick(t, r); got != r.reserves[1] {
 		t.Fatalf("备用身份之间没有轮转，取到 %s", got.label)
 	}
 
 	// 常备一恢复就该回到它 —— 备用只是顶班。
 	r.personas[0].markSuccess()
-	if got := r.pick(); got != r.personas[0] {
+	if got := pick(t, r); got != r.personas[0] {
 		t.Fatalf("常备恢复后仍在用备用身份 %s", got.label)
 	}
 }
@@ -228,10 +228,11 @@ func TestFailsOpenAcrossReserves(t *testing.T) {
 	r.personas[0].markFailure(time.Hour)
 	r.reserves[0].markFailure(time.Minute)
 
-	got := r.pick()
+	got, done := r.take(time.Now())
 	if got == nil {
 		t.Fatal("全部冷却时返回了 nil")
 	}
+	done()
 	if got != r.reserves[0] {
 		t.Errorf("没挑冷却最早到期的那个，取到 %s", got.label)
 	}
@@ -241,13 +242,13 @@ func TestFailsOpenAcrossReserves(t *testing.T) {
 func TestReservesAreTheLeftoverFingerprints(t *testing.T) {
 	fps := []*transport.Fingerprint{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}
 
-	active, reserve := assemble(fps, []*proxyEndpoint{nil}, false)
+	active, reserve := assemble(fps, []*proxyEndpoint{nil}, false, 1)
 	if len(active) != 1 || len(reserve) != 3 {
 		t.Fatalf("单出口：常备 %d 备用 %d，想要 1 和 3", len(active), len(reserve))
 	}
 
 	// 显式点名 profiles = "我就要这几个"：全部常备，不该有它没点名的身份在背后顶上。
-	active, reserve = assemble(fps, []*proxyEndpoint{nil}, true)
+	active, reserve = assemble(fps, []*proxyEndpoint{nil}, true, 1)
 	if len(active) != 4 || len(reserve) != 0 {
 		t.Fatalf("显式点名：常备 %d 备用 %d，想要 4 和 0", len(active), len(reserve))
 	}
@@ -345,7 +346,7 @@ func TestStatusShowsCooldown(t *testing.T) {
 }
 
 func labelled(name string) *persona {
-	p := newPersona(nil, 0, nil)
+	p := newPersona(nil, 0, nil, 1)
 	p.label = name
 	return p
 }
@@ -399,7 +400,7 @@ func TestRotationChangesTheIdentityOnTheWire(t *testing.T) {
 		{Name: "chrome", Family: transport.FamilyChrome, UserAgents: []string{uaChrome133}},
 		{Name: "firefox", Family: transport.FamilyFirefox, UserAgents: []string{uaFirefox}},
 	}
-	active, _ := assemble(fps, []*proxyEndpoint{nil, nil}, false)
+	active, _ := assemble(fps, []*proxyEndpoint{nil, nil}, false, 1)
 
 	rsp, err := (&http.Client{Transport: testRotator(active...)}).Get(srv.URL)
 	if err != nil {
@@ -448,7 +449,7 @@ func TestEachIdentityHasItsOwnConnectionPool(t *testing.T) {
 		{Name: "chrome", Family: transport.FamilyChrome, UserAgents: []string{uaChrome133}},
 		{Name: "firefox", Family: transport.FamilyFirefox, UserAgents: []string{uaFirefox}},
 	}
-	active, _ := assemble(fps, []*proxyEndpoint{nil, nil}, false)
+	active, _ := assemble(fps, []*proxyEndpoint{nil, nil}, false, 1)
 
 	rsp, err := (&http.Client{Transport: testRotator(active...)}).Get(srv.URL)
 	if err != nil {

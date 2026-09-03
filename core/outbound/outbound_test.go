@@ -168,7 +168,7 @@ func TestBuildPersonasPairsByIndex(t *testing.T) {
 
 	// 3 个出口 × 2 个指纹 = 3 个身份，不是 6 个：笛卡尔积会让同一个出口 IP
 	// 以多个指纹出现，那正是这个包想避免的自相矛盾。
-	got, reserve := assemble(fps, proxies, false)
+	got, reserve := assemble(fps, proxies, false, 1)
 	if len(reserve) != 0 {
 		t.Errorf("指纹比出口少，不该有备用身份，得到 %d 个", len(reserve))
 	}
@@ -224,7 +224,7 @@ func TestExplicitProfilesOverrideSingleIdentity(t *testing.T) {
 	// 本测试进程没有注册任何指纹（没空导入 core/ja3），所以这里绕开配置解析、
 	// 直接把假指纹喂给配对规则本身。
 	fps := []*transport.Fingerprint{{Name: "a"}, {Name: "b"}}
-	got, _ := assemble(fps, []*proxyEndpoint{nil}, true)
+	got, _ := assemble(fps, []*proxyEndpoint{nil}, true, 1)
 	if len(got) != 2 {
 		t.Fatalf("显式两个指纹应当得到 2 个身份，得到 %d", len(got))
 	}
@@ -295,7 +295,7 @@ func TestNoFingerprintsDegradesToPlainTLS(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newPersona(nil, 0, nil)
+	p := newPersona(nil, 0, nil, 1)
 	p.h1.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	cli := &http.Client{Timeout: 10 * time.Second, Transport: testRotator(p)}
@@ -325,7 +325,7 @@ func TestRotatorRoundRobin(t *testing.T) {
 	r := testRotatorN(3)
 	seen := map[string]int{}
 	for i := 0; i < 6; i++ {
-		seen[r.pick().label]++
+		seen[pick(t, r).label]++
 	}
 	if len(seen) != 3 {
 		t.Fatalf("6 次取到 %d 个不同身份，想要 3", len(seen))
@@ -342,7 +342,7 @@ func TestRotatorSkipsCooling(t *testing.T) {
 	r.personas[0].markFailure(time.Minute)
 
 	for i := 0; i < 4; i++ {
-		if got := r.pick(); got != r.personas[1] {
+		if got := pick(t, r); got != r.personas[1] {
 			t.Fatalf("第 %d 次取到了冷却中的身份", i+1)
 		}
 	}
@@ -350,7 +350,7 @@ func TestRotatorSkipsCooling(t *testing.T) {
 	r.personas[0].markSuccess() // 一次成功即完全恢复
 	seen := map[*persona]bool{}
 	for i := 0; i < 4; i++ {
-		seen[r.pick()] = true
+		seen[pick(t, r)] = true
 	}
 	if len(seen) != 2 {
 		t.Fatal("markSuccess 之后该身份没有回到轮转里")
@@ -363,17 +363,18 @@ func TestRotatorFailsOpen(t *testing.T) {
 	r.personas[0].markFailure(time.Hour)
 	r.personas[1].markFailure(time.Minute)
 
-	got := r.pick()
+	got, done := r.take(time.Now())
 	if got == nil {
 		t.Fatal("全部冷却时返回了 nil")
 	}
+	done()
 	if got != r.personas[1] {
 		t.Error("没挑冷却最早到期的那个")
 	}
 }
 
 func TestCooldownBacksOffAndCaps(t *testing.T) {
-	p := newPersona(nil, 0, nil)
+	p := newPersona(nil, 0, nil, 1)
 	var last time.Duration
 	for i := 0; i < 12; i++ {
 		before := time.Now()
@@ -398,17 +399,56 @@ func TestCooldownBacksOffAndCaps(t *testing.T) {
 func testRotatorN(n int) *rotator {
 	ps := make([]*persona, 0, n)
 	for i := 0; i < n; i++ {
-		p := newPersona(nil, i, nil)
+		p := newPersona(nil, i, nil, 1)
 		p.label = string(rune('A' + i))
 		ps = append(ps, p)
 	}
 	return testRotator(ps...)
 }
 
+// pick 取一个身份并**立刻放开**它在那条线路上的位置。
+//
+// 下面那些用例测的是轮转顺序与冷却，不是并发闸门（闸门在 serial_test.go）——
+// 不放开的话第二次 take 会认为所有身份都在忙，于是它们测的东西全变了。
+func pick(t *testing.T, r *rotator) *persona {
+	t.Helper()
+	p, done := r.take(time.Now())
+	if p == nil {
+		t.Fatal("take 一个身份都没取到")
+	}
+	done()
+	return p
+}
+
 // testRotator 把 once 先消耗掉，好让 RoundTrip 用给定的身份而不去读配置文件
 // （go test 下 config.AppPath 指向可执行文件的临时目录，读不到 config.json）。
 func testRotator(ps ...*persona) *rotator {
-	r := &rotator{personas: ps}
+	r := &rotator{personas: ps, idle: make(chan struct{}, 1)}
 	r.once.Do(func() {})
 	return r
+}
+
+// TestConcurrencyIsLinesTimesGate —— 调用方拿它定自己工作池的大小。
+//
+// 报大了，多出来的 worker 只是在闸门前排队，而那段排队算在调用方自己的 ctx 里 ——
+// 于是一个本来够用的超时会变成"对方超时"，真正的原因却在我们这边。
+func TestConcurrencyIsLinesTimesGate(t *testing.T) {
+	r := &rotator{personas: []*persona{labelled("A"), labelled("B")}, idle: make(chan struct{}, 1)}
+	r.once.Do(func() {})
+
+	old := *cfg
+	t.Cleanup(func() { *cfg = old })
+
+	prev := Client().Transport
+	Client().Transport = r
+	t.Cleanup(func() { Client().Transport = prev })
+
+	cfg.MaxPerIdentity = 1
+	if got := Concurrency(); got != 2 {
+		t.Fatalf("2 条线路 × 闸门 1 = %d，想要 2", got)
+	}
+	cfg.MaxPerIdentity = 3
+	if got := Concurrency(); got != 6 {
+		t.Fatalf("2 条线路 × 闸门 3 = %d，想要 6", got)
+	}
 }
