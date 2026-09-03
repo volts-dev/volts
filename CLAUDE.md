@@ -193,6 +193,46 @@ Two rules that are easy to get wrong:
 When every node of a service is tripped the filter **fails open** and returns them all: a
 breaker that removes 100% of capacity is worse than the failure it guards against.
 
+### Endpoint-aware node selection
+
+A service name can be served by **more than one process**, and those processes do not
+necessarily expose the same endpoints: another binary blank-imports the module (and
+therefore registers the same service name) while being compiled earlier, or a rolling
+upgrade has old and new binaries live at once. `registry.Service` carries `Endpoints`
+per **registration entry**, but `etcd.GetService` used to merge entries by `Version`
+alone — nodes were all appended while `Endpoints` kept only the *first* entry's. The
+node↔endpoint mapping was gone, so `RpcClient` round-robined onto a process that does
+not implement the path and got `rpc status NotFound: server returned no detail`, which
+is indistinguishable from "this deployment does not have that module" and leaves both
+sides' logs clean. Measured on the real stack (2026-09-03, vectors): ~50% of calls to
+one endpoint failed, alternating.
+
+Two halves, both required:
+
+- **`registry.EndpointsKey`** — merging is keyed by version **plus** a fingerprint of
+  the endpoint set (`GetService` and `registryCacher.update`). Processes with identical
+  endpoint sets — one binary's replicas, i.e. the overwhelming majority — still merge
+  into a single `Service`, so the shape only changes when it actually has to. Splitting
+  costs nothing at balance time: the strategies flatten every `Service`'s nodes before
+  picking (`selector/strategy.go`). `ListServices` deliberately does **not** use it —
+  that call answers "what services exist", where a duplicated name would only make
+  callers double-count.
+- **`selector.FilterEndpointIfKnown`** — `RpcClient.next()` now filters candidates by
+  the endpoint being called. It **fails open** when nobody advertises that name:
+  endpoint naming is the caller's convention (volts itself uses `/model.method`) and
+  older registrations may not report endpoints at all, so a strict filter would turn
+  "I don't recognise this name" into "the service is unavailable" — the same trade-off
+  as the breaker's all-tripped case. The test is "someone advertises it and you don't",
+  never "you don't advertise it".
+
+`registryCacher.Register` must keep scanning past entries whose nodes are not ours: a
+`(name, version)` can now match several `Service` records, and a sibling process's may
+come first — `break`ing on it would register an empty node set as "self", after which
+`filteSelf` no longer recognises this process's own nodes.
+
+Regressions: `registry/endpoints_key_test.go`, `registry/cacher_endpoint_split_test.go`,
+`selector/filter_test.go`.
+
 ### Broker: one instance per process
 
 `broker.Use(name, opts...)` caches instances. The key is the **resolved** backend name

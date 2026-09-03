@@ -365,7 +365,18 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 
 	for _, n := range rsp.Kvs {
 		if sn := decode(n.Value); sn != nil {
-			s, ok := serviceMap[sn.Version]
+			// ★ 分组键是 版本 + **端点集指纹**，不只是版本。
+			//
+			// 一个服务名下可以有好几个注册项（别的进程 blank-import 了这个模块，
+			// 于是它也注册了这个服务名）。只按版本合并的话，nodes 全并进来而
+			// endpoints 只留第一个注册项的 —— 节点与端点的对应关系就此丢失，
+			// 客户端会把请求轮询到不实现该端点的进程上，得到一句
+			// NotFound，而它与"没装那个模块"长得一模一样。详见
+			// registry.EndpointsKey 的注释（含真栈实测）。
+			//
+			// 端点集相同的注册项照旧合并成一个 Service，所以常态下形状不变。
+			key := sn.Version + "\x00" + registry.EndpointsKey(sn.Endpoints)
+			s, ok := serviceMap[key]
 			if !ok {
 				s = &registry.Service{
 					Name:      sn.Name,
@@ -373,7 +384,7 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 					Metadata:  sn.Metadata,
 					Endpoints: sn.Endpoints,
 				}
-				serviceMap[s.Version] = s
+				serviceMap[key] = s
 			}
 
 			s.Nodes = append(s.Nodes, sn.Nodes...)

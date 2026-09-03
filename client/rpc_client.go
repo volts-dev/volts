@@ -335,9 +335,15 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 		}, nil
 	}
 	// only get the things that are of http protocol
-	selectOptions := append(opts.SelectOptions, selector.WithFilter(
-		selector.FilterLabel("protocol", r.config.Transport.Protocol()),
-	))
+	selectOptions := append(opts.SelectOptions,
+		selector.WithFilter(selector.FilterLabel("protocol", r.config.Transport.Protocol())),
+		// ★ 再按**端点**筛一道：同一个服务名下的进程不一定都实现了这条路径
+		// （别的进程 blank-import 了这个模块，或者滚动升级期间新旧二进制并存）。
+		// 不筛的话请求会轮询到不认识它的那个进程，回一句 NotFound —— 与"这个
+		// 部署没装那个模块"长得一模一样，而且是间歇性的。没有任何节点声明过这个
+		// 名字时它原样放行，见 FilterEndpointIfKnown。
+		selector.WithFilter(selector.FilterEndpointIfKnown(request.Method())),
+	)
 
 	// get next nodes from the selector
 	next, err := r.config.Selector.Select(service, selectOptions...)

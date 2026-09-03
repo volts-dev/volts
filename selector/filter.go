@@ -66,6 +66,46 @@ func FilterEndpoint(name string) Filter {
 	}
 }
 
+// FilterEndpointIfKnown 只保留**声明了该端点**的服务；一个都没声明时原样放行。
+//
+// # 它挡的是什么
+//
+// 一个服务名下可以有好几个进程，而它们的端点集不一定相同：别的进程
+// blank-import 了这个模块（于是也注册了这个服务名）而它编译得早，或者滚动升级
+// 期间新旧二进制并存。此前客户端只按 protocol 过滤，于是会把请求轮询到那个不
+// 实现该端点的进程上，得到一句 `rpc status NotFound: server returned no detail`
+// —— 与"这个部署根本没装那个模块"长得一模一样。真栈实测的成功率是 50%，两边
+// 日志都是干净的。详见 registry.EndpointsKey 的注释。
+//
+// # 为什么"一个都没声明时放行"
+//
+// 端点名的写法由调用方决定（volts 自己是 `/model.method`，别的调用方可能传
+// `Greeter.Hello`），而老版本服务注册时可能压根没上报 endpoints。这两种情况下
+// 严格过滤会把**全部**节点滤掉，把"我不认识这个名字"变成"这个服务不可用" ——
+// 那比不过滤糟得多。与熔断器全员失败时 fail open 是同一条取舍。
+//
+// 判据因此是"有人声明了、而你没有"，不是"你没声明"。
+func FilterEndpointIfKnown(name string) Filter {
+	return func(old []*registry.Service) []*registry.Service {
+		if name == "" {
+			return old
+		}
+		out := make([]*registry.Service, 0, len(old))
+		for _, service := range old {
+			for _, ep := range service.Endpoints {
+				if ep != nil && ep.Name == name {
+					out = append(out, service)
+					break
+				}
+			}
+		}
+		if len(out) == 0 {
+			return old // 没有任何一个声明过它 —— 这个名字对这个服务没有意义
+		}
+		return out
+	}
+}
+
 // FilterLabel is a label based Select Filter which will
 // only return services with the label specified.
 func FilterLabel(key string, vals ...string) Filter {

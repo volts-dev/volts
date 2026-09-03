@@ -265,10 +265,17 @@ func (c *registryCacher) update(res *Result) {
 	}
 
 	// existing service found
+	//
+	// ★ 认的是 版本 + **端点集指纹**，不只是版本。一个服务名下可以有好几个进程
+	// （别的进程 blank-import 了这个模块），只按版本认的话，两个端点集不同的进程
+	// 会被并成一条，并且 endpoints 被**最后一次事件**覆盖 —— 节点与端点的对应
+	// 关系丢失，请求轮询到不实现该端点的进程上就是一句 NotFound。
+	// 详见 EndpointsKey 的注释。
+	key := EndpointsKey(res.Service.Endpoints)
 	var service *Service
 	var index int
 	for i, s := range services {
-		if s.Version == res.Service.Version {
+		if s.Version == res.Service.Version && EndpointsKey(s.Endpoints) == key {
 			service = s
 			index = i
 		}
@@ -651,11 +658,19 @@ func (c *registryCacher) Register(s *Service, opts ...Option) error {
 	}
 
 	for _, ss := range services {
-		if ss.Name == s.Name && ss.Version == s.Version {
-			// 只取回读结果里**属于本进程**的节点。注册中心是按服务名合并的，
-			// 同名服务的其它进程节点也在里面；整份存进 localServices 会让
-			// filteSelf 把真正的远端节点当成自己剔掉，那个服务就永远没有代理路由。
-			c.trackLocalService(withNodesOf(ss, s))
+		if ss.Name != s.Name || ss.Version != s.Version {
+			continue
+		}
+		// 只取回读结果里**属于本进程**的节点。注册中心是按服务名合并的，
+		// 同名服务的其它进程节点也在里面；整份存进 localServices 会让
+		// filteSelf 把真正的远端节点当成自己剔掉，那个服务就永远没有代理路由。
+		//
+		// ★ 一个 (name, version) 现在可能对应**好几条** Service：端点集不同的
+		// 进程各自成一条（见 EndpointsKey）。挑不出本进程节点的那些是兄弟进程的，
+		// 跳过继续找 —— 早年这里是 `break`，遇到兄弟进程排在前面就会把一个空节点
+		// 集登记成"我自己"，filteSelf 从此认不出自己的节点。
+		if local := withNodesOf(ss, s); len(local.Nodes) > 0 {
+			c.trackLocalService(local)
 			break
 		}
 	}

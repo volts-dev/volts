@@ -131,3 +131,57 @@ func TestFilterTrasportNilMetadata(t *testing.T) {
 		t.Fatalf("无 metadata 的节点不应匹配任何传输，得到 %v", nodeIds(out))
 	}
 }
+
+// ── 端点过滤 ───────────────────────────────────────────────────────────────
+//
+// 挡的是"一个服务名下有好几个进程，而它们的端点集不同"：别的进程 blank-import
+// 了这个模块（于是也注册了这个服务名）而它编译得早，或者滚动升级期间新旧二进制
+// 并存。不筛的话请求会轮询到不实现该端点的那个进程，回一句 NotFound —— 与"这个
+// 部署没装那个模块"长得一模一样。真栈实测成功率 50%，两边日志都是干净的。
+
+func svcWithEndpoints(nodeId string, eps ...string) *registry.Service {
+	list := make([]*registry.Endpoint, 0, len(eps))
+	for _, e := range eps {
+		list = append(list, &registry.Endpoint{Name: e})
+	}
+	return &registry.Service{
+		Name:      "calendar",
+		Version:   "latest",
+		Endpoints: list,
+		Nodes:     []*registry.Node{{Id: nodeId, Address: nodeId + ":1"}},
+	}
+}
+
+func TestFilterEndpointIfKnown_DropsNodesWithoutIt(t *testing.T) {
+	services := []*registry.Service{
+		svcWithEndpoints("calendar-svc", "/calendar.event.read", "/mail.activity.systray_get_activities"),
+		svcWithEndpoints("hr-svc", "/calendar.event.read"), // 编译于该端点加入之前
+	}
+
+	out := FilterEndpointIfKnown("/mail.activity.systray_get_activities")(services)
+	if len(out) != 1 {
+		t.Fatalf("要 1 条声明了该端点的 service，得到 %d", len(out))
+	}
+	if out[0].Nodes[0].Id != "calendar-svc" {
+		t.Fatalf("留下的应该是实现了该端点的那个进程，得到 %s", out[0].Nodes[0].Id)
+	}
+}
+
+// 一个都没声明时**放行**：端点名的写法由调用方决定，老服务也可能压根没上报
+// endpoints。严格过滤会把"我不认识这个名字"变成"这个服务不可用"，比不过滤糟得多
+// ——与熔断器全员失败时 fail open 是同一条取舍。
+func TestFilterEndpointIfKnown_FailsOpenWhenNobodyAdvertises(t *testing.T) {
+	services := []*registry.Service{
+		svcWithEndpoints("a", "/calendar.event.read"),
+		svcWithEndpoints("b", "/calendar.event.read"),
+	}
+
+	out := FilterEndpointIfKnown("Greeter.Hello")(services)
+	if len(out) != 2 {
+		t.Fatalf("没有任何节点声明过这个名字时要原样放行，得到 %d 条", len(out))
+	}
+
+	if out := FilterEndpointIfKnown("")(services); len(out) != 2 {
+		t.Fatalf("空端点名同样放行，得到 %d 条", len(out))
+	}
+}
