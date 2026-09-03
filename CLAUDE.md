@@ -140,7 +140,7 @@ passes an `Upgrade` request through to an upstream and never parses a frame.
 | `transport/` | Wire-level HTTP and TCP transports, TLS/ACME, message framing with CRC32, proxy dialers (HTTP CONNECT / SOCKS5 / Shadowsocks / ShadowsocksR) |
 | `codec/` | Serialization adapters (JSON via stdlib encoding/json, MsgPack, Protobuf, Gob, bytes) |
 | `registry/` | Service registration/discovery — Consul, ETCD, mDNS, or in-memory backends |
-| `broker/` | Pub/sub messaging — HTTP or in-memory backends |
+| `broker/` | Pub/sub messaging — HTTP or in-memory backends; `broker/redis` (opt-in blank import) adds a Redis Streams backend with real acks and redelivery |
 | `selector/` | Load-balancing strategy over registry nodes, plus per-node failure ejection / circuit breaking (`selector/breaker.go`) |
 | `logger/` | Self-contained leveled logger (writer manager + console writer). **Not** built on zap — `go.uber.org/zap` is pulled in only by `registry/etcd` for clientv3's `LogConfig` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
@@ -310,6 +310,71 @@ returns `(nil, nil)` and memory/etcd return `ErrNotFound` for the same situation
 it through made the same business code start reporting failures when the registry changed.
 
 Regressions: `broker/http/delivery_test.go`.
+
+### broker/redis: swapping the backend swaps the contract
+
+`broker/redis/` keeps messages **in redis, not in the publishing process's memory**. Opt in
+with a blank import, exactly like `registry/etcd` — it is deliberately absent from
+`server`'s import list, so go-redis stays out of binaries that never ask for it:
+
+```go
+import _ "github.com/volts-dev/volts/broker/redis"
+// server.WithBrokerType("redis"), server.WithBrokerHost("redis://:${REDIS_PASSWORD}@host:6379/1")
+```
+
+Three properties invert what the sections above document, so code written against the
+built-in backends is not automatically correct here:
+
+- **Delivery is at-least-once and `IEvent.Ack()` is real** (an `XACK`). `DisableAutoAck()`
+  actually works. Callers now owe idempotency — the exact obligation the http backend
+  explicitly does *not* impose.
+- **Publisher and subscriber need not overlap in time.** The http backend's backlog is 64
+  messages in the publisher's RAM, gone when it exits; here the backlog is the stream itself.
+- **The registry is unused** (`WithRegistry` is a no-op). The whole "two mutually unknown
+  broker instances, one holding a `NopRegistry`, silently dropping every message" failure
+  class does not exist on this backend.
+
+Semantics map onto consumer groups: one topic is one stream; subscriptions sharing a `Queue`
+share one group (messages split across them); a subscription without a queue gets **its own**
+group (every group sees everything).
+
+Rules that are easy to get wrong:
+
+- **Broadcast needs one group per *subscription*, not per process.** A group splits messages
+  internally, so two local broadcast subscriptions sharing one group would each see half —
+  where http's single POST fans out to every local handler. Group names carry a slot index
+  (lowest free), so unsubscribe-then-resubscribe reuses the name, which is what lets a
+  configured `WithBroadcastID` resume its read position across a restart.
+- **Liveness is a heartbeat key, never the consumer's `idle`.** Measured on redis 7.0.4: an
+  `XREADGROUP` that returns nothing does **not** refresh the consumer's seen-time (151ms →
+  209ms across an empty read) and does not even register the consumer. So "no consumers /
+  idle for a day" is precisely what a healthy low-traffic subscriber looks like, and an
+  idle-based sweep destroys live groups. The damage is near-invisible: the read loop's
+  `NOGROUP` branch rebuilds the group at `$`, so the symptom is "every so often a run of
+  messages goes missing". Each broadcast subscriber therefore renews `<stream>:hb:<group>`
+  (throttled to `GroupTTL/4`), and the sweep only destroys broadcast groups whose key has
+  expired. Queue groups are never swept — they are shared, and this process cannot know
+  whether another one still uses them.
+- **`AutoAck` defaults to true, so build the config with `broker.NewSubscribeOptions`.** A
+  hand-rolled `for range opts` over a zero `SubscribeConfig` — which is what `broker/memory`
+  does, harmlessly, since it never reads the field — yields `AutoAck=false`: nothing is ever
+  acked and every message is redelivered after `ClaimMinIdle`. It surfaces as "messages
+  occasionally duplicate", never as a config error.
+- **A handler error must NOT ack** — the opposite of the http backend's rule, because here a
+  real redelivery window exists. `MaxDeliveries` (default 5) then bounds it: a message that
+  can never be handled would otherwise hold the head of the PEL forever, with every genuine
+  retry queued behind it.
+- **`MaxLen` (default 10000, `XADD MAXLEN ~`) is a bounded buffer, not a durable queue.** A
+  subscriber down long enough for its backlog to be trimmed has lost those messages. Same
+  shape of guarantee as the http backend's inbox, just far larger and outside the publisher.
+
+Tests spin up their own `redis-server` on a **unix socket** (no fixed ports; the path is kept
+short because macOS `sun_path` is 104 bytes) and skip when the binary is absent.
+`TestUnsubscribe_StopsDelivery` deliberately uses a *queue* subscription: destroying a
+broadcast group unblocks `XREADGROUP` with `NOGROUP` immediately and the rebuilt group starts
+at `$`, which masks a read loop that never stopped.
+
+Regressions: `broker/redis/redis_test.go`.
 
 ### Registry-Driven Route Updates
 
