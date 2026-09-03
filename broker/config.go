@@ -53,6 +53,11 @@ type (
 	SubscribeConfig struct {
 		// AutoAck defaults to true. When a handler returns
 		// with a nil error the message is acked.
+		//
+		// **内置的两个后端都不读它。** http 后端里唯一的确认通道就是那次 POST
+		// 的响应，消息不落盘也没有重投窗口（投递是 at-most-once，见
+		// broker/http/handler.go 对状态码语义的说明）；memory 后端是同进程直接
+		// 调用。DisableAutoAck() 因此是个不生效的开关，别据它设计需要重投的流程。
 		AutoAck bool
 		// Subscribers with the same queue name
 		// will create a shared subscription where each
@@ -135,6 +140,8 @@ func Addrs(addrs ...string) Option {
 
 // DisableAutoAck will disable auto acking of messages
 // after they have been handled.
+//
+// 内置后端都不实现它，见 SubscribeConfig.AutoAck。
 func DisableAutoAck() SubscribeOption {
 	return func(o *SubscribeConfig) {
 		o.AutoAck = false

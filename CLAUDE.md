@@ -270,13 +270,46 @@ invisible in-process, because all subscriptions of one broker share a single `no
 one POST fans out to every local handler — which is why `TestConcurrentSubBroker` stayed
 green. Regressions: `broker/http/broadcast_test.go`, `broker/use_instance_test.go`.
 
-Still true after those fixes, and the reason to pick topics carefully: delivery is
-**at-most-once** (`event.Ack()` is a no-op and `SubscribeConfig.AutoAck` is unimplemented),
-the retry backlog is 64 messages in the publisher's memory and truncates the *newest* first,
-`Publish` is fire-and-forget and never checks the response status, and
-`httpSubscriber.Topic()` / `Config()` / `Unsubscribe()` are stubs (a subscription cannot be
-cancelled). Use it for cache-invalidation-shaped signals — the message carries a key and the
-receiver re-reads the source of truth — not for messages that must not be lost.
+**The delivery response's status code is the only feedback channel a publisher has**, and
+`broker/http/handler.go` gives it three meanings — get one wrong and the failure is silent
+in a different way each time:
+
+- **4xx = permanently refused** — unparseable message, no `v-topic`, or no subscriber with
+  that `id` (the registry entry is stale: unsubscribed, or the process restarted with a new
+  uuid). Retrying changes nothing, so the publisher drops it rather than replaying a batch
+  of doomed messages ahead of every real one.
+- **5xx = retryable**, kept in the backlog.
+- **2xx = delivered — including when the handler returns an error.** The message *did*
+  arrive; what failed is the application. Answering 5xx would push it back into the backlog,
+  turning "a handler is broken" into "every subsequent message is consumed twice" — and
+  delivery here is at-most-once, so callers owe no idempotency. Handler errors go to
+  `Config().ErrorHandler` (which the http backend previously ignored entirely) or the log,
+  per subscriber; a panicking handler is recovered so it cannot take its siblings' delivery
+  down with it. All of this used to answer 200 unconditionally: a message could be sent,
+  received by nobody, and leave both sides' logs clean.
+
+Delivery is **at-most-once**: `event.Ack()` is a no-op in both built-in backends and
+`SubscribeConfig.AutoAck` / `DisableAutoAck()` are not implemented by either — there is no
+redelivery window to acknowledge. The retry backlog is 64 messages per topic in the
+*publisher's* memory (`maxInboxSize`), drained 8 at a time and **only** by the next
+`Publish` on that same topic — a topic nobody publishes to again never retries — and
+overflow now drops the **oldest**, where it used to keep the oldest 64 and discard each
+newly arriving message. Use this broker for cache-invalidation-shaped signals — the message
+carries a key and the receiver re-reads the source of truth — not for messages that must
+not be lost.
+
+**Unsubscribing deregisters the node only when the topic has no subscribers left.** All
+subscriptions on one topic share a single `node.Id` (`topic + "-" + broker uuid`) and hence
+one registry record, so an unconditional `Deregister` silently removes the whole *process*
+from that topic's delivery list. `Topic()` / `Config()` / `Unsubscribe()` were all stubs
+before — `server.Stop()`'s unsubscribe loop never did anything, and `sub.Config().Queue` was
+a nil dereference on the http backend while working fine on memory.
+
+`Publish` treats `registry.ErrNotFound` as "no subscribers", not as an error: `NopRegistry`
+returns `(nil, nil)` and memory/etcd return `ErrNotFound` for the same situation, so passing
+it through made the same business code start reporting failures when the registry changed.
+
+Regressions: `broker/http/delivery_test.go`.
 
 ### Registry-Driven Route Updates
 

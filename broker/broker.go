@@ -32,6 +32,9 @@ type (
 	IEvent interface {
 		Topic() string
 		Message() *Message
+		// Ack 在内置的 http / memory 后端里都是空实现（恒返回 nil）：
+		// 两者都没有重投窗口，投递是 at-most-once。它留在接口上是给需要确认
+		// 语义的后端（如 NATS/Kafka）用的。
 		Ack() error
 		Error() error
 	}

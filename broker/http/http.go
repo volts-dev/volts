@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -62,6 +63,37 @@ var (
 	registerTTL      = time.Minute
 	registerInterval = time.Second * 30
 )
+
+const (
+	// maxInboxSize 是每个 topic 在发布方内存里保留的重投积压上限。
+	//
+	// 这份积压只活在发布进程的内存里，进程一退就没了 —— 它是"对端刚好在重启"
+	// 这类短暂失败的缓冲，不是持久队列。
+	maxInboxSize = 64
+
+	// maxDrainPerPublish 是每次 Publish 顺带重投的积压条数。
+	//
+	// 积压只在下一次 **同 topic** 的 Publish 时才被带出去重投，没有独立的定时器：
+	// 一个此后再无人发布的 topic，它积压的消息就一直躺在那里。
+	maxDrainPerPublish = 8
+)
+
+// permanentError 标记「对端明确拒绝了这条消息」——重投不会有不同结果。
+//
+// 区分它的意义在于积压队列：把永久失败也存起来，等于每次 Publish 都先把一批
+// 注定失败的旧消息重发一遍（还各带 100ms 的间隔），真正的新消息被排到后面，
+// 而失败原因从头到尾不会变。
+type permanentError struct {
+	err error
+}
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
+func isPermanent(err error) bool {
+	var p *permanentError
+	return errors.As(err, &p)
+}
 
 func init() {
 	broker.Register("http", New)
@@ -449,11 +481,16 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 	// now attempt to get the service
 	self.RLock()
 	s, err := self.registry.GetService(self.config.Name)
-	if err != nil {
-		self.RUnlock()
-		return err
-	}
 	self.RUnlock()
+	if err != nil {
+		// 「没有任何订阅者」不是错误，是 pub/sub 的正常状态，各后端在这里却不一致：
+		// NopRegistry 回 (nil, nil)，memory/etcd 回 ErrNotFound。照原样往上抛会让
+		// 同一段业务代码换个 registry 就开始报"service not found"。统一按空列表处理。
+		if !errors.Is(err, registry.ErrNotFound) {
+			return err
+		}
+		s = nil
+	}
 
 	pub := func(node *registry.Node, t string, b []byte) error {
 		scheme := "http"
@@ -479,10 +516,24 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 		// discard response body
 		io.Copy(io.Discard, r.Body)
 		r.Body.Close()
-		return nil
+
+		// 状态码此前完全没看：对端回 400/404/500 与回 200 一样算投递成功。于是
+		// 「注册表里的节点已经过期」「报文对端解不开」都表现为消息发出去了、
+		// 没人收到、两边日志都干净。
+		if r.StatusCode >= 200 && r.StatusCode < 300 {
+			return nil
+		}
+		rerr := fmt.Errorf("投递到 %s 被拒绝: %s", node.Address, r.Status)
+		if r.StatusCode >= 400 && r.StatusCode < 500 {
+			return &permanentError{err: rerr}
+		}
+		return rerr
 	}
 
-	srv := func(s []*registry.Service, b []byte) {
+	// srv 把一条消息投给所有匹配 topic 的节点，返回实际尝试投递的节点数。
+	// 返回 0 表示这条消息哪儿都没去（没有订阅者）。
+	srv := func(s []*registry.Service, b []byte) int {
+		var attempted int
 		for _, service := range s {
 			var nodes []*registry.Node
 
@@ -508,43 +559,63 @@ func (self *httpBroker) Publish(topic string, message *broker.Message, opts ...b
 			switch service.Version {
 			// broadcast version means broadcast to all nodes
 			case self.broadcastVersion():
-				var success bool
+				var success, retryable bool
 
 				// publish to all nodes
 				for _, node := range nodes {
-					// publish async
-					if err := pub(node, topic, b); err == nil {
+					attempted++
+					err := pub(node, topic, b)
+					switch {
+					case err == nil:
 						success = true
+					case isPermanent(err):
+						log.Warnf("broker: topic %q 广播到 %s 被永久拒绝，丢弃: %v", topic, node.Address, err)
+					default:
+						retryable = true
+						log.Warnf("broker: topic %q 广播到 %s 失败，将重投: %v", topic, node.Address, err)
 					}
 				}
 
-				// save if it failed to publish at least once
-				if !success {
+				// 一个都没成功、且失败是可重试的，才留着下次再发。
+				if !success && retryable {
 					self.saveMessage(topic, b)
 				}
 			default:
 				// select node to publish to
 				node := nodes[rand.Int()%len(nodes)]
+				attempted++
 
 				// publish async to one node
 				if err := pub(node, topic, b); err != nil {
-					// if failed save it
-					self.saveMessage(topic, b)
+					if isPermanent(err) {
+						log.Warnf("broker: topic %q 投递到 %s 被永久拒绝，丢弃: %v", topic, node.Address, err)
+					} else {
+						log.Warnf("broker: topic %q 投递到 %s 失败，将重投: %v", topic, node.Address, err)
+						// if failed save it
+						self.saveMessage(topic, b)
+					}
 				}
 			}
 		}
+		return attempted
 	}
 
 	// do the rest async
 	igoroutine.Go(func() {
-		// get a third of the backlog
-		messages := self.getMessage(topic, 8)
+		// 连同积压一起发。注意这不是"只发刚才那条"：Publish 一进来就 saveMessage，
+		// 这里再整批取出，所以新消息和之前投失败的一起排队出去。
+		messages := self.getMessage(topic, maxDrainPerPublish)
 		delay := (len(messages) > 1)
 
 		// publish all the messages
 		for _, msg := range messages {
 			// serialize here
-			srv(s, msg)
+			if srv(s, msg) == 0 {
+				// 没有任何订阅者节点，消息直接落地。这是 pub/sub 的正常状态
+				// （没人订阅就是没人收），但 Publish 早已返回 nil，不留一行的话
+				// 症状就只剩"对面没反应"，与"消息发失败了"无从区分。
+				log.Dbgf("broker: topic %q 没有任何订阅者节点，消息未投递", topic)
+			}
 
 			// sending a backlog of messages
 			if delay {
@@ -639,6 +710,53 @@ func (self *httpBroker) subscribe(s *httpSubscriber) error {
 	return nil
 }
 
+// unsubscribe 摘掉一个订阅者，必要时把节点从 registry 注销。
+//
+// **同一个 topic 的所有订阅共用同一个 node.Id**（topic + "-" + broker uuid），
+// 在 registry 里也只有一条记录。所以只有当这个 (topic, version) 上再没有别的
+// 订阅者时才能 Deregister —— 否则退订一个 handler 会把整个进程从该 topic 的
+// 投递列表里摘掉，同进程其余 handler 一起收不到消息，且没有任何报错。
+// 回归：TestUnsubscribe_OneOfTwoKeepsTheOtherAlive。
+func (self *httpBroker) unsubscribe(s *httpSubscriber) error {
+	self.Lock()
+
+	var kept []*httpSubscriber
+	var removed, stillRegistered bool
+	for _, sub := range self.subscribers[s.topic] {
+		if !removed && sub == s {
+			removed = true
+			continue
+		}
+		kept = append(kept, sub)
+		// 同 id 同 version 才是同一条 registry 记录（version 由 queue 决定）。
+		if sub.id == s.id && sub.svc.Version == s.svc.Version {
+			stillRegistered = true
+		}
+	}
+
+	if !removed {
+		// 已经退订过。幂等返回，不重复 Deregister —— server.Stop() 会在
+		// 调用方自己退订之后再兜底退一次。
+		self.Unlock()
+		return nil
+	}
+
+	if len(kept) == 0 {
+		delete(self.subscribers, s.topic)
+	} else {
+		self.subscribers[s.topic] = kept
+	}
+	self.Unlock()
+
+	if stillRegistered {
+		return nil
+	}
+
+	// 在锁外注销：subscribe 持写锁调 Register，而退出 goroutine 持读锁调
+	// Deregister，registry 实现里可能有自己的锁和网络调用，不要叠在本对象的锁里。
+	return self.registry.Deregister(s.svc)
+}
+
 func (h *httpBroker) saveMessage(topic string, msg []byte) {
 	h.mtx.Lock()
 	defer h.mtx.Unlock()
@@ -649,9 +767,14 @@ func (h *httpBroker) saveMessage(topic string, msg []byte) {
 	// save message
 	c = append(c, msg)
 
-	// max length 64
-	if len(c) > 64 {
-		c = c[:64]
+	// 超限时丢**最旧**的。此前是 c = c[:64]：保住最旧的 64 条，把刚 append 进来的
+	// 那条立刻扔掉 —— 于是积压一满，此后每一条新消息都发不出去，而进程还在原地
+	// 反复重投一批早已过时的旧消息，且全程没有任何日志。
+	//
+	// 这里复制一份而不是直接切片，避免 append/重切在同一块底层数组上把已经丢弃的
+	// 头部一直留在内存里。
+	if len(c) > maxInboxSize {
+		c = append(make([][]byte, 0, maxInboxSize), c[len(c)-maxInboxSize:]...)
 	}
 
 	// save inbox
