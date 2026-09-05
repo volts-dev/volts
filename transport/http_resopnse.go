@@ -96,8 +96,36 @@ func (self *THttpResponse) commitBeforeBody() {
 	self.Commit()
 }
 
+// bodyAllowedForStatus 与 net/http 同名函数一字不差：204 / 304 / 1xx 这三类响应
+// **不允许有正文**（RFC 9110 §15.3.5、§15.4.5）。
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == http.StatusNoContent:
+		return false
+	case status == http.StatusNotModified:
+		return false
+	}
+	return true
+}
+
+// Write 写正文；状态码不允许带正文时按 net/http 的约定回 ErrBodyNotAllowed 并丢弃。
+//
+// ★ 这一层不是多余的。延迟提交把 WriteHeader 变成"只记状态码"之后，
+// `ctx.NotModified(); ctx.Respond(x)` 里的 x 会一路走到 Apply 的 Write —— 而
+// 之前 WriteHeader 是立即提交的，Apply 见 Written() 就跳过，顺带把这条挡住了。
+//
+// 真栈上 net/http 自己会拦（实测：304 + 18 字节正文，客户端收到的仍是 0 字节），
+// 所以这不是线上缺陷；漏的是**别的 ResponseWriter**：httptest.ResponseRecorder 照单
+// 全收，于是"304 带正文"这件事在单测里看得见、在真栈上看不见，两边判据相反。谁先信了
+// recorder，谁就会去改一个并不存在的问题；谁先信了真栈，谁就会漏掉换一个 writer
+// （压缩包装、Hijack 后自己接管的连接）之后真的漏出去的那一天。
 func (self *THttpResponse) Write(b []byte) (int, error) {
 	self.commitBeforeBody()
+	if !bodyAllowedForStatus(self.status) {
+		return 0, http.ErrBodyNotAllowed
+	}
 	size, err := self.ResponseWriter.Write(b)
 	self.size += size
 	return size, err

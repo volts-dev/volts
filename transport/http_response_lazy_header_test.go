@@ -146,3 +146,35 @@ func TestHttpResponse_ConnectResetsCommitState(t *testing.T) {
 		t.Fatalf("复用后的对象应能正常发出 201，实际 %v", got)
 	}
 }
+
+// TestHttpResponse_BodyRejectedForStatusThatForbidsIt 锁定 204/304 上写正文被拒，
+// 且拒得干净：返回 http.ErrBodyNotAllowed、一个字节都不落、Size 不增长。
+func TestHttpResponse_BodyRejectedForStatusThatForbidsIt(t *testing.T) {
+	for _, code := range []int{http.StatusNoContent, http.StatusNotModified} {
+		rsp, w := newLazyRsp(t)
+		rsp.WriteHeader(code)
+		n, err := rsp.Write([]byte("nope"))
+		if err != http.ErrBodyNotAllowed {
+			t.Errorf("%d: err=%v, want ErrBodyNotAllowed", code, err)
+		}
+		if n != 0 || rsp.Size() != 0 {
+			t.Errorf("%d: n=%d size=%d，应为 0", code, n, rsp.Size())
+		}
+		if len(w.body) != 0 {
+			t.Errorf("%d: 正文还是落到底层了：%q", code, w.body)
+		}
+		if got := w.codes; len(got) != 1 || got[0] != code {
+			t.Errorf("%d: 状态行应照常发出一次，实际 %v", code, got)
+		}
+	}
+
+	// 允许带正文的状态码不受影响。
+	rsp, w := newLazyRsp(t)
+	rsp.WriteHeader(http.StatusOK)
+	if n, err := rsp.Write([]byte("ok")); err != nil || n != 2 {
+		t.Fatalf("200 上的正文被误挡: n=%d err=%v", n, err)
+	}
+	if string(w.body) != "ok" {
+		t.Fatalf("body=%q", w.body)
+	}
+}

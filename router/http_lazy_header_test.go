@@ -183,3 +183,48 @@ func TestLive_HeaderOnly404GoesOut(t *testing.T) {
 		t.Fatalf("status=%d, want 404", rsp.StatusCode)
 	}
 }
+
+// TestApply_NoBodyOnStatusThatForbidsOne 锁定延迟提交带来的一个回归口子：
+// 204 / 304 之后再 Respond，正文绝不能落笔。
+//
+// 延迟提交之前，`ctx.NotModified()` 立刻发出状态行，Apply 见 `Written()` 为真就跳过，
+// 顺带把这条挡住了。改成延迟提交之后 Apply 的判据变成"写没写过正文"，于是 Result 会
+// 一路走到 Write —— 实测这让 vectors 那边 connect_components 的
+// `TestPassRevalidation_Answers304WithoutBody` 变红：**304 带了 18 字节正文出去**。
+//
+// ★ 这一条必须用 `httptest.ResponseRecorder`，不能用真服务器 —— 与本文件里
+// TestLive_* 那几条的结论正好相反。真栈上 net/http 自己会把 304 的正文丢掉（实测
+// 客户端收到 0 字节），所以真服务器测不出来；recorder 则照单全收。两种 writer 的判据
+// 相反，而漏的正是**换一个 writer 之后**真的会漏出去的那一天（压缩包装、Hijack 之后
+// 自己接管的连接）。
+func TestApply_NoBodyOnStatusThatForbidsOne(t *testing.T) {
+	cases := []struct {
+		name string
+		hd   func(*THttpContext)
+		code int
+	}{
+		{"304 之后 Respond", func(ctx *THttpContext) {
+			ctx.NotModified()
+			ctx.Respond([]byte("这段不该出现"))
+		}, http.StatusNotModified},
+		{"204 之后 Respond", func(ctx *THttpContext) {
+			ctx.WriteHeader(http.StatusNoContent)
+			ctx.Respond([]byte("这段也不该出现"))
+		}, http.StatusNoContent},
+		{"304 之后 RespondByJson", func(ctx *THttpContext) {
+			ctx.NotModified()
+			ctx.RespondByJson(map[string]string{"a": "b"})
+		}, http.StatusNotModified},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := serveOnce(t, "GET", "/nobody/case"+string(rune('a'+i)), c.hd)
+			if rec.Code != c.code {
+				t.Fatalf("status=%d, want %d", rec.Code, c.code)
+			}
+			if got := rec.Body.String(); got != "" {
+				t.Fatalf("%d 带了 %d 字节正文：%q —— 浏览器对此各家表现不一", c.code, len(got), got)
+			}
+		})
+	}
+}

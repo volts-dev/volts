@@ -198,6 +198,15 @@ grp.Url([]string{"GET"}, "/bus/websocket", func(ctx *router.THttpContext) {
 
 Four rules that are easy to get wrong:
 
+Deferring the commit opened one hole that had to be closed with it: `Apply` now judges on
+"has a body been written", so `ctx.NotModified(); ctx.Respond(x)` sends `x` where the old
+`Written()` check silently swallowed it. `THttpResponse.Write` therefore refuses a body on
+204 / 304 / 1xx (`http.ErrBodyNotAllowed`, same as net/http). **Test that one with
+`httptest.ResponseRecorder`, not a real server** — the exact opposite of the rule above. A
+real net/http server drops a 304's body itself, so the fault is invisible there; the recorder
+takes it. What the recorder is standing in for is any *other* writer: the compression wrapper,
+or a connection taken over after Hijack.
+
 - **A successful upgrade detaches the context from the pool.** `Upgrade` sets
   `ctx.hijacked`, and `TRouter.ServeHTTP` returns immediately instead of running
   `ctx.Apply()` / `pool.Put(ctx)` / `respPool.Put(rsp)`. Skipping this is not cosmetic: the
@@ -685,6 +694,15 @@ See project memory for the full list. Remaining open notes:
   names the chain it picked. `transport/ss_live_test.go` (`VOLTS_SS_LIVE_NODES=<file>`) is
   the real judgment: it prints the **exit IP** per node, so a working proxy is visible as a
   different IP rather than as a 200 that direct traffic would also produce.
+- **`httptest.ResponseRecorder` does not enforce net/http's body rules, and the real
+  server does** — so a 304 or 204 carrying a body is visible in a unit test and invisible
+  through `httptest.NewServer` (measured: 18 bytes written, 0 bytes on the wire; net/http
+  answers `ErrBodyNotAllowed`). The two instruments disagree, which is worse than either
+  being wrong: trust the recorder and you chase a defect that does not exist in production;
+  trust the live server and you miss the day a different writer (the compression wrapper, a
+  hijacked connection) actually lets it out. `THttpResponse.Write` therefore applies the
+  rule itself. Regression: `router/http_bodyless_test.go` (recorder) — deliberately not a
+  live test, since a live test passes either way.
 - `transport/message_fuzz_test.go` holds the fuzz targets; deep runs with
   `gotip test -run=XXX -fuzz=FuzzMessageDecode -fuzztime=10m ./transport/`.
 - **Measure before calling something an optimization.** `router/handler_bench_test.go`
