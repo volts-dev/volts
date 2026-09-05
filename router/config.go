@@ -66,6 +66,11 @@ type (
 		UploadBuf                 int      `field:"upload_buf"`      // 上传文件大小MB
 		UseRootStatics            bool     `field:"use_root_statics"`
 		StaticCacheTTL            int      `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
+
+		// 响应压缩，见 compress.go。默认关闭 —— 开启是部署方的明示动作（BREACH）。
+		Compress        bool     `field:"compress"`
+		CompressMinSize int      `field:"compress_min_size"` // 小于此字节数不压，0 = DefaultCompressMinSize
+		CompressTypes   []string `field:"compress_types"`    // 参与压缩的 Content-Type，空 = DefaultCompressTypes
 	}
 
 	GroupOption func(*GroupConfig)
@@ -304,6 +309,31 @@ func WithAloneService(asService bool, servicsName string, prefix ...string) Grou
 func WithEmbedFS(fsys fs.FS) GroupOption {
 	return func(cfg *GroupConfig) {
 		cfg.EmbedFS = fsys
+	}
+}
+
+// WithCompress 开启 HTTP 响应压缩（gzip / deflate）。
+//
+// 默认关闭。开启前请确认本服务的响应里不会把**攻击者可影响的输入**与**同一响应中的
+// 机密**（CSRF token、会话标识）放在一起 —— 压缩率本身是一条侧信道，那正是 BREACH
+// 的前提，且 HTTPS 挡不住（泄漏的是密文长度）。纯静态资源与不含机密的 API 响应没有
+// 这个问题。详见 compress.go 顶部。
+//
+// minSize 省略时用 DefaultCompressMinSize（1KB）；types 省略时用 DefaultCompressTypes。
+func WithCompress(minSize ...int) Option {
+	return func(cfg *Config) {
+		cfg.Compress = true
+		if len(minSize) > 0 {
+			cfg.CompressMinSize = minSize[0]
+		}
+	}
+}
+
+// WithCompressTypes 指定参与压缩的 Content-Type（前缀以 "/" 或 "*" 结尾，如 "text/"）。
+// 不自动开启压缩，需与 WithCompress 同用。
+func WithCompressTypes(types ...string) Option {
+	return func(cfg *Config) {
+		cfg.CompressTypes = types
 	}
 }
 

@@ -59,6 +59,9 @@ type (
 		*TGroup
 		// config holds the router's runtime options.
 		config *Config
+		// compressor 是装配期编译好的响应压缩策略；nil 表示不压（默认）。
+		// 请求路径上只剩一次 nil 判断，见 compress.go 顶部对"分流放注册期"的说明。
+		compressor *compressor
 		// middleware manages the router's middleware stack.
 		middleware *TMiddlewareManager
 		// template provides HTML template rendering capabilities.
@@ -113,6 +116,10 @@ func New(opts ...Option) *TRouter {
 	}
 	cfg.Router = router
 	router.TGroup.config.StaticCacheTTL = cfg.StaticCacheTTL
+	if cfg.Compress {
+		// 类型表在这里一次编译成查找结构，请求期只做查表。
+		router.compressor = newCompressor(cfg.CompressMinSize, cfg.CompressTypes)
+	}
 
 	// registry 每 60s 刷新（watch/refresh→store）会为同一 (method,path) 生成
 	// **新 id** 的 route 对象热替换树节点；上下文池按 route id 键控、请求命中时
@@ -345,6 +352,17 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			rsp = transport.NewHttpResponse(r.Context(), r)
 		} else {
 			rsp = v.(*transport.THttpResponse)
+		}
+		// 响应压缩：套在真实 writer 外面，生命周期覆盖整条响应（含 Apply 才写出的
+		// 正文），所以只能在这里装、在这里关 —— 中间件在 Next 返回时就结束了，那时
+		// 正文还没落笔。关闭时（默认）只是一次 nil 判断。
+		if self.compressor != nil {
+			if cw := self.compressor.wrap(w, r.Request); cw != nil {
+				w = cw
+				// 覆盖所有出口：尾斜杠跳转、404、池损坏、正常结束，以及 WebSocket
+				// 劫持（那条一个字节都没写过，Close 是空操作）。
+				defer cw.Close()
+			}
 		}
 		rsp.Connect(w)
 

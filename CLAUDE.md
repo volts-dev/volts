@@ -86,6 +86,45 @@ Execution order: global → route-level → embedded → main controller.
 
 Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
 
+### Response compression
+
+`router.WithCompress()` turns on gzip/deflate on the HTTP egress (`router/compress.go`).
+Measured on the real front end: vertex's main bundle 2.06MB → 589KB (71%), a lazy chunk
+74%, `website.css` 82%. Before this, every page and every `call_kw` went out at full size,
+and `connect_components` had to hand-roll its own `serveBytes` to re-compress what it
+proxied.
+
+Four rules that are easy to get wrong:
+
+- **It is off by default, and that is a security decision, not caution.** Compressing an
+  attacker-influenced input together with a secret in the same response (a CSRF token, a
+  session id) makes the compression ratio a side channel — that is BREACH, and HTTPS does
+  not stop it because what leaks is ciphertext *length*. Turning it on is the deployer's
+  explicit act.
+- **It is not a middleware, and cannot be one.** A middleware ends when `ctx.Next()`
+  returns, but the body is written *afterwards* by `ctx.Apply()` — closing the compression
+  stream at the end of `Next` closes a stream that has not yet seen a single byte. The
+  only place that knows when a response ends is `TRouter.ServeHTTP`, so the wrapper is
+  installed and closed there. Disabled, the cost is one nil check per request.
+- **The decision is deferred, because size is not known at `WriteHeader` time.**
+  `Content-Length` is usually absent, so the writer buffers up to `minSize` (default 1KB)
+  and only then commits to compressing. `Flush` forces the decision — a streaming first
+  frame (SSE `: connected`) is far under the threshold and must go out *now*, not sit in a
+  buffer waiting for a threshold that will never arrive. Regression:
+  `TestCompress_StreamingFlushIsNotStalled` (it hangs, not fails, when this is wrong).
+- **Compressing rewrites the entity, so three headers must follow.** `Content-Length` is
+  deleted (net/http recomputes it — leave the original and the client waits forever for
+  bytes that never come), a strong `ETag` is weakened to `W/`, and `Vary: Accept-Encoding`
+  goes out on **every** response, compressed or not, or a shared cache will hand the
+  compressed body to a client that cannot decode it.
+
+Never compressed: `Content-Encoding` already set (a reverse-proxied response the upstream
+already compressed — compressing gzip again costs CPU and yields something no client can
+read), 204/304/206 and any `Content-Range`, non-2xx, HEAD, upgrade requests, and content
+types outside `DefaultCompressTypes`. `q=0` in `Accept-Encoding` is an explicit refusal and
+is honoured — answering with an encoding the client just declined renders the page as
+binary garbage.
+
 ### WebSocket
 
 Native server-side WebSocket (RFC 6455) lives in two layers: `transport/websocket.go` is
