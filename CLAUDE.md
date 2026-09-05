@@ -492,6 +492,33 @@ Regressions: `broker/redis/redis_test.go`.
 
 **Only HTTP endpoints get proxy routes.** `store()` skips `CONNECT` (RPC) endpoints: there is no RPC reverse-proxy implementation — `RpcReverseProxy` was an empty function body, so the route silently swallowed the request and the caller waited out `RequestTimeout` (20s) for a `context deadline exceeded` with nothing in the log pointing back here. Worse, `TTree.addNode` replaces same-path routes, so that empty handler would evict the local RPC handler and turn working local calls into black holes. Cross-process RPC dials the target node directly via `client` and never transits the gateway, so nothing needs proxying. A request for a service this process doesn't host now gets `StatusNotFound` immediately.
 
+**Discovered proxy routes are now reclaimed.** `store()` used to only ever add, and
+`TRouter.Deregister` has no production caller at all, so a service whose last node
+deregistered kept its proxy routes forever — the path answered **503** ("retry later", which
+clients and gateways duly do) where the honest answer was 404. `router/proxy_route_reclaim.go`
+books what `store()` actually built, per service, together with the proxy handler id, and
+removes the difference on the next round, on a watch `delete`, and on a `refresh()`
+reconciliation against `ListServices`.
+
+Removal is safe because `TTree.DelRoute` strips **by handler id** (`route.stripHandler`) and
+only drops the node once nothing is left on it; the id is a crc32 of `service:path:…`, so it
+cannot collide with a local handler or another service. Two further gates sit on top, and
+only one of them is load-bearing:
+
+- **A path still claimed by another service is never removed** — this one matters. Two
+  services advertising one path share a single tree route (last writer wins), so removing the
+  later one would take the path away from the earlier one until the next refresh, up to 60s.
+  The regression must drop *the service whose handler is currently on the tree*; dropping the
+  other proves nothing, because the id-recheck has already given up by then.
+- **The id is re-checked against the tree before deleting** — defensive only. Missing the
+  strip is harmless; the check just avoids a pointless write-locked traversal and keeps
+  `TTree.Count` (a display counter) honest.
+
+An erroneous reclamation is self-healing: the next `store()` rebuilds the route. Not
+reclaiming is permanent. That is the same bias as `isLocalService` — prefer one extra pass
+over a bad route nothing will ever correct. Regression:
+`router/proxy_route_reclaim_test.go`.
+
 `registry.Service.Equal` decides (via `TRouter.isLocalService`) whether `refresh()` skips a service entirely, so a wrong `true` means **permanently no route**. It compares name, version, node count, and node ids — historically the whole comparison sat inside `if len(a.Nodes) == len(b.Nodes)` and fell through to `return true` when counts differed, which any zombie node (SIGKILL leaves the etcd lease un-revoked, so old+new nodes coexist and the count doubles) turned into "remote service misread as local". Keep the bias toward `false`: a false negative only costs one extra `store()` pass, where `filteSelf` filters precisely.
 
 **A local route always wins over a discovered proxy route.** `filteSelf` is a *best-effort* filter — it only works when the process can recognize itself, and in the real vectors topology it routinely cannot: one `TRouter` is shared by the HTTP and the RPC server, each `server.WithRegistry` wraps the registry in its **own** `registryCacher`, and the router keeps only the last one — so `LocalServices()` never sees the sibling server's node, and every self-hosted service comes back through discovery looking remote (kylin logs one shield warning per service at startup; that is this, not a new fault). Three defenses now sit behind it, in `store()`:

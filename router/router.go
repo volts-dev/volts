@@ -59,6 +59,9 @@ type (
 		*TGroup
 		// config holds the router's runtime options.
 		config *Config
+		// proxyRoutes 记账 store() 实际建成的代理路由，供服务/端点下线时回收。
+		// 服务名 → map[proxyRouteKey]handlerId，见 proxy_route_reclaim.go。
+		proxyRoutes sync.Map
 		// compressor 是装配期编译好的响应压缩策略；nil 表示不压（默认）。
 		// 请求路径上只剩一次 nil 判断，见 compress.go 顶部对"分流放注册期"的说明。
 		compressor *compressor
@@ -826,6 +829,18 @@ func (self *TRouter) store(services []*registry.Service) {
 		return
 	}
 
+	// 本轮为每个服务名建成的代理路由，用于与上一轮做差量回收（见
+	// proxy_route_reclaim.go）。一个 store() 调用里的 services 都是同一个服务名的
+	// 若干条记录（watch/refresh 都是按名 GetService 取回来的），但这里不做此假设。
+	created := make(map[string]map[proxyRouteKey]int)
+	for _, service := range services {
+		if service != nil {
+			if _, ok := created[service.Name]; !ok {
+				created[service.Name] = make(map[proxyRouteKey]int)
+			}
+		}
+	}
+
 	// Create a new endpoint mapping.
 	for _, service := range services {
 		// me 到这里必非 nil（上面已提前返回），无需再判空。
@@ -884,7 +899,11 @@ func (self *TRouter) store(services []*registry.Service) {
 				r.handlers = append(r.handlers, handlerId)
 				if err := self.tree.AddRoute(r); err != nil {
 					log.Err(err)
+					continue
 				}
+				// 记账必须在 AddRoute **成功之后**：建失败的条目记进去，回收时会去剥
+				// 一个从来没挂上过的 handler，白白把树的计数器减一。
+				created[service.Name][newProxyRouteKey(sep)] = handlerId
 			}
 
 			// 每个服务只报一次：refresh 每 60s 重跑一轮，同样的护盾命中会一直重复，
@@ -900,6 +919,12 @@ func (self *TRouter) store(services []*registry.Service) {
 				}
 			}
 		}
+	}
+
+	// 记账并回收"上一轮建过、这一轮不再广告"的端点。放在最后统一做：同一个服务名
+	// 可能有多条 Service 记录（版本/端点集不同），要合并完才知道本轮的全集。
+	for name, routes := range created {
+		self.trackProxyRoutes(name, routes)
 	}
 }
 
@@ -978,6 +1003,9 @@ func (self *TRouter) watch() {
 					// 且不带服务名 —— 每次重启一个兄弟进程就刷出一排看不出主语的
 					// 红字，真正的故障混在里面反而没人看。
 					log.Infof("router: service %q is gone from the registry (watch action=%s)", res.Service.Name, res.Action)
+					// 服务整个没了：把它的代理路由收回来，否则那些路径会一直以 503
+					// 存在下去（store() 只增不减）。
+					self.dropProxyRoutes(res.Service.Name)
 				} else {
 					log.Errf("router: unable to get service %q after watch action=%s: %v", res.Service.Name, res.Action, err)
 				}
@@ -1032,6 +1060,9 @@ func (self *TRouter) refresh() {
 			}
 			continue
 		}
+
+		// ListServices 成功了才对账：读失败时 list 是空的，那不是"服务都没了"。
+		self.reconcileProxyRoutes(list)
 
 		if len(list) != 0 {
 			attempts = 0
