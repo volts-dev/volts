@@ -61,31 +61,16 @@ func (t *httpTransportListener) Accept() (net.Conn, error) {
 }
 
 func (h *httpTransportListener) Serve(handler Handler) error {
-	// 显式收紧 header 上限 —— 标准库默认 1MB，对 RPC/Web 都偏大；
-	// 8KiB 足以容纳常规 cookie+UA+自定义头，攻击者无法用大 header 耗内存。
-	const maxHeaderBytes = 8 << 10
-
 	// 先在局部构建完毕，再在锁内发布到 h.http（Close 并发读取）。
 	var srv *http.Server
 	if hd, ok := handler.Handler().(http.Handler); ok {
-		srv = &http.Server{
-			Handler:        hd,
-			ReadTimeout:    h.transport.config.ReadTimeout,
-			WriteTimeout:   h.transport.config.WriteTimeout,
-			MaxHeaderBytes: maxHeaderBytes,
-		}
+		srv = &http.Server{Handler: hd}
 	}
 
 	if hd, ok := handler.Handler().(customHandler); ok {
-		srv = &http.Server{
-			Handler: &customxx{
-				hd: hd,
-			},
-			ReadTimeout:    h.transport.config.ReadTimeout,
-			WriteTimeout:   h.transport.config.WriteTimeout,
-			MaxHeaderBytes: maxHeaderBytes,
-		}
+		srv = &http.Server{Handler: &customxx{hd: hd}}
 	}
+	applyServerLimits(srv, h.transport.config)
 	// default http2 server
 
 	// 明文连接上的 HTTP/2（h2c）改为显式开启 —— 见 Config.EnableH2C 的说明：

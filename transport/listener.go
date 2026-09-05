@@ -72,16 +72,15 @@ func (self *transportListener) serveHTTP(srv *http.Server) error {
 func (self *transportListener) Serve(handler Handler) error {
 	switch v := handler.Handler().(type) {
 	case http.Handler:
-		return self.serveHTTP(&http.Server{
-			Handler: v,
-		})
+		// 此前这里连超时和头部上限都没设 —— 一条连接可以永远不发完请求头。
+		srv := &http.Server{Handler: v}
+		applyServerLimits(srv, self.transport.Config())
+		return self.serveHTTP(srv)
 
 	case customHandler:
-		return self.serveHTTP(&http.Server{
-			Handler: &customxx{
-				hd: v,
-			},
-		})
+		srv := &http.Server{Handler: &customxx{hd: v}}
+		applyServerLimits(srv, self.transport.Config())
+		return self.serveHTTP(srv)
 
 	case rpcHandler:
 		var tempDelay time.Duration

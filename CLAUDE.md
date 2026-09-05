@@ -86,6 +86,35 @@ Execution order: global → route-level → embedded → main controller.
 
 Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
 
+### Connection limits: four segments, and `Debug()` may only widen two
+
+`transport.applyServerLimits` is the single place that configures every `http.Server` this
+package builds (there are two construction sites, and they used to disagree —
+`transport/listener.go` set no timeout and no header cap at all). Four settings each bound a
+different segment of a connection's life, and a segment left unbounded is unbounded:
+
+| segment | setting |
+|---|---|
+| handshake → request headers read | `ReadHeaderTimeout` (20s) |
+| headers → request body read | `ReadTimeout` (15s) |
+| first write → response written | `WriteTimeout` (15s) |
+| between keep-alive requests | `IdleTimeout` (120s) |
+
+**`ReadHeaderTimeout` and `IdleTimeout` fall back to `ReadTimeout` when unset**, so every
+deployment that raises `ReadTimeout` for a legitimate reason silently opens those two as
+well. `transport.Debug()` raises it to 999s — and vectors' `cmd.Start()` calls
+`volts.Debug()` **unconditionally** for both servers (measured: read/write/dial all become
+16m39s). That left every process in production willing to spend sixteen minutes receiving a
+few hundred bytes of request header, which is precisely the Slowloris precondition. So these
+two are configured independently and `Debug()` does not touch them: a debugger breakpoint
+sits inside a handler, which is *after* the headers are read.
+
+Regression: `transport/server_limits_test.go`. `TestSlowHeaderConnectionIsClosed` is
+behavioural, not a field assertion — it dribbles half a request line into a real socket and
+asserts the server gives up on schedule (drop the setting and it hangs for the full
+`ReadTimeout`). Note the server answers a header timeout with `400` + `Connection: close`
+before closing, so the judgement is *when* it gives up, not what it says.
+
 ### Response compression
 
 `router.WithCompress()` turns on gzip/deflate on the HTTP egress (`router/compress.go`).

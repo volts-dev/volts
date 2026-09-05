@@ -16,6 +16,17 @@ import (
 var (
 	log            = logger.New("Transport")
 	DefaultTimeout = 15 * time.Second
+
+	// DefaultReadHeaderTimeout 是读完请求头的默认时限。
+	// 请求头只有几百字节，20 秒对任何真实客户端都绰绰有余，对 Slowloris 则是致命的。
+	DefaultReadHeaderTimeout = 20 * time.Second
+
+	// DefaultIdleTimeout 是 keep-alive 连接的默认空闲时限。
+	DefaultIdleTimeout = 120 * time.Second
+
+	// DefaultMaxHeaderBytes 是请求头的默认上限（标准库默认 1MB，对 RPC/Web 都偏大；
+	// 8KiB 足以容纳常规 cookie + UA + 自定义头）。
+	DefaultMaxHeaderBytes = 8 << 10
 )
 
 type (
@@ -63,6 +74,29 @@ type (
 		ReadTimeout time.Duration
 		// WriteTimeout sets writedeadline for underlying net.Conns
 		WriteTimeout time.Duration
+
+		// ReadHeaderTimeout 是**读完请求头**的时限，与 ReadTimeout 分开。
+		//
+		// 分开是因为二者的正当取值天差地别：ReadTimeout 覆盖整个请求（一个 2GB 的
+		// 上传就该允许它很长），而收几百字节的请求头无论如何不该花上几分钟。合成
+		// 一个的后果是，任何为了正当理由把 ReadTimeout 调大的部署，都顺带把"慢速
+		// 发送请求头"这条路一起放开了 —— 攻击者每隔几十秒发一个字节，一条连接就
+		// 长期占着一个 goroutine 与一个 fd（Slowloris）。
+		//
+		// **Debug() 故意不动它**：调试器断点停在的是 handler，那已经在请求头读完
+		// 之后；没有任何正当理由需要几分钟来收请求头。
+		ReadHeaderTimeout time.Duration `field:"read_header_timeout"`
+
+		// IdleTimeout 是 keep-alive 连接上**两次请求之间**的空闲时限。
+		//
+		// 不设时标准库回落到 ReadTimeout —— 于是 ReadTimeout 一调大，空闲连接也跟着
+		// 被留很久，一样是拿 fd 换不了任何东西。它不影响正在进行的请求（SSE、长轮询
+		// 都是活跃请求，不算空闲），也不影响已被接管的连接（WebSocket 升级后脱离
+		// http.Server 管理）。
+		IdleTimeout time.Duration `field:"idle_timeout"`
+
+		// MaxHeaderBytes 是请求头的字节上限。标准库默认 1MB，对 RPC/Web 都偏大。
+		MaxHeaderBytes int `field:"max_header_bytes"`
 
 		// Other options for implementations of the interface
 		// can be stored in a context
@@ -112,10 +146,13 @@ func (self *DialConfig) Init(opts ...DialOption) {
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		Name:         "default",
-		DialTimeout:  DefaultTimeout,
-		ReadTimeout:  DefaultTimeout,
-		WriteTimeout: DefaultTimeout,
+		Name:              "default",
+		DialTimeout:       DefaultTimeout,
+		ReadTimeout:       DefaultTimeout,
+		WriteTimeout:      DefaultTimeout,
+		ReadHeaderTimeout: DefaultReadHeaderTimeout,
+		IdleTimeout:       DefaultIdleTimeout,
+		MaxHeaderBytes:    DefaultMaxHeaderBytes,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)
@@ -172,12 +209,40 @@ func (self *Config) Load() error {
 	return nil
 }
 
+// Debug 把读写与拨号超时放到近乎无限，好让调试器在断点上停多久都不会被掐断。
+//
+// **它故意不动 ReadHeaderTimeout / IdleTimeout。** 断点停在 handler 里，那已经是
+// 请求头读完之后的事；把"收请求头"也放到 999 秒，等于对每一个开着 Debug 的进程
+// 敞开 Slowloris —— 而 vectors 的 cmd.Start() 是**无条件**调 volts.Debug() 的，
+// 也就是说线上跑的每一个进程都会走到这里。
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
 		cfg.ReadTimeout = 999 * time.Second
 		cfg.WriteTimeout = 999 * time.Second
 		cfg.DialTimeout = 999 * time.Second
+	}
+}
+
+// WithReadHeaderTimeout 设定读完请求头的时限，见 Config.ReadHeaderTimeout。
+// <=0 表示不限（不建议：那正是 Slowloris 想要的）。
+func WithReadHeaderTimeout(t time.Duration) Option {
+	return func(cfg *Config) {
+		cfg.ReadHeaderTimeout = t
+	}
+}
+
+// WithIdleTimeout 设定 keep-alive 空闲时限，见 Config.IdleTimeout。
+func WithIdleTimeout(t time.Duration) Option {
+	return func(cfg *Config) {
+		cfg.IdleTimeout = t
+	}
+}
+
+// WithMaxHeaderBytes 设定请求头字节上限。<=0 时回落到 DefaultMaxHeaderBytes。
+func WithMaxHeaderBytes(n int) Option {
+	return func(cfg *Config) {
+		cfg.MaxHeaderBytes = n
 	}
 }
 

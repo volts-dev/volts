@@ -64,7 +64,7 @@ func (s *Socket) Local() string {
 	return s.local
 }
 
-func (s *Socket) Send(m * Message) error {
+func (s *Socket) Send(m *Message) error {
 	// send a message
 	select {
 	case s.send <- m:
@@ -75,7 +75,7 @@ func (s *Socket) Send(m * Message) error {
 	return nil
 }
 
-func (s *Socket) Recv(m * Message) error {
+func (s *Socket) Recv(m *Message) error {
 	// receive a message
 	select {
 	case msg := <-s.recv:
