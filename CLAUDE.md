@@ -426,6 +426,35 @@ come first — `break`ing on it would register an empty node set as "self", afte
 Regressions: `registry/endpoints_key_test.go`, `registry/cacher_endpoint_split_test.go`,
 `selector/filter_test.go`.
 
+### Subscribers: only `func(*TSubscriberContext)` can ever run
+
+`handler.InvokeSubscriber` walks `handler.funcs` and calls `handle.SubFunc`, whose type is
+`func(*TSubscriberContext)`. Anything that does not end up in `funcs` with that shape is
+registered, advertised in the registry, delivered to this process — and never executed.
+
+`parseSubscriber`'s two branches used to disagree about that. The plain
+`func(*TSubscriberContext)` case filled `funcs`; the reflection case (a struct's methods, or a
+func arriving as a `reflect.Value`) built the handler and returned without ever populating
+`funcs`. So **struct subscribers silently never fired**, with `Subscribe` returning nil. Two
+further faults in the same branch confirm nobody had ever taken it:
+
+- The methods were collected with `Type().Method(i).Func`, which is **unbound** — its first
+  parameter is the receiver, so the signature is `func(T, *TSubscriberContext)`, matching
+  nothing and with no receiver to pass. `Value.Method(i)` is the bound form.
+- `if v, ok := sub.(IString)` shadowed the type-switch's own `v`, so the `else` branch handed
+  `utils.Obj2Name` the **failed** assertion's nil interface — `reflect: call of
+  reflect.Value.Type on zero Value`. Any struct subscriber not implementing `IString` panicked
+  on registration.
+
+Struct methods now work, and must be **value receivers** with exactly that signature — the
+same rule as controllers and middleware, for the same reason (the method set of a value
+excludes pointer-receiver methods). Methods with any other signature are skipped, since a
+struct normally has unrelated methods too.
+
+`validateSubscriber` was `return nil`. It now rejects any handler with an empty `funcs`, so a
+shape that cannot execute fails at registration instead of surfacing later as "that event does
+nothing". Regression: `router/subscriber_test.go`.
+
 ### Broker: one instance per process
 
 `broker.Use(name, opts...)` caches instances. The key is the **resolved** backend name
