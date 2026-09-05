@@ -201,7 +201,12 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 
 	conn, err := self.pool.Get(node.Address, dOpts...)
 	if err != nil {
-		return nil, errors.InternalServerError("volts.client", err)
+		// 标成"连接没建成"：这是唯一可以证明重试安全的一档 —— 请求的一个字节都还
+		// 没写出去，服务端不可能执行过它。见 RetryOnConnectError。
+		// 仍然是一个带 500 码的 *errors.Error（errors.As 照样取得到码），只是链上
+		// 多挂了一个可判定的哨兵。
+		return nil, errors.Wrap(ErrConnectFailed, "volts.client",
+			500, fmt.Sprintf("dial %s: %v", node.Address, err))
 	}
 
 	// 获取请求消息载体

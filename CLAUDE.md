@@ -213,6 +213,48 @@ app.Run()  // blocks until SIGTERM/SIGINT/SIGQUIT or context cancel
 
 On macOS, browser/curl access via LAN IP to a locally-running server is intercepted at the kernel level. Use `localhost` for local development access instead.
 
+### Errors carry a code, and the code must survive wrapping
+
+`errors.Error` is the framework's error type: `Id`, `Code`, `Detail`, `Status`. Upper layers
+(vectors' `codec.WriteData`) read `Code` to decide what status the caller sees, and anything
+they cannot recognise is flattened to 500.
+
+- **Read the code with `errors.Code(err)` / `errors.From(err)`, never a type assertion.**
+  Business code wraps freely (`fmt.Errorf("...: %w", err)`), and `err.(*errors.Error)` misses
+  the moment anything wraps it — the caller then gets a 500 for what was a 404. `Code` walks
+  the chain.
+- **`errors.Wrap(err, id, code, detail)` keeps the cause reachable**, so `errors.Is` can still
+  identify a sentinel underneath. The cause is unexported: it is *not* serialized, so what
+  crosses a process boundary is still only the four fields.
+- **`(*Error).Is` compares Id + Code + Detail**, so a sentinel survives a JSON round-trip
+  through RPC — pointer equality does not, and `Parse` builds a new object every time. All
+  three fields matter: `PermissionDenied` and `UnavailableService` share Id `""` and Code 500
+  and differ only in Detail.
+- The package re-exports stdlib `Is` / `As` / `Join` / `Unwrap`, so a file that imports
+  `volts/errors` does not also need the stdlib one under an alias.
+
+### Retries are off by default, and that is deliberate
+
+`client.DefaultRetry` is `RetryNever`. Retrying a non-idempotent call means executing it
+twice, and this stack carries sale / purchase / account / payment — the same reasoning as the
+reverse proxy's refusal to replay POSTs. Opting in takes two knobs, both of which are now
+real: `client.WithRetries(n)` (the attempt count — `Config.Retries`, i.e. `client.*.retries`
+in config.json, had **no reader at all** and was a knob that did nothing) and
+`client.WithRetry(fn)` (the policy).
+
+- **`RetryOnConnectError` is the only provably safe policy.** It fires solely on
+  `client.ErrConnectFailed` — the connection was never established, so not one byte of the
+  request was sent and the server cannot have executed it. A bare `EOF` after the request went
+  out is deliberately excluded: "the server never got it" and "the server finished and then
+  the connection dropped" are indistinguishable.
+- **`RetryOnError` (408/500) is for idempotent reads only.** A 500 means the server *did*
+  execute it. It also used to be dead code: it read the status via `errors.Parse(err.Error())`,
+  and `Error()` returns only `Detail`, so `Parse` always failed to decode and left `Code` at 0
+  — the switch never matched and it returned false for every error, silently.
+- The RPC client never consults the policy when the server answered with a non-OK status bit;
+  it returns immediately. So on the RPC side the connect-only policy covers every case that is
+  retryable at all.
+
 ### Node Health / Circuit Breaking
 
 `selector` ejects a node after `BreakerFailures` consecutive failures (default 3), holds it

@@ -21,8 +21,12 @@ var (
 
 	// Default Client
 	defaultClient IClient
-	// DefaultRetry is the default check-for-retry function for retries
-	DefaultRetry = RetryOnError
+	// DefaultRetry 是默认的重试判定。默认从不重试 —— 见 RetryNever 的说明：
+	// 重试一个非幂等调用等于让它执行两次，框架不替调用方做这个决定。
+	//
+	// 历史上这里是 RetryOnError，但那个函数一直是死的（取不到状态码，恒返回 false），
+	// 所以"默认不重试"其实是既有的**实际**行为，这里只是把它写成事实。
+	DefaultRetry = RetryNever
 	// DefaultRetries is the default number of times a request is tried
 	DefaultRetries = 1
 	// DefaultRequestTimeout is the default request timeout
@@ -167,7 +171,11 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		Name:      "default",
 		Logger:    log,
 		Transport: tr,
-		Retries:   3,
+		// 与 CallOptions.Retries 保持一致。此前这里写死 3 而**没有任何读取方**，
+		// 于是 config.json 里那条 client.*.retries 是个改了不生效的旋钮 ——
+		// 正是"改了配置没反应"最贵的那一类。现在它被 newConfig 末尾同步进
+		// CallOptions，真正起作用。
+		Retries: DefaultRetries,
 		//RPCPath:        share.DefaultRPCPath,
 		//SerializeType:  codec.MsgPack,
 		CompressType:  transport.None,
@@ -241,6 +249,14 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 			selector.WithStrategy(cfg.SelectorStrategy),
 		)
 	}
+
+	// Retries 的单一来源是 Config.Retries（config.json 里的 client.*.retries）。
+	// 配置文件里的值经 config.Register → Load 落进 cfg.Retries，这里再同步进真正
+	// 被重试循环读取的 CallOptions —— 少了这一步，那条配置项就是个改了不生效的旋钮。
+	if cfg.Retries < 1 {
+		cfg.Retries = DefaultRetries
+	}
+	cfg.CallOptions.Retries = cfg.Retries
 
 	return cfg
 }
@@ -455,6 +471,31 @@ func WithHost(address ...string) Option {
 }
 
 // 修改Config.json的路径
+// WithRetries 设定一次调用最多尝试几次（含第一次）。1 = 不重试。
+//
+// 此前没有任何办法改这个值：CallOptions.Retries 恒为 DefaultRetries，而 Config.Retries
+// 没有读取方。**调大它之前先选好策略** —— 默认策略是 RetryNever，光调大次数不会有
+// 第二次尝试。写路径请配 RetryOnConnectError（只在连接没建成时重试，可证明不会重复
+// 执行），只有确认幂等的读路径才适合 RetryOnError。
+func WithRetries(n int) Option {
+	return func(cfg *Config) {
+		if n < 1 {
+			n = 1
+		}
+		cfg.Retries = n
+		cfg.CallOptions.Retries = n
+	}
+}
+
+// WithRetry 指定重试判定函数，见 RetryNever / RetryOnConnectError / RetryOnError。
+func WithRetry(fn RetryFunc) Option {
+	return func(cfg *Config) {
+		if fn != nil {
+			cfg.CallOptions.Retry = fn
+		}
+	}
+}
+
 func WithConfigPrefixName(prefixName string) Option {
 	return func(cfg *Config) {
 		cfg.Unregister(cfg)

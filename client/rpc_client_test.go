@@ -63,7 +63,7 @@ func TestRpcClient_NewRequest(t *testing.T) {
 	if req.Method() != "Test.Method" {
 		t.Errorf("Expected Test.Method, got %s", req.Method())
 	}
-	
+
 	if req.Body() == nil || req.Body().Data == nil || req.Body().Data.Len() == 0 {
 		t.Errorf("Expected encoded body to exist")
 	}

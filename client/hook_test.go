@@ -18,12 +18,12 @@ func newFakeRequest() *fakeRequest {
 	return &fakeRequest{header: make(header.Header)}
 }
 
-func (r *fakeRequest) Service() string        { return "svc" }
-func (r *fakeRequest) Method() string         { return "m" }
-func (r *fakeRequest) ContentType() string    { return "application/json" }
-func (r *fakeRequest) Header() header.Header  { return r.header }
-func (r *fakeRequest) Body() *body.TBody      { return nil }
-func (r *fakeRequest) Stream() bool           { return false }
+func (r *fakeRequest) Service() string         { return "svc" }
+func (r *fakeRequest) Method() string          { return "m" }
+func (r *fakeRequest) ContentType() string     { return "application/json" }
+func (r *fakeRequest) Header() header.Header   { return r.header }
+func (r *fakeRequest) Body() *body.TBody       { return nil }
+func (r *fakeRequest) Stream() bool            { return false }
 func (r *fakeRequest) Options() RequestOptions { return RequestOptions{} }
 
 func TestApplyRequestHooksOrderGlobalBeforeOwn(t *testing.T) {

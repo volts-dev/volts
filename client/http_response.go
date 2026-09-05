@@ -57,4 +57,3 @@ func (r *httpResponse) Read(out interface{}) error {
 func (self *httpResponse) StatusCode() int {
 	return self.Code
 }
-
