@@ -354,6 +354,12 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 	// make the request
 	hrsp, err := h.client.Do(hreq.WithContext(ctx))
 	if err != nil {
+		// 拨号阶段失败的，链上挂一个 ErrConnectFailed 哨兵：请求的一个字节都还没
+		// 写出去，重试到另一个节点是可以证明安全的（见 RetryOnConnectError）。
+		// 状态码仍是 500，调用方看到的东西不变。
+		if isConnectFailure(err) {
+			return nil, errors.Wrap(ErrConnectFailed, "http.client", 500, err.Error())
+		}
 		return nil, errors.InternalServerError("http.client", err.Error())
 	}
 	defer hrsp.Body.Close()
