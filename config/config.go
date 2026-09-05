@@ -222,8 +222,18 @@ func New(name string, opts ...Option) *Config {
 	}
 	// 初始化程序硬配置
 	cfg.Init(opts...)
-	// 加载文件配置
-	cfg.LoadFromFile()
+	// 加载文件配置。
+	//
+	// ★ 错误必须记下来。此前这里丢掉了返回值，而 `defaultConfig = New(DEFAULT_PREFIX)`
+	// 就在包初始化里 —— 一份 JSON 写坏了的 config.json（漏个花括号是手改配置最常见的
+	// 坏法）在进程启动时被完全忽略：所有配置停在代码默认值上，`Errors()` 是空的，
+	// 日志里一个字都没有。这是"改了配置没反应"最极端的形态 —— 整份文件都没生效。
+	//
+	// 走 errorf 而不是返回错误/log.Fatal：本包的既定做法是**累积**（见 Errors 的注释），
+	// 由 service.Start() 在所有组件注册完之后统一报出来；库不该替调用方 os.Exit。
+	if err := cfg.LoadFromFile(); err != nil {
+		c.errorf("装载配置文件 %q 失败（本次启动将全部使用代码默认值）: %w", c.FileName, err)
+	}
 
 	return cfg
 }
@@ -677,4 +687,3 @@ func (self *Config) GetFloat64(field string, defaultValue float64) float64 {
 func (self *Config) SetValue(field string, value interface{}) {
 	self.Core().fmt.SetValue(field, value)
 }
-
