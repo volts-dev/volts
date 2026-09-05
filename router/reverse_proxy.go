@@ -80,7 +80,14 @@ func HttpReverseProxy(ctx *THttpContext) {
 
 	service, node, err := getService(ctx)
 	if err != nil {
-		ctx.WriteHeader(500)
+		// 选不到上游节点是「上游不可用」，不是网关自己出了错：回 503 而不是 500。
+		// 此前回 500 且一个字都不记 —— 调用方看到的是"网关内部错误"，而真正的原因
+		// （该服务已从注册中心注销、所有节点都被熔断摘除、注册中心读不到）在两边
+		// 日志里都找不到。这条代理路由本身也可能已经过期：远程服务的最后一个节点
+		// 注销后，store() 不会回收它建过的路由，请求仍会落到这里。
+		log.Errf("http: proxy has no upstream for service %q: %v | Method: %s | Path: %s",
+			ctx.Handler().Service(), err, inReq.Method, inReq.URL.Path)
+		ctx.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 

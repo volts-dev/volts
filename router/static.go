@@ -300,7 +300,11 @@ func rootStaticHandler(ctx *THttpContext) {
 	fileExt := strings.ToLower(p.FieldByName("ext").AsString())
 
 	if utils.IndexOf(fileExt, "", "html", "txt", "xml") == -1 {
+		// 必须 return：NotFound 只是写了 404 头和正文，不会终止本函数。此前漏了
+		// 这一句，后面的 ServeFile 照样执行 —— 404 之后又把文件内容追加进同一条
+		// 响应（net/http 记一条 superfluous WriteHeader），白名单形同虚设。
 		ctx.NotFound()
+		return
 	}
 
 	filePath := filepath.Clean(ctx.request.URL.Path[1:])

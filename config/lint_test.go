@@ -214,3 +214,102 @@ func TestLint_NoFalsePositiveOnNestedStruct(t *testing.T) {
 		t.Errorf("嵌套 struct 字段被误报为未知: %s", is)
 	}
 }
+
+type movedModel struct {
+	Config
+	name  string
+	Value string `field:"value"`
+}
+
+func (self *movedModel) String() string { return self.name }
+
+type movedSub struct {
+	Config
+	name string
+	Port int `field:"port"`
+}
+
+func (self *movedSub) String() string { return self.name }
+
+// TestLint_NoFalsePositiveAfterPrefixMove 锁定：模型经 WithConfigPrefixName 搬走自己的
+// 配置节、而它在旧前缀下建的子组件仍留在原地时，旧节里那些已搬走的字段不被误报。
+//
+// 真栈形状（kylin 2026-09-05 的启动日志）：router 注册为 router.default，其
+// RegistryCacher/Selector 注册为 router.default.registry / router.default.selector；
+// server 随后把 router 搬到 server.http.router。于是 router.default 成了某个已声明
+// 字段的前缀，它下面 recover / upload_buf / use_openapi 等十个字段整节被报成
+// 「未知配置项（不会生效）」—— 而它们只是搬走了。server.http.broker 被复用后改挂
+// server.rpc 时同样中招。误报一多，真正的错字就没人看了。
+func TestLint_NoFalsePositiveAfterPrefixMove(t *testing.T) {
+	fn := "lint_prefix_move.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	content := `{
+  "old": {
+    "owner": {
+      "value": "x",
+      "typo_here": 1,
+      "sub": {
+        "port": 1,
+        "bogus": 2
+      }
+    }
+  },
+  "new": {
+    "owner": {
+      "value": "x",
+      "vlaue": "typo"
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newIsolated(t, fn)
+	owner := &movedModel{name: "old.owner"}
+	sub := &movedSub{name: "old.owner.sub"}
+	cfg.Register(owner)
+	cfg.Register(sub)
+
+	// 搬家前：old.owner 是已注册节，里面的错字必须报出来（对照组）。
+	var got []string
+	for _, is := range cfg.Lint() {
+		got = append(got, is.Path)
+	}
+	if !contains(got, "old.owner.typo_here") || !contains(got, "old.owner.sub.bogus") {
+		t.Fatalf("搬家前的错字没报全: %v", got)
+	}
+
+	// 搬家：与 WithConfigPrefixName 的实现逐字相同 —— 注销、改名、再注册。
+	cfg.Unregister(owner)
+	owner.name = "new.owner"
+	cfg.Register(owner)
+
+	got = got[:0]
+	for _, is := range cfg.Lint() {
+		got = append(got, is.Path)
+	}
+	// 子组件自己的节仍在，它内部的错字照报；新节里的错字照报。
+	for _, want := range []string{"old.owner.sub.bogus", "new.owner.vlaue"} {
+		if !contains(got, want) {
+			t.Errorf("搬家后漏报 %s: %v", want, got)
+		}
+	}
+	// 旧节里已搬走的字段不是错字，一个都不许报。
+	for _, p := range got {
+		if p == "old.owner.value" || p == "old.owner.typo_here" {
+			t.Errorf("已搬走的旧节字段被误报为未知: %s", p)
+		}
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}

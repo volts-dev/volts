@@ -952,7 +952,15 @@ func (self *TRouter) watch() {
 			// Fetch full service information from the cache after a change update.
 			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
 			if err != nil {
-				log.Errf("unable to get service: %v", err)
+				if errors.Is(err, registry.ErrNotFound) {
+					// 服务的最后一个节点注销后，delete 事件紧跟着这次 GetService，
+					// 「找不到」正是这条事件的正常结局，不是故障。此前按 ERR 记、
+					// 且不带服务名 —— 每次重启一个兄弟进程就刷出一排看不出主语的
+					// 红字，真正的故障混在里面反而没人看。
+					log.Infof("router: service %q is gone from the registry (watch action=%s)", res.Service.Name, res.Action)
+				} else {
+					log.Errf("router: unable to get service %q after watch action=%s: %v", res.Service.Name, res.Action, err)
+				}
 				continue
 			}
 
@@ -1016,7 +1024,12 @@ func (self *TRouter) refresh() {
 
 				services, err = self.config.RegistryCacher.GetService(s.Name)
 				if err != nil {
-					log.Errf("unable to get service: %v", err)
+					if errors.Is(err, registry.ErrNotFound) {
+						// ListServices 与 GetService 之间它注销了：下一轮就不在列表里。
+						log.Dbgf("router: service %q vanished between list and get", s.Name)
+					} else {
+						log.Errf("router: unable to get service %q during refresh: %v", s.Name, err)
+					}
 					continue
 				}
 				self.store(services)
@@ -1041,4 +1054,3 @@ func (self *TRouter) isLocalService(service *registry.Service, locals []*registr
 	}
 	return false
 }
-

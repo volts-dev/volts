@@ -101,13 +101,14 @@ func (self *Config) Lint() []LintIssue {
 	return issues
 }
 
-// knownKeys 收集所有已注册模型声明过的叶子路径。
+// knownKeys 收集所有已注册模型声明过的叶子路径，值是声明它的那个配置节（模型的
+// String()）—— isReportable 靠它分辨「模型自己的嵌套字段」与「另一个子组件的节」。
 //
 // 复用 SaveFromModel 的那套展开（utils.Struct2ItfMap + collectLeaves），确保
 // 「模型声明了哪些 key」与「模型会写出哪些 key」用的是同一个答案 —— 两边各写一遍
 // 展开逻辑，迟早会对不上，那时 Lint 就开始误报，比不报还糟。
-func (self *Config) knownKeys() map[string]struct{} {
-	out := make(map[string]struct{})
+func (self *Config) knownKeys() map[string]string {
+	out := make(map[string]string)
 
 	self.Core().models.Range(func(key any, value any) bool {
 		model, ok := value.(IConfig)
@@ -126,11 +127,11 @@ func (self *Config) knownKeys() map[string]struct{} {
 			}
 			if sub, ok := v.(map[string]any); ok && len(sub) > 0 {
 				collectLeaves(sub, prefix+"."+strings.ToLower(k), func(p string, _ any) {
-					out[strings.ToLower(p)] = struct{}{}
+					out[strings.ToLower(p)] = prefix
 				})
 				continue
 			}
-			out[prefix+"."+strings.ToLower(k)] = struct{}{}
+			out[prefix+"."+strings.ToLower(k)] = prefix
 		}
 		return true
 	})
@@ -166,7 +167,16 @@ func (self *Config) knownSections() []string {
 // 是**子组件**的配置节 —— server 模型自己并没有声明 client.* 下的任何字段（那些实例
 // 字段都是 field:"-"）。若只判断「落在已注册节内」，这类 key 会整片被误报；实测对
 // kylin 的 config.json 是 77 条里的绝大多数。
-func isReportable(key string, sections []string, known map[string]struct{}) bool {
+//
+// 「已声明字段路径的前缀」这一条还要再收一档：父路径必须落在**声明该字段的那个
+// 配置节之内**（等于它，或在它下面）。反例来自 kylin 真栈：server 用
+// WithConfigPrefixName 把 router 的节从 router.default 搬到 server.http.router，
+// 而 router 在 newConfig 时给自己建的 RegistryCacher / Selector 仍留在
+// router.default.registry.* / router.default.selector.* —— 于是 router.default
+// 是「某个已声明字段的前缀」，它下面那十个早已搬走的字段（recover、upload_buf …）
+// 整节被报成未知；server.http.broker 被复用后改挂 server.rpc 时是同一个形状。
+// 这些父路径在**子组件的节之上**，不在任何模型自己的结构里，报了就是误报。
+func isReportable(key string, sections []string, known map[string]string) bool {
 	parent, _ := splitLast(key)
 	if parent == "" {
 		return false
@@ -176,10 +186,19 @@ func isReportable(key string, sections []string, known map[string]struct{}) bool
 			return true
 		}
 	}
-	return isPrefixOfAny(parent, known)
+	p := parent + "."
+	for k, owner := range known {
+		if !strings.HasPrefix(k, p) {
+			continue
+		}
+		if parent == owner || strings.HasPrefix(parent, owner+".") {
+			return true
+		}
+	}
+	return false
 }
 
-func isPrefixOfAny(key string, known map[string]struct{}) bool {
+func isPrefixOfAny(key string, known map[string]string) bool {
 	p := key + "."
 	for k := range known {
 		if strings.HasPrefix(k, p) {
@@ -193,7 +212,7 @@ func isPrefixOfAny(key string, known map[string]struct{}) bool {
 //
 // 只在「同一父路径下」比较叶子名：跨子树的建议（把 server.http.read_timeout 建议成
 // client.rpc.read_timeout）看着像模像样，实际会把人引到错误的地方去。
-func nearest(key string, known map[string]struct{}) string {
+func nearest(key string, known map[string]string) string {
 	parent, leaf := splitLast(key)
 
 	best, bestDist := "", 1<<30

@@ -45,7 +45,7 @@ type (
 		Logger           logger.ILogger           `field:"-"` // 实例
 		Router           *TRouter                 `field:"-"`
 		Selector         selector.ISelector       `field:"-"`
-		SelectorStrategy string                   //
+		SelectorStrategy string                   `field:"selector_strategy"`
 		Registry         registry.IRegistry       `field:"-"`
 		RegistryCacher   registry.IRegistryCacher `field:"-"` // registry cache
 		RecoverHandler   func(IContext)           `field:"-"`
@@ -58,14 +58,14 @@ type (
 		RequestPrinter            bool     `field:"request_printer"`
 		StaticDir                 []string `field:"static_dir"` // the static dir allow to visit
 		StaticExt                 []string `field:"static_ext"` // the static file format allow to visit
-		UsePprof                  bool
-		UseOpenAPI                bool   `field:"use_openapi"`     // 配置开关：开启后挂载 /openapi.json 与 /docs
-		OpenAPITitle              string `field:"openapi_title"`   // 文档标题（空则默认 "Volts API"）
-		OpenAPIVersion            string `field:"openapi_version"` // 文档版本（空则默认 "1.0.0"）
-		OpenAPIGateway            bool   `field:"openapi_gateway"` // 是否聚合 registry 中的远程服务端点
-		UploadBuf                 int    `field:"upload_buf"`      // 上传文件大小MB
-		UseRootStatics            bool
-		StaticCacheTTL            int `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
+		UsePprof                  bool     `field:"use_pprof"`
+		UseOpenAPI                bool     `field:"use_openapi"`     // 配置开关：开启后挂载 /openapi.json 与 /docs
+		OpenAPITitle              string   `field:"openapi_title"`   // 文档标题（空则默认 "Volts API"）
+		OpenAPIVersion            string   `field:"openapi_version"` // 文档版本（空则默认 "1.0.0"）
+		OpenAPIGateway            bool     `field:"openapi_gateway"` // 是否聚合 registry 中的远程服务端点
+		UploadBuf                 int      `field:"upload_buf"`      // 上传文件大小MB
+		UseRootStatics            bool     `field:"use_root_statics"`
+		StaticCacheTTL            int      `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
 	}
 
 	GroupOption func(*GroupConfig)
