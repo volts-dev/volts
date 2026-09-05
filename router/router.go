@@ -406,6 +406,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 
 		if route == nil {
 			rsp.WriteHeader(http.StatusNotFound)
+			rsp.Commit() // WriteHeader 是延迟提交的，归还池之前必须真的发出去
 			// 404 也要把 rsp 归还池——否则扫描器/缺失静态资源刷 404 时，每个
 			// 请求都重新分配一个 THttpResponse，池形同虚设。
 			rsp.ResponseWriter = nil
@@ -424,6 +425,7 @@ func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest)
 			// 未来若有人误存其他类型时直接 panic 拉崩整个 HTTP server。
 			log.Errf("httpCtxPool corruption: unexpected type %T for route %v", p, route.Id())
 			rsp.WriteHeader(http.StatusInternalServerError)
+			rsp.Commit()
 			rsp.ResponseWriter = nil
 			self.respPool.Put(rsp)
 			return

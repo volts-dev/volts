@@ -279,12 +279,22 @@ func (self *THttpContext) Apply() {
 			if err := self.Template.RenderToWriter(self.TemplateSrc, self.templateVar, self.response); err != nil {
 				http.Error(self.response, "Apply fail:"+err.Error(), http.StatusInternalServerError)
 			}
-		} else if !self.response.Written() { // STEP:只许一次返回
+		} else if self.response.Size() == 0 && (len(self.Result) > 0 || !self.response.Written()) {
+			// 只许一次返回：handler 已经自己写过正文就不再追加。
+			//
+			// 判据是"写没写过正文"，不再是 Written()（那只说明记过状态码）。
+			// WriteHeader 现在是延迟提交的，所以 `WriteHeader(422)` 之后再
+			// `RespondByJson(x)`，Result 照样能带着 422 出去 —— 旧实现在这里把它
+			// 静默丢掉，客户端拿到的是 body 为空的状态码。
 			self.Write(self.Result)
 		}
 
 		self.isDone = true
 	}
+
+	// 把只记了状态码、没写正文的响应（404、304、302…）发出去。幂等：handler 自己
+	// defer 了 Apply、router 在请求结束时再调一次也没关系。
+	self.response.Commit()
 }
 
 func (self *THttpContext) Route() IRoute {
@@ -416,6 +426,34 @@ func (self *THttpContext) SetCookie(cookie *http.Cookie) {
 	}
 
 	http.SetCookie(self.response, cookie)
+}
+
+// DeleteCookie 让浏览器删掉名为 name 的 Cookie。
+//
+// 删除指令必须带上与写入时**相同的 Path**（有 Domain 的还要同 Domain），否则浏览器
+// 按"当前请求所在目录"给它定域：在 `POST /shop/cart/update` 上发出的不带 Path 的
+// 删除指令，域是 /shop/cart，与写入时 Path=/ 的那一条不是同一个 Cookie —— 删除静默
+// 落空，响应头里明明有一条 Set-Cookie。`SetCookieValue(name, "", -1)` 拼出来的正是
+// 这种指令，vectors 前台的购物车 / 优惠码 cookie 清理因此长期失效。
+//
+// path 缺省为 "/"，与前台 Cookie 的写入约定一致；写入时带了 Domain 的传 domain。
+func (self *THttpContext) DeleteCookie(name string, path string, domain ...string) {
+	if path == "" {
+		path = "/"
+	}
+	c := &http.Cookie{
+		Name:    name,
+		Value:   "",
+		Path:    path,
+		MaxAge:  -1,
+		Expires: time.Unix(0, 0),
+		// 浏览器不允许非安全来源覆盖 Secure Cookie；本次请求走了 TLS 就照样标上。
+		Secure: self.request.TLS != nil,
+	}
+	if len(domain) > 0 {
+		c.Domain = domain[0]
+	}
+	self.SetCookie(c)
 }
 
 // SetCookieValue 以位置参数下发 Cookie（旧版 SetCookie 的行为）。
@@ -569,7 +607,8 @@ func (self *THttpContext) RespondByJson(data interface{}) {
 	js := json.NewEncoder(buf)
 	js.SetEscapeHTML(false)
 	if err := js.Encode(data); err != nil {
-		self.response.Write([]byte(err.Error()))
+		// 编码失败是服务端的错，不能以 200 把错误文本当正文送出去。
+		self.RespondError(err.Error())
 		return
 	}
 
