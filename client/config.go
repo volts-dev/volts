@@ -71,10 +71,6 @@ type (
 		RequestTimeout time.Duration
 		// Stream timeout for the stream
 		StreamTimeout time.Duration
-		// Use the services own auth token
-		ServiceToken bool
-		// Duration to cache the response for
-		CacheExpiry time.Duration
 
 		// 曾有一个 `CallWrappers []CallWrapper` 的半成品挂在这里（类型从未定义、
 		// 调用点也是注释掉的）。它想包住两个 client 各自的低层 call，而那两个函数返回
@@ -133,16 +129,10 @@ type (
 		// RPCPath for http connection
 		_RPCPath string
 
-		// BackupLatency is used for Failbackup mode. rpc will sends another request if the first response doesn't return in BackupLatency time.
-		BackupLatency time.Duration
-
 		// 传输序列类型
 		Serialize     codec.SerializeType `field:"-"`
 		SerializeType string              //codec.SerializeType
 		CompressType  transport.CompressType
-
-		Heartbeat         bool
-		HeartbeatInterval time.Duration
 
 		Ja3      transport.Ja3 `field:"-"`
 		ProxyUrl string
@@ -178,8 +168,7 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		Retries: DefaultRetries,
 		//RPCPath:        share.DefaultRPCPath,
 		//SerializeType:  codec.MsgPack,
-		CompressType:  transport.None,
-		BackupLatency: 10 * time.Millisecond,
+		CompressType: transport.None,
 
 		CallOptions: CallOptions{
 			//Backoff:        DefaultBackoff,

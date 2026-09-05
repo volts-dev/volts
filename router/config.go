@@ -52,20 +52,17 @@ type (
 		PathRewriter     PathRewriter             `field:"-"` // 路由匹配前的路径改写(多语言 URL 前缀),见类型注释
 
 		// mapping to config file
-		Recover                   bool     `field:"recover"`
-		RouterTreePrinter         bool     `field:"router_tree_printer"`
-		RouterTreeRefreshInterval int      `field:"router_tree_refresh_interval"`
-		RequestPrinter            bool     `field:"request_printer"`
-		StaticDir                 []string `field:"static_dir"` // the static dir allow to visit
-		StaticExt                 []string `field:"static_ext"` // the static file format allow to visit
-		UsePprof                  bool     `field:"use_pprof"`
-		UseOpenAPI                bool     `field:"use_openapi"`     // 配置开关：开启后挂载 /openapi.json 与 /docs
-		OpenAPITitle              string   `field:"openapi_title"`   // 文档标题（空则默认 "Volts API"）
-		OpenAPIVersion            string   `field:"openapi_version"` // 文档版本（空则默认 "1.0.0"）
-		OpenAPIGateway            bool     `field:"openapi_gateway"` // 是否聚合 registry 中的远程服务端点
-		UploadBuf                 int      `field:"upload_buf"`      // 上传文件大小MB
-		UseRootStatics            bool     `field:"use_root_statics"`
-		StaticCacheTTL            int      `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
+		Recover                   bool   `field:"recover"`
+		RouterTreePrinter         bool   `field:"router_tree_printer"`
+		RouterTreeRefreshInterval int    `field:"router_tree_refresh_interval"`
+		RequestPrinter            bool   `field:"request_printer"`
+		UsePprof                  bool   `field:"use_pprof"`
+		UseOpenAPI                bool   `field:"use_openapi"`      // 配置开关：开启后挂载 /openapi.json 与 /docs
+		OpenAPITitle              string `field:"openapi_title"`    // 文档标题（空则默认 "Volts API"）
+		OpenAPIVersion            string `field:"openapi_version"`  // 文档版本（空则默认 "1.0.0"）
+		OpenAPIGateway            bool   `field:"openapi_gateway"`  // 是否聚合 registry 中的远程服务端点
+		UploadBuf                 int    `field:"upload_buf"`       // 上传文件大小MB
+		StaticCacheTTL            int    `field:"static_cache_ttl"` // 缓存秒数，默认 60；0 = 永不过期（仅靠 watcher 失效）
 
 		// 响应压缩，见 compress.go。默认关闭 —— 开启是部署方的明示动作（BREACH）。
 		Compress        bool     `field:"compress"`
@@ -97,7 +94,6 @@ func newConfig(opts ...Option) *Config {
 		RecoverHandler:            recoverHandler,
 		UploadBuf:                 25,
 		StaticCacheTTL:            60,
-		UseRootStatics:            true,
 		RouterTreeRefreshInterval: 60,
 		SelectorStrategy:          "random",
 	}
@@ -155,10 +151,6 @@ func (self *GroupConfig) Init(opts ...GroupOption) {
 func (self *Config) Load() error {
 	if err := self.Config.Load(); err != nil {
 		return err
-	}
-
-	if self.UseRootStatics && self.Router != nil {
-		self.Router.Url([]string{"GET"}, "/<:fileName>.<:ext>", rootStaticHandler)
 	}
 
 	return nil

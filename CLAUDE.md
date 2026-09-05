@@ -86,6 +86,26 @@ Execution order: global → route-level → embedded → main controller.
 
 Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
 
+### The framework never serves the working directory
+
+There used to be a `UseRootStatics` option, defaulting to **true**, that registered
+`GET /<:fileName>.<:ext>` onto a handler which passed the URL to `http.ServeFile` as a path
+**relative to the process working directory**. Any `.html` / `.txt` / `.xml` sitting next to
+the binary was reachable.
+
+It never fired, purely by luck: the route tree's placeholder syntax is `{:name}` and that
+line used `<:name>`, so the whole pattern was registered as a *literal* and only ever matched
+the string `/<:fileName>.<:ext>`; on top of that, `config.Register` runs `Load()` while
+`cfg.Router` is still nil inside `New()`, so usually nothing was registered at all. Rewriting
+the syntax "correctly" would have handed every process a working-directory file server —
+measured: `GET /secret.xml` returns 200 with the file's contents.
+
+The whole thing is gone, together with `StaticDir` and `StaticExt`, the two allowlist fields
+that were meant to fence it in and had no reader anywhere. Downstream already serves
+`/robots.txt` and `/favicon.ico` from explicit module routes.
+`TestRouter_DoesNotServeTheWorkingDirectory` pins the property, not the implementation:
+anyone adding root-level static serving has to turn it red first.
+
 ### Static files: modtime is what buys the 304
 
 `TStaticStore` (`router/static.go`) is a TTL memory cache in front of a disk dir and an

@@ -16,7 +16,6 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/volts-dev/cacher"
 	"github.com/volts-dev/cacher/memory"
-	"github.com/volts-dev/utils"
 )
 
 // ------------------------------------------------------------
@@ -318,36 +317,6 @@ func (i *memFileInfo) ModTime() time.Time { return i.modTime }
 func (i *memFileInfo) IsDir() bool        { return false }
 func (i *memFileInfo) Sys() any           { return nil }
 
-// ------------------------------------------------------------
-// staticHandler — 原有磁盘版（保留兼容）
-// ------------------------------------------------------------
-
-func staticHandler(urlPattern string, filePath string) func(c *THttpContext) {
-	fs := http.Dir(filePath)
-	fileServer := http.StripPrefix(urlPattern, http.FileServer(fs))
-
-	return func(ctx *THttpContext) {
-		defer ctx.Apply()
-
-		file := filepath.Join(ctx.pathParams.FieldByName("filepath").AsString())
-		cleanPath := filepath.Clean(file)
-		if strings.Contains(cleanPath, "..") {
-			ctx.response.WriteHeader(http.StatusForbidden)
-			return
-		}
-
-		if _, err := fs.Open(file); err != nil {
-			if ctx.handlerIndex == len(ctx.Route().Handlers())-1 {
-				ctx.response.WriteHeader(http.StatusNotFound)
-			}
-			log.Warn(err)
-			return
-		}
-
-		fileServer.ServeHTTP(ctx.response, ctx.request.Request)
-	}
-}
-
 // browserStaticMaxAge 静态资源的浏览器缓存时长(秒)。此前不发任何缓存头,
 // 每次页面访问都重复拉取全部 CSS/JS/图片(embed 资源无 mod time,连
 // Last-Modified 协商缓存都没有)。资源随二进制发布,1 小时是保守值。
@@ -363,28 +332,4 @@ func staticStoreHandler(urlPattern string, store *TStaticStore) func(c *THttpCon
 		}
 		fileServer.ServeHTTP(ctx.response, ctx.request.Request)
 	}
-}
-
-// rootStaticHandler 支持服务器 root 文件夹下的文件
-func rootStaticHandler(ctx *THttpContext) {
-	defer ctx.Apply()
-
-	p := ctx.PathParams()
-	fileExt := strings.ToLower(p.FieldByName("ext").AsString())
-
-	if utils.IndexOf(fileExt, "", "html", "txt", "xml") == -1 {
-		// 必须 return：NotFound 只是写了 404 头和正文，不会终止本函数。此前漏了
-		// 这一句，后面的 ServeFile 照样执行 —— 404 之后又把文件内容追加进同一条
-		// 响应（net/http 记一条 superfluous WriteHeader），白名单形同虚设。
-		ctx.NotFound()
-		return
-	}
-
-	filePath := filepath.Clean(ctx.request.URL.Path[1:])
-	if strings.Contains(filePath, "..") {
-		ctx.response.WriteHeader(http.StatusForbidden)
-		return
-	}
-
-	ctx.ServeFile(filePath)
 }
