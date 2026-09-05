@@ -370,7 +370,7 @@ func (h *HttpClient) call(ctx context.Context, node *registry.Node, req *httpReq
 		return nil, errors.InternalServerError("http.client", err.Error())
 	}
 
-	bd := body.New(req.body.Codec)
+	bd := body.New(responseCodec(hrsp, req.body.Codec))
 	bd.Data.Write(b) // NOTED 存入编码数据
 	rsp := &httpResponse{
 		response: hrsp,
@@ -532,4 +532,40 @@ func removeEmptyPort(host string) string {
 
 func isNotToken(r rune) bool {
 	return !httpguts.IsTokenRune(r)
+}
+
+// responseCodec 按**响应自己的** Content-Type 挑解码器，挑不出来才回落到请求那一侧。
+//
+// 此前响应体一律用请求那一侧的编解码器（`body.New(req.body.Codec)`）。对「发 JSON
+// 收 JSON」的 POST 碰巧是对的，对 GET 就不是：没有请求体的请求拿到的是 bytes 编解码
+// 器，于是 `rsp.Body().Decode(&out)` 报一句 "... is not a []byte" —— 看起来像对端返回
+// 的格式不对，而其实是我们拿错了解码器。vectors 的 `core/codec` 就在走这条路。
+//
+// **必须走 IdentifyWireCodec，不能用 IdentifyCodec**：Content-Type 是对端填的，等于
+// 让任何人挑选我们用哪个解码器去解析他发来的字节。Gob 因此默认不可被对端选中（见
+// codec 包关于内存放大的说明）。挑不出来就回落，行为与从前一致。
+func responseCodec(hrsp *http.Response, fallback codec.ICodec) codec.ICodec {
+	if hrsp == nil {
+		return fallback
+	}
+	ct := hrsp.Header.Get("Content-Type")
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i] // "application/json; charset=UTF-8"
+	}
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	if ct == "" {
+		return fallback
+	}
+
+	var st codec.SerializeType
+	switch ct {
+	case "application/json":
+		st = codec.JSON
+	default:
+		st = codec.Use(ct)
+	}
+	if c := codec.IdentifyWireCodec(st); c != nil {
+		return c
+	}
+	return fallback
 }

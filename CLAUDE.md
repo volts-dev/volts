@@ -302,6 +302,29 @@ app.Run()  // blocks until SIGTERM/SIGINT/SIGQUIT or context cancel
 
 On macOS, browser/curl access via LAN IP to a locally-running server is intercepted at the kernel level. Use `localhost` for local development access instead.
 
+### A client response decodes with the *response's* codec
+
+`httpResponse` used to build its body with the **request's** codec
+(`body.New(req.body.Codec)`). For a POST that sends JSON and receives JSON that happens to be
+right; for a GET it is not — a request with no body gets the bytes codec, so
+`rsp.Body().Decode(&out)` fails with `... is not a []byte`, which reads as "the peer returned
+the wrong format" rather than "we picked the wrong decoder". vectors' `core/codec` takes
+exactly this path. The codec now comes from the response's `Content-Type`, falling back to the
+request's when it is absent or unrecognised.
+
+**Use `codec.IdentifyWireCodec`, never `IdentifyCodec`, for that lookup.** `Content-Type` is
+filled in by the peer, so it decides which decoder we point at the peer's own bytes — the same
+rule as the RPC header byte, and the reason Gob is not wire-selectable.
+`TestResponseCodec_PicksByResponseContentType` pins it, including that a response claiming
+`gob` gets the fallback.
+
+While there: `httpResponse.Read(out)` was a stub whose whole body was `return nil` — the
+caller got an untouched zero value and a nil error. It is not in `IResponse` and had no
+callers, but `HttpResponse` is an exported alias, so it was reachable. It now decodes.
+`Body()` also dropped a dead re-read of `self.response.Body`, which by then is already closed
+and drained; its error check was inverted (`if err == nil { log.Err(err) }`), logging a nil on
+success and staying silent on real failures.
+
 ### Errors carry a code, and the code must survive wrapping
 
 `errors.Error` is the framework's error type: `Id`, `Code`, `Detail`, `Status`. Upper layers
