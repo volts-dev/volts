@@ -45,6 +45,32 @@ func StopAllStaticStores() {
 	allStaticStores = nil
 }
 
+// DefaultStaticCacheMaxFileSize 是单个文件进内存缓存的上限。
+//
+// 缓存此前没有任何大小限制：每个被请求过的文件都整份读进内存，按 TTL 留着，而
+// StaticCacheTTL 配 0 就是**永不过期**。静态目录里放一个几十 MB 的视频或字体包，
+// 一次请求就把它常驻了 —— 与 transport.Message.Decode 那次"16 字节报文换 67MB"是同
+// 一类问题，只是这次的放大倍数由目录内容决定。超过上限的文件改为直接从磁盘/embed
+// 流式返回，不进缓存：它们本来就摊不薄，缓存的收益远小于占住的内存。
+const DefaultStaticCacheMaxFileSize = 4 << 20 // 4MiB
+
+// staticEmbedModTime 是 embed 资源的修改时间基准。
+//
+// embed.FS 的文件没有修改时间，而 `http.ServeContent` 只在 modtime 非零时才发
+// Last-Modified、才肯回 304 —— 于是 embed 静态资源从来没有过协商缓存，浏览器缓存一
+// 过期就整份重下。可执行文件自己的 mtime 正是这批资源的"版本"：它们随二进制一起发布，
+// 二进制不变则内容不变。取不到就退回进程启动时间（同一进程内稳定，重启后失效一次）。
+var staticEmbedModTime = sync.OnceValue(func() time.Time {
+	if exe, err := os.Executable(); err == nil {
+		if fi, err := os.Stat(exe); err == nil {
+			return fi.ModTime()
+		}
+	}
+	return processStartTime
+})
+
+var processStartTime = time.Now()
+
 // ------------------------------------------------------------
 // TStaticStore — 实现 fs.FS，作为静态文件缓存层
 // ------------------------------------------------------------
@@ -53,14 +79,16 @@ func StopAllStaticStores() {
 // 读取优先级：cache 命中 → 磁盘（diskDir）→ embed.FS。
 // fsnotify 监听 diskDir，文件变动时失效对应 cache entry。
 type TStaticStore struct {
-	cache     *memory.TMemoryCache
-	ttl       time.Duration
-	diskDir   string // 磁盘目录（可为空）
-	diskPath  string // 磁盘路径
-	embedFS   fs.FS  // embed 来源（可为 nil）
-	stopOnce  sync.Once
-	watchOnce sync.Once
-	stop      chan struct{}
+	cache    *memory.TMemoryCache
+	ttl      time.Duration
+	diskDir  string // 磁盘目录（可为空）
+	diskPath string // 磁盘路径
+	embedFS  fs.FS  // embed 来源（可为 nil）
+	// maxFileSize 单个文件进缓存的上限；<=0 用 DefaultStaticCacheMaxFileSize。
+	maxFileSize int64
+	stopOnce    sync.Once
+	watchOnce   sync.Once
+	stop        chan struct{}
 }
 
 func newStaticStore(ttl time.Duration, diskPath string, embedFS fs.FS) *TStaticStore {
@@ -72,12 +100,13 @@ func newStaticStore(ttl time.Duration, diskPath string, embedFS fs.FS) *TStaticS
 	}
 
 	return &TStaticStore{
-		cache:    memory.New(memory.WithExpire(expireSec), memory.WithInterval(intervalSec)),
-		ttl:      ttl,
-		diskPath: diskPath,
-		diskDir:  filepath.Base(diskPath),
-		embedFS:  embedFS,
-		stop:     make(chan struct{}),
+		cache:       memory.New(memory.WithExpire(expireSec), memory.WithInterval(intervalSec)),
+		ttl:         ttl,
+		diskPath:    diskPath,
+		diskDir:     filepath.Base(diskPath),
+		embedFS:     embedFS,
+		maxFileSize: DefaultStaticCacheMaxFileSize,
+		stop:        make(chan struct{}),
 	}
 }
 
@@ -94,8 +123,8 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 	// 1. 查 cache
 	if s.cache.Exists(name) {
 		if val, err := s.cache.Get(name); err == nil {
-			if data, ok := val.([]byte); ok {
-				return newMemFile(name, data), nil
+			if e, ok := val.(*staticEntry); ok {
+				return newMemFile(name, e.data, e.modTime), nil
 			}
 		}
 	}
@@ -111,12 +140,27 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 				return nil, fs.ErrNotExist
 			}
 			rel, rerr := filepath.Rel(rootReal, real)
-			if rerr != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			if rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				return nil, fs.ErrNotExist
 			}
-			if data, err := os.ReadFile(real); err == nil {
-				s.setCache(name, data)
-				return newMemFile(name, data), nil
+			if f, err := os.Open(real); err == nil {
+				fi, serr := f.Stat()
+				if serr != nil || fi.IsDir() {
+					f.Close()
+					return nil, fs.ErrNotExist
+				}
+				// 超过上限的不进缓存，直接把真实文件交出去：*os.File 本身就是
+				// fs.File 且可 Seek，http.ServeContent 照常支持 Range 与 304。
+				if fi.Size() > s.cacheLimit() {
+					return f, nil
+				}
+				data, rerr := io.ReadAll(f)
+				f.Close()
+				if rerr != nil {
+					return nil, fs.ErrNotExist
+				}
+				s.setCache(name, data, fi.ModTime())
+				return newMemFile(name, data, fi.ModTime()), nil
 			}
 		}
 	}
@@ -124,28 +168,52 @@ func (s *TStaticStore) Open(name string) (fs.File, error) {
 	// 3. 读 embed.FS
 	if s.embedFS != nil {
 		if f, err := s.embedFS.Open(name); err == nil {
-			data, err := io.ReadAll(f)
-			if err != nil {
-				f.Close()
+			// embed 文件没有修改时间，用可执行文件的 mtime 代替（见
+			// staticEmbedModTime）—— 没有它就永远发不出 Last-Modified，也就永远
+			// 回不了 304。
+			modTime := staticEmbedModTime()
+			if fi, serr := f.Stat(); serr == nil && fi.Size() > s.cacheLimit() {
+				return f, nil // 大文件不进缓存，embed 的 File 也可 Seek
+			}
+			data, rerr := io.ReadAll(f)
+			f.Close()
+			if rerr != nil {
 				return nil, fs.ErrNotExist
 			}
-			f.Close()
-			s.setCache(name, data)
-			return newMemFile(name, data), nil
+			s.setCache(name, data, modTime)
+			return newMemFile(name, data, modTime), nil
 		}
 	}
 
 	return nil, fs.ErrNotExist
 }
 
-func (s *TStaticStore) setCache(name string, data []byte) {
+// cacheLimit 返回单个文件进缓存的字节上限。
+func (s *TStaticStore) cacheLimit() int64 {
+	if s.maxFileSize > 0 {
+		return s.maxFileSize
+	}
+	return DefaultStaticCacheMaxFileSize
+}
+
+// staticEntry 是缓存里存的东西：内容 + 它的修改时间。
+//
+// 修改时间必须一起缓存。只存 []byte 的话，命中缓存的那一路就交不出 modtime，
+// `http.ServeContent` 于是不发 Last-Modified —— 表现为"第一次请求能回 304、后面反而
+// 不能"，比全都不能更难查。
+type staticEntry struct {
+	data    []byte
+	modTime time.Time
+}
+
+func (s *TStaticStore) setCache(name string, data []byte, modTime time.Time) {
 	blockTTL := s.ttl
 	if blockTTL <= 0 {
 		blockTTL = -1 // cacher: -1 = never expire for this entry
 	}
 	s.cache.Set(&cacher.CacheBlock{
 		Key:        name,
-		Value:      data,
+		Value:      &staticEntry{data: data, modTime: modTime},
 		TTL:        blockTTL,
 		LastAccess: time.Now(),
 	})
@@ -223,10 +291,10 @@ type memFile struct {
 	info *memFileInfo
 }
 
-func newMemFile(name string, data []byte) *memFile {
+func newMemFile(name string, data []byte, modTime time.Time) *memFile {
 	return &memFile{
 		Reader: bytes.NewReader(data),
-		info:   &memFileInfo{name: path.Base(name), size: int64(len(data))},
+		info:   &memFileInfo{name: path.Base(name), size: int64(len(data)), modTime: modTime},
 	}
 }
 
@@ -234,14 +302,19 @@ func (f *memFile) Close() error               { return nil }
 func (f *memFile) Stat() (fs.FileInfo, error) { return f.info, nil }
 
 type memFileInfo struct {
-	name string
-	size int64
+	name    string
+	size    int64
+	modTime time.Time
 }
 
-func (i *memFileInfo) Name() string       { return i.name }
-func (i *memFileInfo) Size() int64        { return i.size }
-func (i *memFileInfo) Mode() fs.FileMode  { return 0444 }
-func (i *memFileInfo) ModTime() time.Time { return time.Time{} }
+func (i *memFileInfo) Name() string      { return i.name }
+func (i *memFileInfo) Size() int64       { return i.size }
+func (i *memFileInfo) Mode() fs.FileMode { return 0444 }
+
+// ModTime 必须是真实时间。返回零值时 `http.ServeContent` 既不发 Last-Modified，
+// 也不处理 If-Modified-Since —— 静态资源于是完全没有协商缓存，浏览器缓存一过期就
+// 整份重下。vertex 的主包 gzip 后 589KB，每小时重下一次，而它其实一个字节都没变。
+func (i *memFileInfo) ModTime() time.Time { return i.modTime }
 func (i *memFileInfo) IsDir() bool        { return false }
 func (i *memFileInfo) Sys() any           { return nil }
 

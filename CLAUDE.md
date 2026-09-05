@@ -86,6 +86,33 @@ Execution order: global → route-level → embedded → main controller.
 
 Because the framework serves HTTP and RPC from separate handler objects (the handler id includes `TransportType`), `Use` filters by transport **at assembly time**: the argument type carries the intent (`func(*THttpContext)` / `func(*TRpcContext)` / `func(IContext)`), and an `IMiddleware` may declare scope via the optional `IMiddlewareTransport`. Entries that do not apply are absent from the other side's `funcs` slice, so the cost is literally zero rather than merely small. **Any new cross-cutting feature must follow this rule — branch at registration, never in the request path.**
 
+### Static files: modtime is what buys the 304
+
+`TStaticStore` (`router/static.go`) is a TTL memory cache in front of a disk dir and an
+`embed.FS`. Two things it got wrong, both invisible until measured:
+
+- **`memFileInfo.ModTime()` returned the zero time.** `http.ServeContent` only emits
+  `Last-Modified`, and only honours `If-Modified-Since`, when modtime is non-zero — so static
+  assets had no conditional caching at all, and every browser cache expiry re-downloaded the
+  whole body. Disk files now carry the file's real mtime; `embed.FS` has none, so it borrows
+  the **executable's** mtime, which is exactly the right version key (embedded assets ship
+  with the binary). The modtime is cached *alongside* the bytes — cache only the `[]byte` and
+  the hit path has no modtime, which reads as "the first request can 304 but later ones
+  cannot", harder to diagnose than never working.
+- **Nothing capped what went into memory.** Every served file was slurped whole and kept for
+  the TTL, and `StaticCacheTTL: 0` means never expire. One large file in a static dir became
+  resident forever. Files over `DefaultStaticCacheMaxFileSize` (4MiB) now stream straight from
+  disk or embed and are not cached; `*os.File` and embed files are both seekable, so Range
+  and 304 still work.
+
+`Cache-Control: public, max-age=3600` is still set, so the 304 only happens after that hour
+elapses; the two together are what make a repeat visit cheap.
+
+A name containing `..` is rejected outright, even for a legitimate file called `..hidden`.
+`path.Clean("/"+name)` already makes traversal impossible, so that check is a second line of
+defence, and keeping it costs only an exotic filename. Worth knowing because it surfaces as
+"the file is right there in the directory but 404s".
+
 ### Connection limits: four segments, and `Debug()` may only widen two
 
 `transport.applyServerLimits` is the single place that configures every `http.Server` this
