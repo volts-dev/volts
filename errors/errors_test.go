@@ -3,6 +3,7 @@ package errors
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,43 @@ func TestCause_IsNotSerialized(t *testing.T) {
 	}
 	if m["detail"] != "boom" || int(m["code"].(float64)) != 500 {
 		t.Fatalf("四个字段应原样上线，实际 %s", raw)
+	}
+}
+
+// TestDetail_HasNoStrayBrackets 锁定错误文案里不再有 Go 的切片方括号。
+//
+// 从前 `fmt.Sprintf("%s Forbidden %v", id, msg)` 里的 msg 是 `...any`，`%v` 打印的是
+// 切片本身 —— 用户在红条上看到的是 `acl Forbidden [user 42]`，一个参数都不传时末尾
+// 还挂着空的 `[]`。同时**状态词必须留下**：调用方按它匹配错误。
+func TestDetail_HasNoStrayBrackets(t *testing.T) {
+	cases := []struct {
+		got  error
+		want string
+	}{
+		{Unauthorized("web.login", "token expired"), "web.login Session Expired token expired"},
+		{Unauthorized("web.login"), "web.login Session Expired"},
+		{Forbidden("acl", "user", 42), "acl Forbidden user 42"},
+		{Forbidden(""), "Forbidden"},
+		{InternalServerError("orm", "boom"), "orm Internal Server Error boom"},
+		{UnsupportedCodec("volts.client", "MsgPack"), "volts.client unsupported codec MsgPack"},
+	}
+	for _, c := range cases {
+		if got := c.got.Error(); got != c.want {
+			t.Errorf("Detail=%q, want %q", got, c.want)
+		}
+	}
+
+	// 状态词是调用方的匹配依据，任何情况下都不能丢。
+	for _, c := range []struct {
+		err    error
+		status string
+	}{
+		{Unauthorized("x"), "Session Expired"},
+		{Forbidden("x"), "Forbidden"},
+		{InternalServerError("x"), "Internal Server Error"},
+	} {
+		if !strings.Contains(c.err.Error(), c.status) {
+			t.Errorf("%q 里少了状态词 %q", c.err.Error(), c.status)
+		}
 	}
 }

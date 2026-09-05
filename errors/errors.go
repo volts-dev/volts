@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // 标准库的四个组合子在这里原样转出。
@@ -153,7 +154,7 @@ func Unauthorized(id string, msg ...any) error {
 	return &Error{
 		Id:     id,
 		Code:   401,
-		Detail: fmt.Sprintf("%s Session Expired %v", id, msg),
+		Detail: detailOf(id, "Session Expired", msg),
 		Status: http.StatusText(401),
 	}
 }
@@ -163,7 +164,7 @@ func Forbidden(id string, msg ...any) error {
 	return &Error{
 		Id:     id,
 		Code:   403,
-		Detail: fmt.Sprintf("%s Forbidden %v", id, msg),
+		Detail: detailOf(id, "Forbidden", msg),
 		Status: http.StatusText(403),
 	}
 }
@@ -213,7 +214,7 @@ func InternalServerError(id string, msg ...any) error {
 	return &Error{
 		Id:     id,
 		Code:   500,
-		Detail: fmt.Sprintf("%s Internal Server Error %v", id, msg),
+		Detail: detailOf(id, "Internal Server Error", msg),
 		Status: http.StatusText(500),
 	}
 }
@@ -222,7 +223,31 @@ func UnsupportedCodec(id string, a ...interface{}) error {
 	return &Error{
 		Id:     id,
 		Code:   500,
-		Detail: fmt.Sprintf("%s unsupported codec %v", id, a),
+		Detail: detailOf(id, "unsupported codec", a),
 		Status: http.StatusText(500),
 	}
+}
+
+// detailOf 拼出 "<id> <状态词> <说明>"。
+//
+// 从前是 `fmt.Sprintf("%s Forbidden %v", id, msg)`，而 msg 是 `...any` —— `%v` 打印
+// 的是**切片本身**，于是用户看到的是 `acl Forbidden [user 42]`，一对凭空出现的方括号；
+// 一个参数都不传时更明显，末尾挂着一个空的 `[]`。这段文案是直接送到前端红条上的
+// （vectors 的 codec 把 Detail 当 data 下发），括号看着就像出了别的毛病。
+//
+// **状态词必须留在 Detail 里**：调用方按状态词匹配错误（vectors 的 TResponseRPC.Error
+// 用 strings.Contains(detail, message) 判断要不要把状态词再拼一遍），去掉它会让每条
+// 错误平白多一截重复前缀。所以这里只做一件事：把方括号和多余空格去掉。
+func detailOf(id, status string, msg []any) string {
+	var b strings.Builder
+	if id != "" {
+		b.WriteString(id)
+		b.WriteByte(' ')
+	}
+	b.WriteString(status)
+	for _, m := range msg {
+		b.WriteByte(' ')
+		b.WriteString(fmt.Sprint(m))
+	}
+	return b.String()
 }
