@@ -228,3 +228,18 @@ func TestApply_NoBodyOnStatusThatForbidsOne(t *testing.T) {
 		})
 	}
 }
+
+// TestApply_OrdinaryStatusStillCarriesBody 是上一条的反向断言：那道闸不许连累别人。
+//
+// 单独写出来是因为最容易写错的正是这个组合 —— 先 WriteHeader 一个非 200 的成功码、
+// 再 Respond。判据放宽成"只要显式写过状态码就不发正文"的话，上一条照样绿，而这一条
+// 立刻红。
+func TestApply_OrdinaryStatusStillCarriesBody(t *testing.T) {
+	rec := serveOnce(t, "GET", "/nobody/ordinary", func(ctx *THttpContext) {
+		ctx.WriteHeader(http.StatusAccepted)
+		ctx.Respond([]byte("hi"))
+	})
+	if rec.Code != http.StatusAccepted || rec.Body.String() != "hi" {
+		t.Fatalf("status=%d body=%q，期望 202 与 \"hi\"", rec.Code, rec.Body.String())
+	}
+}

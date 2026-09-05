@@ -181,6 +181,19 @@ types outside `DefaultCompressTypes`. `q=0` in `Accept-Encoding` is an explicit 
 is honoured — answering with an encoding the client just declined renders the page as
 binary garbage.
 
+### WriteHeader is deferred, and 204 / 304 must stay empty
+
+`THttpResponse.WriteHeader` only *records* the status; the status line goes out on the first
+`Write` / `Flush`, or at `Apply`'s `Commit()`. That is what lets `ctx.WriteHeader(422)` be
+followed by `ctx.RespondByJson(x)` — under immediate commit the headers froze first and
+`Apply` dropped the body, so every non-200 JSON response went out empty.
+
+Deferring it opened one hole that has to be closed alongside: `Apply` now judges on "has a
+body been written", so `ctx.NotModified(); ctx.Respond(x)` sends `x` where the old `Written()`
+check silently swallowed it. `THttpResponse.Write` therefore refuses a body on 204 / 304 / 1xx
+(`http.ErrBodyNotAllowed`, same rule and same error as net/http). See Testing Notes for why
+that guard can only be tested on a recorder, never on a live server.
+
 ### WebSocket
 
 Native server-side WebSocket (RFC 6455) lives in two layers: `transport/websocket.go` is
@@ -197,15 +210,6 @@ grp.Url([]string{"GET"}, "/bus/websocket", func(ctx *router.THttpContext) {
 ```
 
 Four rules that are easy to get wrong:
-
-Deferring the commit opened one hole that had to be closed with it: `Apply` now judges on
-"has a body been written", so `ctx.NotModified(); ctx.Respond(x)` sends `x` where the old
-`Written()` check silently swallowed it. `THttpResponse.Write` therefore refuses a body on
-204 / 304 / 1xx (`http.ErrBodyNotAllowed`, same as net/http). **Test that one with
-`httptest.ResponseRecorder`, not a real server** — the exact opposite of the rule above. A
-real net/http server drops a 304's body itself, so the fault is invisible there; the recorder
-takes it. What the recorder is standing in for is any *other* writer: the compression wrapper,
-or a connection taken over after Hijack.
 
 - **A successful upgrade detaches the context from the pool.** `Upgrade` sets
   `ctx.hijacked`, and `TRouter.ServeHTTP` returns immediately instead of running
