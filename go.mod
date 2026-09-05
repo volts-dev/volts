@@ -16,6 +16,7 @@ require (
 	github.com/hashicorp/consul/api v1.34.4
 	github.com/miekg/dns v1.1.72
 	github.com/mitchellh/hashstructure/v2 v2.0.2
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/spf13/viper v1.21.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/volts-dev/cacher v0.0.0-20260314091036-7e3a317fca8b
@@ -58,7 +59,6 @@ require (
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/redis/go-redis/v9 v9.22.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
