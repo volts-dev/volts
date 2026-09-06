@@ -2,15 +2,10 @@ module github.com/volts-dev/volts
 
 go 1.27
 
-// 本地 cacher 已修 TMemoryCache.Push 的 Len() 锁外读竞态（发布版 v0314 仍带竞态，
-// TestConcurrentPubBroker -race 可实锤）；发布 cacher 新版后移除本 replace 并 bump。
-replace github.com/volts-dev/cacher => ../cacher
-
 require (
 	github.com/bwmarrin/snowflake v0.3.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getkin/kin-openapi v0.144.0
-	github.com/go-acme/lego/v4 v4.35.2
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.34.4
@@ -19,7 +14,7 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/spf13/viper v1.21.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/volts-dev/cacher v0.0.0-20260314091036-7e3a317fca8b
+	github.com/volts-dev/cacher v0.0.0-20260906072122-5930f877b3df
 	github.com/volts-dev/dataset v0.0.0-20260707234140-fb059add5c90
 	github.com/volts-dev/template v0.0.0-20240613070915-3d2783a5c479
 	github.com/volts-dev/utils v0.0.0-20260429065959-186108449dda
@@ -65,6 +60,7 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.7.0 // indirect

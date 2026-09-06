@@ -152,9 +152,14 @@ Two of them are worth knowing individually:
   case-insensitive path matching is a classic ACL-bypass shape — the middleware checks one
   casing, the backend opens another. `router/case_sensitive_routing_test.go` pins the
   property.
-- **`server.AutoCreate` is kept, marked `Deprecated`.** It has no reader either, but
-  vectors' `service.go` calls it twice, so removing it is a coordinated up/downstream
-  change rather than a cleanup.
+- **`server.AutoCreate` was the one that needed both sides.** It had no reader either, but
+  vectors' `service.go` called it twice, so it stayed behind one release marked
+  `Deprecated` and came out once those two call sites were gone.
+
+Deleting `internal/acme/options.go` had a second effect worth noting: it was the **only**
+file importing `github.com/go-acme/lego/v4`, so the whole ACME certificate library left
+the dependency tree. A dead options struct nobody could reach was compiling a TLS/ACME
+library into every binary that linked volts.
 
 Separately, `HttpTransport.Listen`'s ACME branch wrote `config, err := ...`, which shadowed
 the outer `err`; the later `l, err = vnet.Listen(...)` then assigned to the **inner** one,
@@ -837,13 +842,18 @@ See project memory for the full list. Remaining open notes:
   listen addresses or DB connection strings); returning nil means the model applied the
   change itself under its own lock. The change list is computed *before* `OnReload`, since
   afterwards the model already equals the new copy and nothing would diff.
+- **go.mod must stay free of `replace`.** A local `replace ... => ../xxx` only holds on
+  one machine; left in the repo it means nobody else can `go get` this module, and the
+  error they see points at *their* disk. The cacher replace sat here for months doing
+  exactly that. Temporary replaces are legitimate — `TestGoMod_HasNoReplaceDirective`
+  makes forgetting to remove one visible immediately instead of when someone reports that
+  the library will not install.
+
 - `IClient` interface completeness is a design gap, not a bug. It lacks `NewRequest`
   because HttpClient (`method, url, data`) and RpcClient (`service, method, request`)
   differ semantically — code needing it must hold the concrete type.
 - broker/http `Publish` must keep `maddr.LocalFormat` on node addresses (macOS network
   extensions intercept traffic to physical interfaces — same rule as client/reverse_proxy)
-- go.mod carries a local `replace` for volts-dev/cacher until its Push race fix is
-  published. **Until then this repo cannot be `go get`-ed by anyone else.**
 
 ### Testing Notes
 
