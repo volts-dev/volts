@@ -313,7 +313,7 @@ func (self *TRouter) RegisterGroup(groups ...IGroup) {
 // ServeHTTP implements the http.Handler interface, dispatching requests to HTTP or RPC handlers.
 func (self *TRouter) ServeHTTP(w http.ResponseWriter, r *transport.THttpRequest) {
 	// Log the request path if enabled.
-	if self.config.RequestPrinter {
+	if self.config.PrintsRequest() {
 		defer func() {
 			log.Infof("[Path]%v", r.URL.Path)
 		}()
@@ -600,7 +600,7 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 }
 
 func (self *TRouter) route(route *route, ctx IContext) {
-	if self.config.Recover {
+	if self.config.RecoverEnabled() {
 		defer func() {
 			if err := recover(); err != nil {
 				log.Err(err)

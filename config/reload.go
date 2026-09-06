@@ -6,6 +6,7 @@ import (
 	"log"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/volts-dev/utils"
 )
@@ -35,6 +36,45 @@ import (
 // 完全不被触碰。适合那些本就不该热更的配置 —— 监听地址、数据库连接串、
 // 会话存储后端之类，改了也得重启才生效，热重载去写它们只有坏处。
 var ErrReloadUnsupported = errors.New("该配置不支持热重载")
+
+// hotMu 把「热重载写模型字段」与「请求路径读同一字段」隔开。
+//
+// 写侧只有 applyChangedFields 一处（而且只在真有字段变化时才取写锁）；读侧由各包
+// 自己的访问器持有读锁，见 HotRLock。
+//
+// 用一把进程级的锁而不是每个模型一把：reload 是罕见事件，读锁是共享的、无竞争时
+// 只是一次原子加，相对一次请求（微秒级）可以忽略；而每模型一把锁没法放进
+// config.Config —— 那个结构体会被按值复制（broker/memory 就从 *m.config 取字面量），
+// 里面放锁会让 go vet 的 copylocks 对既有代码报警。
+var hotMu sync.RWMutex
+
+// HotRLock / HotRUnlock 括住一次「读会被热重载改写的字段」。
+//
+// 谁需要它：字段在**请求或连接路径上**被读，同时又没有标 `field:"-"`（也就是
+// 热重载会写它）。目前这样的字段是 router.Config 的 Recover / RequestPrinter、
+// selector.Config 的三个 Breaker*、transport.Config 的三个超时。
+//
+// 装配期的读不需要 —— 那时候还没有请求在跑，没有并发写。
+//
+// 刻意做成**包级函数而不是 Config 的方法**：每个配置模型都内嵌 config.Config，
+// 方法会被提升到所有模型上，凭空给它们加一对看起来像锁 API 的导出方法。
+//
+//	func (self *Config) RecoverEnabled() bool {
+//	    config.HotRLock()
+//	    defer config.HotRUnlock()
+//	    return self.Recover
+//	}
+//
+// 两条使用禁忌：
+//   - 不要**嵌套**取读锁。Go 的 RWMutex 读锁不可重入 —— 同一 goroutine 第二次
+//     RLock 时若正好有写者在排队，就会死锁。现有调用点全是先后调用而非嵌套
+//     （BreakerEnabled 返回后才进 mark，mark 里才取 breakerSettings）。
+//   - IReloadable.OnReload 的实现里**不要**调它 —— 那条路径由模型自己接管同步，
+// 框架不持有 hotMu，但模型若在 OnReload 里再取读锁，写侧一旦改成也取写锁就会死锁。
+func HotRLock() { hotMu.RLock() }
+
+// HotRUnlock 见 HotRLock。
+func HotRUnlock() { hotMu.RUnlock() }
 
 // IReloadable 由配置模型**可选**实现，用于接管热重载的应用方式。
 //
@@ -218,6 +258,15 @@ func diffFields(cur, next IConfig, path string) []ReloadChange {
 
 // applyChangedFields 把 next 中与 cur 不同的字段写回 cur，并返回变更清单。
 func applyChangedFields(cur, next IConfig, path string) []ReloadChange {
+	// 先只比对不写：绝大多数 reload 没有任何字段变化，那种情况下连写锁都不取，
+	// 请求路径上的读锁一次都不会被阻塞。
+	if len(compareFields(cur, next, path, false)) == 0 {
+		return nil
+	}
+
+	// 确实要写了 —— 与请求路径上的读互斥，见 HotRLock。
+	hotMu.Lock()
+	defer hotMu.Unlock()
 	return compareFields(cur, next, path, true)
 }
 

@@ -45,6 +45,24 @@ type (
 	}
 )
 
+// breakerSettings 一次性读出三个熔断参数。
+//
+// 三个必须**一起**读：它们逻辑上是一组设置，分三次读会横跨一次热重载，拿到新旧
+// 混合的组合（新的阈值配旧的冷却时长）。读锁的理由见 config.HotRLock —— 这三个
+// 字段都会被热重载改写，而每次 Select / Mark 都读它们。
+func (self *Config) breakerSettings() (failures int, cooldown, maxCooldown time.Duration) {
+	config.HotRLock()
+	defer config.HotRUnlock()
+	return self.BreakerFailures, self.BreakerCooldown, self.BreakerMaxCooldown
+}
+
+// BreakerEnabled 熔断是否开启（BreakerFailures > 0）。见 breakerSettings。
+func (self *Config) BreakerEnabled() bool {
+	config.HotRLock()
+	defer config.HotRUnlock()
+	return self.BreakerFailures > 0
+}
+
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
 		Name:               "default",

@@ -64,7 +64,7 @@ func (self *registrySelector) Match(endpoint string, opts ...SelectOption) (Next
 		return nil, err
 	}
 	// 摘掉处于熔断状态的节点（与 Select 同规则）
-	if self.config.BreakerFailures > 0 {
+	if self.config.BreakerEnabled() {
 		self.health.purge()
 		services = self.health.filterHealthy(services)
 	}
@@ -107,7 +107,7 @@ func (self *registrySelector) Select(service string, opts ...SelectOption) (Next
 
 	// 摘掉处于熔断状态的节点。放在用户 filter 之后，确保用户的筛选逻辑
 	// 看到的是完整节点集（否则 filter 的语义会随节点健康度漂移）。
-	if self.config.BreakerFailures > 0 {
+	if self.config.BreakerEnabled() {
 		self.health.purge()
 		services = self.health.filterHealthy(services)
 	}
@@ -128,7 +128,7 @@ func (self *registrySelector) Select(service string, opts ...SelectOption) (Next
 // 此前本方法是空函数 —— 挂掉的节点会被持续选中，直到注册中心 TTL 过期
 // （分钟级），期间每个落到它头上的请求都必然失败。
 func (self *registrySelector) Mark(service string, node *registry.Node, err error) {
-	if node == nil || self.config.BreakerFailures <= 0 {
+	if node == nil || !self.config.BreakerEnabled() {
 		return
 	}
 	self.health.mark(service, node.Id, err, self.config)

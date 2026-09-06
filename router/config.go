@@ -85,6 +85,25 @@ type (
 	}
 )
 
+// RecoverEnabled 与 PrintsRequest 是**每请求都要读、又会被热重载改写**的两个字段的
+// 访问器，读锁的理由见 config.HotRLock。
+//
+// 直接读 self.config.Recover 与热重载的写入之间没有任何同步，而 vectors 的
+// cmd/service.go 是开着 WithWatcher 的 —— 这条竞态是线上活的。
+// 装配期的读不用走这里：那时候还没有请求在跑。
+func (self *Config) RecoverEnabled() bool {
+	config.HotRLock()
+	defer config.HotRUnlock()
+	return self.Recover
+}
+
+// PrintsRequest 见 RecoverEnabled。
+func (self *Config) PrintsRequest() bool {
+	config.HotRLock()
+	defer config.HotRUnlock()
+	return self.RequestPrinter
+}
+
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
 		Name:                      "default",

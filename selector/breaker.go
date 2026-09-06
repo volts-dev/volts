@@ -84,8 +84,12 @@ func (self *healthTracker) mark(service string, nodeId string, err error, cfg *C
 		return
 	}
 
+	// 三个参数一次读齐，见 Config.breakerSettings：分次读会横跨一次热重载，
+	// 拿到新阈值配旧冷却时长这种组合。
+	breakerFailures, breakerCooldown, breakerMaxCooldown := cfg.breakerSettings()
+
 	failures := h.failures.Add(1)
-	threshold := uint32(cfg.BreakerFailures)
+	threshold := uint32(breakerFailures)
 	if threshold == 0 || failures < threshold {
 		return
 	}
@@ -97,13 +101,13 @@ func (self *healthTracker) mark(service string, nodeId string, err error, cfg *C
 	// 等于当下 → 节点立刻又可选，看起来"熔断器开着"其实什么都没做。
 	// 经 newConfig 构造时这两个字段都有默认值，但调用方直接写 Config{} 就会踩到，
 	// 而一个悄悄不工作的安全机制比没有更糟 —— 它让人以为自己有保护。
-	cooldown := cfg.BreakerCooldown
+	cooldown := breakerCooldown
 	if cooldown <= 0 {
 		cooldown = DefaultBreakerCooldown
 	}
 
 	// 未声明上限 = 不做指数退避，保持基础冷却时长（而不是"上限为 0"）。
-	maxCooldown := cfg.BreakerMaxCooldown
+	maxCooldown := breakerMaxCooldown
 	if maxCooldown <= 0 {
 		maxCooldown = cooldown
 	}

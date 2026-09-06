@@ -800,17 +800,33 @@ A second, wider audit (security / stability / efficiency / stack) ran 2026-07-20
 `go test -race ./...` clean, `go vet ./...` clean, 3 fuzz targets ~5M execs with no crash.
 See project memory for the full list. Remaining open notes:
 
-- **config hot-reload is still racy on the read side** (`config.WithWatcher()`, which
-  vectors enables in production). Reload now decodes into a *copy*, validates it, and
-  writes back **only the fields that actually changed** — so most reloads write nothing at
-  all, an invalid file no longer corrupts a live instance, and the config layer's own
-  write paths (Register / LoadFromFile / Reload) are serialized by `core.applyMu`.
-  What remains unfixed: when a field genuinely changes, that write still races against
-  request goroutines reading the same struct field directly (`router.Config.Recover` per
-  request, `transport.Config.ReadTimeout` per connection, `selector.Config.BreakerFailures`
-  per Select). Closing it needs copy-on-write + accessor reads across every read site —
-  a read-side change, not a config-layer one. Do not "just add a mutex" there: the readers
-  are arbitrary business code touching struct fields directly.
+- **config hot-reload's read side is now synchronized** (`config.WithWatcher()`, which
+  vectors enables in production). Reload decodes into a *copy*, validates it, and writes
+  back **only the fields that actually changed** — so most reloads write nothing at all,
+  an invalid file no longer corrupts a live instance, and the config layer's own write
+  paths (Register / LoadFromFile / Reload) are serialized by `core.applyMu`.
+  The remaining read-side race is closed by `config.HotRLock` / `HotRUnlock`: a
+  process-wide `RWMutex` taken for writing by `applyChangedFields` — and **only when a
+  field actually changed**, so a no-op reload never blocks a request — and for reading by
+  the accessors that sit in front of every hot field.
+  Two things made this far smaller than it looks. The set of fields that are both
+  reloadable and read on a request/connection path is **five**, not "every read site":
+  `router.Config.Recover` / `RequestPrinter` and `selector.Config.BreakerFailures` /
+  `BreakerCooldown` / `BreakerMaxCooldown`. And `transport.Config` / `server.Config` had
+  already taken the other valid route — their `OnReload` returns `ErrReloadUnsupported`,
+  so nothing writes them at all and there is no race to close; adding a lock there would
+  guard a writer that does not exist.
+  The accessors read the whole group in one acquisition (`breakerSettings` returns all
+  three) because reading them one at a time straddles a reload and yields a mix of old and
+  new. `RWMutex` read locks are **not reentrant** — a second `RLock` on one goroutine
+  deadlocks if a writer queues in between — so the accessors are called in sequence, never
+  nested, and an `OnReload` implementation must not call them. Measured on
+  `BenchmarkServe_3Mid`, `-count=9`: 1411 ns/op with the accessors vs 1455 without, i.e.
+  below this benchmark's noise floor.
+  Regressions: `config/reload_race_test.go` (needs `-race`; a torn bool read is
+  unobservable otherwise) and `config/hot_field_guard_test.go`, a source scan that fails
+  if any of those files reads a hot field directly again — the list in that test *is* the
+  list.
   Reload must keep skipping `field:"-"` when diffing — those are live instance pointers
   (Logger / Registry / Transport / Router); `UnmarshalKey` never populates them, so the
   copy holds nil, and diffing them would "detect a change" and null out the running
