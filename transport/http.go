@@ -118,10 +118,38 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 	}
 	dialCfg.Init(opts...)
 
-	var conn net.Conn
-	var err error
+	network := dialCfg.Network
+	if network == "" {
+		network = "tcp"
+	}
 
-	// TODO: support dial option here rather than using internal config
+	// 代理：WithDialer 给的优先，其次按 WithProxyURL 现建一个。
+	//
+	// 这两个此前几乎没有读取方 —— ProxyURL **一个都没有**，dialer 只在下面的 JA3
+	// 分支里被用到。于是「配了代理但没配指纹」的请求（client.HttpClient 的默认形态）
+	// 直接从本机 IP 发出去，而调用方以为自己走了代理。配代理恰恰是为了不让对端看到
+	// 这个 IP，静默绕过等于反着做，且不留任何痕迹。
+	dialer := dialCfg.dialer
+	if dialer == nil && dialCfg.ProxyURL != "" {
+		d, err := NewProxyDialer(dialCfg.ProxyURL, "")
+		if err != nil {
+			return nil, err
+		}
+		dialer = d
+	}
+
+	// 没有代理时保留原来的 newConn 包装：它认环境变量里的代理。
+	rawDial := func() (net.Conn, error) {
+		if dialer != nil {
+			return dialer.Dial(network, addr)
+		}
+		return newConn(func(a string) (net.Conn, error) {
+			return net.DialTimeout(network, a, dialCfg.DialTimeout)
+		})(addr)
+	}
+
+	var conn net.Conn
+
 	if dialCfg.Secure || self.config.TlsConfig != nil {
 		config := self.config.TlsConfig
 		if config == nil {
@@ -135,45 +163,59 @@ func (self *HttpTransport) Dial(addr string, opts ...DialOption) (IClient, error
 			config.MinVersion = tls.VersionTLS12
 		}
 
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			host = addr
+		}
+
+		rawConn, err := rawDial()
+		if err != nil {
+			return nil, err
+		}
+
 		if dialCfg.Ja3.Ja3 != "" {
 			// JA3 指纹伪装的实现在独立子模块 core/ja3 里（见 ja3_hook.go）。
 			// 未注册时**明确报错**而不是静默退回普通 TLS —— 后者会让伪装悄悄失效，
 			// 调用方还以为自己伪装了。
 			dial := ja3Dialer()
 			if dial == nil {
+				rawConn.Close()
 				return nil, ErrJa3NotRegistered
-			}
-
-			rawConn, err := dialCfg.dialer.Dial(dialCfg.Network, addr)
-			if err != nil {
-				return nil, err
-			}
-
-			var host string
-			if host, _, err = net.SplitHostPort(addr); err != nil {
-				host = addr
 			}
 
 			conn, err = dial(rawConn, host, config, dialCfg.Ja3.Ja3)
 			if err != nil {
+				rawConn.Close()
 				return nil, err
 			}
 		} else {
-			//config.NextProtos = []string{"http/1.1"}
-			//	conn, err = newConn(func(addr string) (net.Conn, error) {
-			//		return tls.DialWithDialer(&net.Dialer{Timeout: self.config.DialTimeout}, "tcp", addr, config)
-			//	})(addr)
-			conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
+			// tls.Client 不会像 tls.Dial 那样从地址推出 ServerName，不补的话证书
+			// 校验必然失败，而报出来的是"证书名字对不上"，不指向这里。
+			if config.ServerName == "" {
+				config = config.Clone()
+				config.ServerName = host
+			}
+			// tls.DialWithDialer 会把拨号超时同时用作握手超时；这里手工补上，
+			// 否则一个只完成 TCP、不回 ServerHello 的对端能把调用方挂住。
+			if dialCfg.DialTimeout > 0 {
+				rawConn.SetDeadline(time.Now().Add(dialCfg.DialTimeout))
+			}
+			tlsConn := tls.Client(rawConn, config)
+			if err = tlsConn.Handshake(); err != nil {
+				rawConn.Close()
+				return nil, err
+			}
+			if dialCfg.DialTimeout > 0 {
+				rawConn.SetDeadline(time.Time{})
+			}
+			conn = tlsConn
 		}
-
 	} else {
-		conn, err = newConn(func(addr string) (net.Conn, error) {
-			return net.DialTimeout("tcp", addr, dialCfg.DialTimeout)
-		})(addr)
-	}
-
-	if err != nil {
-		return nil, err
+		c, err := rawDial()
+		if err != nil {
+			return nil, err
+		}
+		conn = c
 	}
 
 	return &httpTransportClient{

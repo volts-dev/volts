@@ -302,6 +302,55 @@ app.Run()  // blocks until SIGTERM/SIGINT/SIGQUIT or context cancel
 
 On macOS, browser/curl access via LAN IP to a locally-running server is intercepted at the kernel level. Use `localhost` for local development access instead.
 
+### HttpClient could not do HTTPS at all
+
+`client.HttpClient`'s HTTPS path ended in a **panic on the caller's goroutine**, not an
+error. `roundTripper.dialTLS` only registered a transport when the connection satisfied
+`transport.INegotiatedProtocol` — which `core/ja3`'s utls wrapper does and **`*tls.Conn`
+does not** (crypto/tls exposes ALPN through `ConnectionState()`, not a method of that
+name). With no fingerprint configured nothing was ever written to `cachedTransports`, and
+`RoundTrip` then called a method on a nil interface. vectors only uses this client for
+plain intra-cluster HTTP, so it never fired there — but turning on TLS between services
+would have taken down every caller at once.
+
+Three things had to move together, and the second only becomes reachable once the first
+is fixed:
+
+- **Read ALPN by capability, not by one vendor's type.** `transport.NegotiatedProtocolOf`
+  accepts both shapes. On top of that `dialTLS` now falls back to HTTP/1.1 when the
+  protocol cannot be read at all — an unknown ALPN must land on a working default, never
+  on "register nothing". `RoundTrip` returns a readable error if the map is still empty,
+  because a library must not panic in its caller's goroutine.
+- **A configured proxy was silently bypassed.** `DialConfig.ProxyURL` had **no reader
+  anywhere**, and `dialCfg.dialer` was consulted only inside `HttpTransport.Dial`'s JA3
+  branch — plain TLS went out through `tls.DialWithDialer`, i.e. direct. So "proxy
+  configured, no fingerprint" put the request on the host's own IP while the caller
+  believed otherwise, which is the exact failure `core/outbound`'s `allow_direct=false`
+  exists to prevent. Every branch now dials through one `rawDial`, which prefers
+  `WithDialer`, then builds one from `WithProxyURL`, and otherwise keeps the old
+  env-proxy-aware `newConn` wrapper. `tls.Client` needs `ServerName` filled in by hand
+  (`tls.Dial` infers it; `tls.Client` does not) and a handshake deadline, or a peer that
+  completes TCP and never sends ServerHello holds the caller forever.
+- **`User-Agent` was wiped on every request.** `call()` computes it from
+  `config.UserAgent` / `Ja3.UserAgent`; `RoundTrip` then did an unconditional
+  `Set("User-Agent", rt.UserAgent)` against a field the constructor never filled. Every
+  request went out with an empty UA and the whole `WithUserAgent` / JA3-UA pairing was
+  dead. It is now only applied when non-empty.
+
+Two smaller ones in the same path: `RoundTrip` did all its map work — nil check, make,
+read, write — outside the lock that `dialTLS` holds, so concurrent requests raced (and
+`concurrent map writes` is a crash, not a warning); and the per-dial option slice was
+`append`ed to **in place** inside the captured closure, growing by three entries per dial
+without bound and racing on the same slice variable. `cfg.DialOptions` — written by
+`Init`, read by nobody — is now the single source both the constructor and `Init` seed, so
+`Init(WithJa3(...))` / `Init(WithProxyURL(...))` finally take effect instead of silently
+doing nothing.
+
+Regression: `client/https_dial_test.go`. `TestProxy_IsUsedForHTTPSWithoutFingerprint`
+stands up a real CONNECT proxy and counts hits — asserting on the dial helper instead
+passes even when the plain-TLS branch dials direct, because the raw dial has already gone
+through the proxy by then.
+
 ### A client response decodes with the *response's* codec
 
 `httpResponse` used to build its body with the **request's** codec

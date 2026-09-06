@@ -71,10 +71,14 @@ func NewHttpClient(opts ...Option) (*HttpClient, error) {
 		pool.Transport(cfg.Transport),
 	)
 
-	// 使用指纹
-	var dialOptions []transport.DialOption
-	if cfg.Ja3.Ja3 != "" {
-		dialOptions = append(dialOptions, transport.WithJa3(cfg.Ja3.Ja3, cfg.Ja3.UserAgent))
+	// 指纹与代理都写进 cfg.DialOptions，和 Init 用同一段代码。
+	//
+	// 此前这里维护的是一个**只属于构造函数的局部切片**，而 Init 写的是
+	// cfg.DialOptions —— 后者没有任何读取方。于是 cli.Init(WithJa3(...))、
+	// cli.Init(WithProxyUrl(...)) 都是静默无操作：调用方以为换了指纹/代理，
+	// 拨号那边用的还是构造时的那份。
+	if err := applyDialOptions(cfg); err != nil {
+		return nil, err
 	}
 
 	// 代理
@@ -97,13 +101,18 @@ func NewHttpClient(opts ...Option) (*HttpClient, error) {
 			Transport: &roundTripper{
 				Dialer: dialer,
 				DialTLS: func(network, addr string) (net.Conn, error) {
-					dialOptions = append(dialOptions,
+					// 每次拨号现拼一份，不要往捕获的切片里 append：
+					// 原写法每拨一次就往同一个切片追加 3 个选项（拨 N 次就是 3N 个，
+					// 无上限），而且 DialTLS 是被并发调用的，等于并发 append 同一个
+					// 切片变量 —— 竞态。
+					opts := make([]transport.DialOption, 0, len(cfg.DialOptions)+3)
+					opts = append(opts, cfg.DialOptions...)
+					opts = append(opts,
 						transport.WithDialer(dialer),
 						transport.WithTLS(),
-						//transport.WithContext(ctx),
 						transport.WithNetwork(network),
 					)
-					dialConn, err := cfg.Transport.Dial(addr, dialOptions...)
+					dialConn, err := cfg.Transport.Dial(addr, opts...)
 					if err != nil {
 						return nil, err
 					}
@@ -129,13 +138,9 @@ func (self *HttpClient) String() string {
 	return "HttpClient"
 }
 
-func (self *HttpClient) Init(opts ...Option) error {
-	cfg := self.config
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	// clear
+// applyDialOptions 把 cfg 上的指纹 / 代理设置翻译成拨号选项。
+// 构造函数和 Init 都走这里，两边不会再各写一份、各自漂移。
+func applyDialOptions(cfg *Config) error {
 	cfg.DialOptions = nil
 
 	if cfg.Ja3.Ja3 != "" {
@@ -144,7 +149,24 @@ func (self *HttpClient) Init(opts ...Option) error {
 
 	// 使用代理
 	if cfg.ProxyUrl != "" {
+		// 先解析一遍：地址不认识就当场报错。放到拨号时才发现的话，症状是
+		// 「请求偶发失败」，而不是「代理配错了」。
+		if _, err := transport.ParseProxyURL(cfg.ProxyUrl); err != nil {
+			return err
+		}
 		cfg.DialOptions = append(cfg.DialOptions, transport.WithProxyURL(cfg.ProxyUrl))
+	}
+	return nil
+}
+
+func (self *HttpClient) Init(opts ...Option) error {
+	cfg := self.config
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if err := applyDialOptions(cfg); err != nil {
+		return err
 	}
 
 	self.config.Transport.Init()

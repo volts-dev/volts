@@ -91,3 +91,24 @@ func Ja3Dialer() Ja3DialFunc {
 type INegotiatedProtocol interface {
 	NegotiatedProtocol() string
 }
+
+// NegotiatedProtocolOf 读出一个已完成握手的 TLS 连接协商到的 ALPN 协议。
+//
+// 认两种形状，缺一不可：
+//
+//   - INegotiatedProtocol —— utls 那种自带 NegotiatedProtocol() 的连接（core/ja3）。
+//   - ConnectionState() —— crypto/tls 的 *tls.Conn。它**没有** NegotiatedProtocol()
+//     方法，ALPN 结果藏在 ConnectionState 里。只认第一种形状的调用方会把每一条普通
+//     TLS 连接都判成"读不出协议"，然后按"读不出"那条分支去处理 —— 而那条分支往往
+//     是没人写过的。
+//
+// 第二个返回值区分「协商出的是空串」和「这根本不是一条 TLS 连接」。
+func NegotiatedProtocolOf(conn net.Conn) (string, bool) {
+	if c, ok := conn.(INegotiatedProtocol); ok {
+		return c.NegotiatedProtocol(), true
+	}
+	if c, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
+		return c.ConnectionState().NegotiatedProtocol, true
+	}
+	return "", false
+}
