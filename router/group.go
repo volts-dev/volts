@@ -209,7 +209,7 @@ func NewGroup(opts ...GroupOption) *TGroup {
 	grp := &TGroup{
 		config:      cfg,
 		TemplateVar: newTemplateVar(),
-		tree:        NewRouteTree(WithIgnoreCase()),
+		tree:        NewRouteTree(),
 		//path:        _path.Join("/", cfg.Name),
 		Metadata: map[string]string{
 			//"name": cfg.Name,

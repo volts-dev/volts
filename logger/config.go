@@ -15,7 +15,6 @@ type (
 		PrefixName    string `field:"-"` // config prefix name
 		Level         Level
 		//Prefix         string
-		WriterName string
 	}
 )
 
@@ -52,12 +51,6 @@ func (self *Config) Init(opts ...Option) {
 func Debug() Option {
 	return func(cfg *Config) {
 		cfg.Debug = true
-	}
-}
-
-func WithWrite(name string) Option {
-	return func(cfg *Config) {
-		cfg.WriterName = name
 	}
 }
 

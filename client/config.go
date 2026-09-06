@@ -70,7 +70,6 @@ type (
 		// Request/Response timeout
 		RequestTimeout time.Duration
 		// Stream timeout for the stream
-		StreamTimeout time.Duration
 
 		// 曾有一个 `CallWrappers []CallWrapper` 的半成品挂在这里（类型从未定义、
 		// 调用点也是注释掉的）。它想包住两个 client 各自的低层 call，而那两个函数返回
@@ -138,7 +137,6 @@ type (
 		ProxyUrl string
 		// http options
 		UserAgent     string
-		AllowRedirect bool
 
 		// Debug mode
 		PrintRequest    bool
@@ -324,12 +322,6 @@ func WithDialTimeout(d time.Duration) CallOption {
 	}
 }
 
-func WithStreamTimeout(d time.Duration) CallOption {
-	return func(o *CallOptions) {
-		o.StreamTimeout = d
-	}
-}
-
 // WithAddress sets the remote addresses to use rather than using service discovery
 func WithAddress(a ...string) CallOption {
 	return func(o *CallOptions) {
@@ -355,12 +347,6 @@ func WithUserAgent(userAgent string) HttpOption {
 	return func(cfg *Config) {
 		cfg.UserAgent = userAgent
 		cfg.Ja3.UserAgent = userAgent
-	}
-}
-
-func AllowRedirect() HttpOption {
-	return func(cfg *Config) {
-		cfg.AllowRedirect = true
 	}
 }
 

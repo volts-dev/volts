@@ -245,9 +245,13 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 	if self.config.EnableACME && self.config.ACMEProvider != nil {
 		// should we check the address to make sure its using :443?
 		//l, err = self.config.ACMEProvider.Listen(self.config.ACMEHosts...)
-		config, err := self.config.ACMEProvider.TLSConfig(self.config.ACMEHosts...)
-		if err != nil {
-			return nil, err
+		// 注意这里**不能**写成 `config, err := ...`：那样会新建一个 err 把外层的遮住，
+		// 下面 `l, err = vnet.Listen(...)` 写进的是被遮住的那个，于是外层 err 恒为 nil，
+		// 函数尾部的错误检查永远不触发 —— ACME 监听失败会静默返回一个包着 nil
+		// listener 的对象，服务器"启动成功"却没在听任何端口。
+		config, cfgErr := self.config.ACMEProvider.TLSConfig(self.config.ACMEHosts...)
+		if cfgErr != nil {
+			return nil, cfgErr
 		}
 
 		fn := func(addr string) (net.Listener, error) {

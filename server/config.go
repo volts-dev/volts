@@ -42,10 +42,16 @@ type (
 		Metadata      map[string]string           `field:"-"`
 		RegisterCheck func(context.Context) error `field:"-"` // RegisterCheck runs a check function before registering the service
 
+		// AutoCreate 没有任何读取方 —— 设它不会改变任何行为。之所以还留着，
+		// 是因为 vectors 的 service.go 有两处在调它，删掉是一次要同时动上下游的
+		// 动作。标成 Deprecated 让调用点能被工具扫出来。
+		//
+		// Deprecated: 空开关，不要在新代码里用。
+		AutoCreate bool `field:"-"`
+
 		Address    string
 		Advertise  string
 		Version    string
-		AutoCreate bool // TODO 没必要 自动创建实例
 
 		// broker
 		BrokerType string
@@ -90,7 +96,6 @@ func newConfig(opts ...Option) *Config {
 		RegisterTTL:      DefaultRegisterTTL,
 		RegisterCheck:    DefaultRegisterCheck,
 		Version:          DefaultVersion,
-		AutoCreate:       true,
 	}
 	cfg.Init(opts...)
 	config.Register(cfg)
@@ -234,6 +239,13 @@ func Logger() logger.ILogger {
 }
 
 // Server name
+// Deprecated: AutoCreate 没有读取方，调它不会改变任何行为。见 Config.AutoCreate。
+func AutoCreate(open bool) Option {
+	return func(cfg *Config) {
+		cfg.AutoCreate = open
+	}
+}
+
 func Name(name string) Option {
 	return func(cfg *Config) {
 		cfg.Unregister(cfg)
@@ -392,8 +404,3 @@ func TLSConfig(t *tls.Config) Option {
 }
 
 // 如果为False服务器不会自动创建默认必要组件实例,开发者自己配置
-func AutoCreate(open bool) Option {
-	return func(cfg *Config) {
-		cfg.AutoCreate = open
-	}
-}

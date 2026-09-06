@@ -80,7 +80,6 @@ type (
 		IsService      bool   // 是否在registry注册为独立的服务
 		Service        *registry.Service
 		PathPrefix     string
-		StaticHandler  func(IContext) `field:"-"`
 		EmbedFS        fs.FS          `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
 		StaticCacheTTL int            `field:"-"` // 0 = use default (60s); negative = never expire
 	}
@@ -244,12 +243,6 @@ func WithStatic(path ...string) GroupOption {
 
 		// init router tree
 		cfg.Group.SetStatic("/static")
-	}
-}
-
-func WithStaticHandler(handler func(IContext)) GroupOption {
-	return func(cfg *GroupConfig) {
-		cfg.StaticHandler = handler
 	}
 }
 

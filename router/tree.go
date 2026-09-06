@@ -80,7 +80,6 @@ type (
 		sync.RWMutex  // lock for conbine action
 		root          map[string]*treeNode
 		Text          string
-		IgnoreCase    bool
 		__DelimitChar byte // Delimit Char xxx<.>xxx
 		PrefixChar    byte // the Prefix Char </>xxx.xxx
 		Count         atomic.Int32
@@ -970,12 +969,5 @@ func printNode(buf *bytes.Buffer, node *treeNode, prefix string) {
 
 		buf.WriteByte('\n')
 		printNode(buf, c, childPrefix)
-	}
-}
-
-// 忽略大小写
-func WithIgnoreCase() ConfigOption {
-	return func(tree *TTree) {
-		tree.IgnoreCase = true
 	}
 }
