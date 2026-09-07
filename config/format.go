@@ -34,6 +34,17 @@ type (
 		// read_timeout 出现 9 次，没有行号的错误消息定位不了任何东西。
 		lines map[string]int
 
+		// fileTree 是配置文件**单独一层**的内容（小写键的嵌套 map），由 ReadInConfig
+		// 同步刷新。decodeSection 靠它拿到「文件里这一节」而不经 viper.Get。
+		//
+		// 为什么不用 v.Get(section)：viper 对一个前缀路径按层查找，**哪一层先命中就
+		// 整块返回那一层的子树**。只要有人 SetValue 过该节下任意一个 key，override 层
+		// 就命中了，返回的是只含那一个 key 的 map —— 文件里同节的其余项全部被遮住，
+		// 解码后模型停在默认值上，且没有任何提示。client 的 Config.Init 曾在每次 apply
+		// option 后整体 Save() 进 override 层，于是 config.json 里 client.* 那一节从来
+		// 没有生效过。
+		fileTree map[string]any
+
 		// watchOnce / watchStop 管理配置文件监听协程。
 		watchOnce sync.Once
 		watchStop chan struct{}
@@ -142,7 +153,109 @@ func (self *format) SetConfigFile(in string) {
 func (self *format) ReadInConfig() error {
 	self.Lock()
 	defer self.Unlock()
-	return self.v.ReadInConfig()
+	if err := self.v.ReadInConfig(); err != nil {
+		return err
+	}
+	// 用一个只读文件、没有任何 defaults / override 的 viper 取出纯文件层。
+	fv := viper.New()
+	fv.SetConfigFile(self.v.ConfigFileUsed())
+	if err := fv.ReadInConfig(); err != nil {
+		return err
+	}
+	self.fileTree = fv.AllSettings()
+	return nil
+}
+
+// decodeSection 把 path 这一节解码进 out（结构体指针）。
+//
+// 解码用的数据是**文件层里这一节**，再叠上运行期 SetValue 过的同节键 —— 不含 defaults
+// 层。不含 defaults 是刻意的：结构体本身就带着默认值，而且可能已被 option 在装载之后
+// 改过（volts.Debug() 在 New 之后改 Address），把 defaults 解回去会把那些改动冲掉。
+//
+// 返回 found=false 表示文件里没有这一节、运行期也没设过它下面的任何键。
+func (self *format) decodeSection(path string, out any) (found bool, err error) {
+	self.Lock()
+	defer self.Unlock()
+
+	m := self.sectionMap(strings.ToLower(path))
+	if m == nil {
+		return false, nil
+	}
+
+	dc := &mapstructure.DecoderConfig{
+		Result:           out,
+		WeaklyTypedInput: true,
+	}
+	withTagName("field")(dc)
+	withMatchName()(dc)
+	withDurationHook()(dc)
+	dec, err := mapstructure.NewDecoder(dc)
+	if err != nil {
+		return true, err
+	}
+	return true, dec.Decode(m)
+}
+
+// sectionMap 取 path 那一节的解码输入：文件层子树的深拷贝，叠上 override 层里以
+// path 为前缀的键。调用方须持锁。没有任何数据时返回 nil。
+func (self *format) sectionMap(path string) map[string]any {
+	var m map[string]any
+	if sub, ok := searchMap(self.fileTree, strings.Split(path, ".")).(map[string]any); ok {
+		m = deepCopyMap(sub)
+	}
+	prefix := path + "."
+	for k := range self.overrideKeys {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		if m == nil {
+			m = map[string]any{}
+		}
+		setNested(m, strings.Split(k[len(prefix):], "."), self.v.Get(k))
+	}
+	return m
+}
+
+func searchMap(m map[string]any, path []string) any {
+	if len(path) == 0 {
+		return m
+	}
+	next, ok := m[path[0]]
+	if !ok {
+		return nil
+	}
+	if len(path) == 1 {
+		return next
+	}
+	if sub, ok := next.(map[string]any); ok {
+		return searchMap(sub, path[1:])
+	}
+	return nil
+}
+
+func setNested(m map[string]any, path []string, val any) {
+	for len(path) > 1 {
+		sub, ok := m[path[0]].(map[string]any)
+		if !ok {
+			sub = map[string]any{}
+			m[path[0]] = sub
+		}
+		m = sub
+		path = path[1:]
+	}
+	m[path[0]] = val
+}
+
+func deepCopyMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if sub, ok := v.(map[string]any); ok {
+			out[k] = deepCopyMap(sub)
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // WriteConfig 把配置落盘，但**只写差异**：运行期显式设定过的值，以及本来就在
@@ -248,7 +361,7 @@ func (self *format) GetBool(key string, defaultValue bool) bool {
 
 // GetString 读取字符串配置，并展开其中的 ${VAR} 环境变量引用。
 //
-// 与模型装载路径（LoadToModel -> expandEnvRefs）保持一致：两条读路径对同一份数据
+// 与结构体装载路径（decodeSection -> expandEnvRefs）保持一致：两条读路径对同一份数据
 // 必须给出同样的结果，否则把密钥外置成 ${VAR} 之后，走 GetString 的调用方会拿到
 // 字面量 "${VS_DB_PASSWORD}" 并把它当成密码用。
 //
@@ -317,7 +430,7 @@ func (self *format) GetTime(key string, defaultValue time.Time) time.Time {
 
 // GetDuration 读取时长配置。
 //
-// 单位约定必须与写入端一致：SaveFromModel 把 time.Duration 落盘为
+// 单位约定必须与写入端一致：setLeaves 把 time.Duration 落盘为
 // d.Milliseconds()（毫秒整数），withDurationHook 也按毫秒把整数解回 Duration。
 // 此前这里却是 time.Duration(GetInt64(key)) —— **按纳秒解释**，同一份数据经
 // UnmarshalKey 读出 5s、经 GetDuration 读出 5µs，差 100 万倍。
@@ -358,13 +471,6 @@ func (self *format) Unmarshal(rawVal interface{}) error {
 	self.Lock()
 	defer self.Unlock()
 	return self.v.Unmarshal(rawVal, withTagName("field"), withMatchName(), withDurationHook())
-}
-
-// key 可以整个config结构
-func (self *format) UnmarshalKey(key string, rawVal interface{}) error {
-	self.Lock()
-	defer self.Unlock()
-	return self.v.UnmarshalKey(key, rawVal, withTagName("field"), withMatchName(), withDurationHook())
 }
 
 // SetValue 写入一个运行期显式设定值（override 层，优先级高于配置文件），并记账

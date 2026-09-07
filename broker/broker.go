@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"github.com/volts-dev/volts/config"
 )
 
 type (
@@ -138,27 +136,17 @@ func warnConfigDivergence(altName string, want, got *Config) {
 	if want.BroadcastVersion != "" && want.BroadcastVersion != got.BroadcastVersion {
 		diffs = append(diffs, fmt.Sprintf("broadcast_version: %q -> %q", got.BroadcastVersion, want.BroadcastVersion))
 	}
-	// 配置路径也算分歧：WithConfigPrefixName 会把实例的配置节整段搬走
-	// （Unregister + Register），一个进程里两台 server 共用 broker 时，
-	// 它在 config.json 里的位置取决于谁最后装配。
-	if want.PrefixName != "" && want.PrefixName != got.PrefixName {
-		diffs = append(diffs, fmt.Sprintf("config_prefix: %q -> %q", got.PrefixName, want.PrefixName))
-	}
 	if len(diffs) == 0 {
 		return
 	}
 
-	log.Warnf("broker %q 已被复用（同名同地址即同一实例），来自 %q 的配置将**覆盖**"+
-		"先前 %q 的设置：\n  %s", altName, want.String(), got.String(), strings.Join(diffs, "\n  "))
+	log.Warnf("broker %q 已被复用（同名同地址即同一实例），本次调用（broker.%s）传入的配置将**覆盖**"+
+		"先前的设置：\n  %s", altName, want.Name, strings.Join(diffs, "\n  "))
 }
 
 func Use(name string, opts ...Option) IBroker {
-	// 与全局隔离：这个 cfg 只用来解析 Addrs 以查实例缓存，随后丢弃。opts 里常含
-	// WithConfigPrefixName，而它内部直接 Register —— 不隔离就会把临时对象注册进
-	// 全局 models，该配置路径此后指向一个没人持有的孤儿对象。详见 config.Detach。
-	cfg := &Config{Name: name}
-	config.Detach(&cfg.Config)
-	cfg.Init(opts...)
+	// 这个 cfg 只用来解析 Addrs 以查实例缓存，随后丢弃；它不绑定到配置树。
+	cfg := newConfig(append([]Option{WithName(name)}, opts...)...)
 
 	// 解析后端名。空名或未注册的名字回落到 http（与此前行为一致），但**缓存键
 	// 用回落后的真名** —— 否则 Use("") 与 Use("http") 各建一个实例。server 的

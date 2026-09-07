@@ -165,14 +165,14 @@ func New(opts ...broker.Option) broker.IBroker {
 	b.started.Store(false)
 
 	if b.transport == nil {
+		// 进程共享的默认传输层：broker 只借它监听，不拥有它，配置节仍是 transport.default。
 		b.transport = transport.Default()
-		b.transport.Init(
-			transport.WithConfigPrefixName(cfg.String()),
-		)
 	}
 
 	if b.router == nil {
-		b.router = router.New(router.WithConfigPrefixName(cfg.String()))
+		// 内部路由器只挂一条投递路由，是实现细节而不是可配置的组件：给它一份不绑定
+		// 的配置，它就不在配置文件里出现。
+		b.router = router.New(router.WithConfig(router.NewConfig()))
 
 		// 注册路由
 		b.router.Url([]string{"POST"}, DefaultSubPath, b.Handler)

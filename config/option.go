@@ -11,15 +11,6 @@ func WithFileName(fileName string) Option {
 	}
 }
 
-// 保存新配置数据
-func WithConfig(model IConfig) Option {
-	return func(cfg *Config) {
-		if err := cfg.SaveFromModel(model); err != nil {
-			cfg.Core().errorf("保存配置 %q 失败: %w", model.String(), err)
-		}
-	}
-}
-
 // 监听配置文件变动
 //
 // NOTE 此前直接用 core.fmt.v.WatchConfig()，绕过了 format 的读写锁：viper 会

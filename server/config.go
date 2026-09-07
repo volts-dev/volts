@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,39 +21,51 @@ import (
 type (
 	Option func(*Config)
 
+	// Config 是服务器的配置。纯结构体：导出字段就是配置文件里的项，接口 / 函数类型的
+	// 字段（Transport、Router、Registry、Broker、Logger、Context、RegisterCheck）是实例
+	// 引用，天然不进配置。配置节是 server.<name>（server.http / server.rpc）。
+	//
+	// 归属规则：server **拥有**自己的传输层 —— TransportConfig 就是那份配置，随本结构体
+	// 一起绑定，配置节 server.<name>.transport.*；router / registry / broker 是跨 server
+	// **共享**的实例，只留名字字段（BrokerType / BrokerHost / RegistryType / RegistryHost）
+	// 引用它们，它们的配置各自是根节（router.default、registry.etcd、broker.http）。
 	Config struct {
-		config.Config `field:"-"`
-		Name          string `field:"-"` // config name/path in config file
-		PrefixName    string `field:"-"` // config prefix name
-		Uid           string `field:"-"` // 实例
-		//Tracer    trace.Tracer
-		Subscriber broker.ISubscriber   `field:"-"` // Subscribe to service name
-		Broker     broker.IBroker       `field:"-"`
-		Registry   registry.IRegistry   `field:"-"` // 实例
-		Transport  transport.ITransport `field:"-"` // 实例
-		Router     vrouter.IRouter      `field:"-"` // 实例 The router for requests
-		Logger     logger.ILogger       `field:"-"` // 实例
-		TLSConfig  *tls.Config          `field:"-"` // TLSConfig specifies tls.Config for secure serving
+		Name  string `field:"-"` // 配置路径 server.<name>
+		Debug bool   `field:"-"`
+		Uid   string `field:"-"` // 实例
 
-		// Other options for implementations of the interface
-		// can be stored in a context
-		Context       context.Context             `field:"-"`
-		Metadata      map[string]string           `field:"-"`
-		RegisterCheck func(context.Context) error `field:"-"` // RegisterCheck runs a check function before registering the service
+		Address   string
+		Advertise string
+		Version   string
 
-		Address    string
-		Advertise  string
-		Version    string
+		// 拥有的传输层的配置（= Transport.Config()）
+		TransportConfig *transport.Config `field:"transport"`
 
-		// broker
+		// broker（共享实例的引用）
 		BrokerType string
 		BrokerHost string
 
-		// Registry
+		// Registry（共享实例的引用）
 		RegistryType     string
 		RegistryHost     []string
-		RegisterTTL      time.Duration `field:"register_ttl"` // The register expiry time
-		RegisterInterval time.Duration // The interval on which to register
+		RegisterTTL      time.Duration `field:"register_ttl"`      // The register expiry time
+		RegisterInterval time.Duration `field:"register_interval"` // The interval on which to register
+
+		// ---- 实例，不进配置文件 ----
+		//Tracer    trace.Tracer
+		Subscriber broker.ISubscriber // Subscribe to service name
+		Broker     broker.IBroker
+		Registry   registry.IRegistry
+		Transport  transport.ITransport
+		Router     vrouter.IRouter // The router for requests
+		Logger     logger.ILogger
+		TLSConfig  *tls.Config `field:"-"` // TLSConfig specifies tls.Config for secure serving
+
+		// Other options for implementations of the interface
+		// can be stored in a context
+		Context       context.Context
+		Metadata      map[string]string           `field:"-"`
+		RegisterCheck func(context.Context) error // RegisterCheck runs a check function before registering the service
 	}
 )
 
@@ -91,18 +102,28 @@ func newConfig(opts ...Option) *Config {
 		Version:          DefaultVersion,
 	}
 	cfg.Init(opts...)
-	config.Register(cfg)
 
-	// 同过截取配置初始化对象
-	// 初始化 registry
+	// 传输层是 server 拥有的：注入了实例就用它的配置结构体（Bind 会把它从 transport.default
+	// 收编到 server.<name>.transport），没注入就先备一份默认配置，实例在装载之后再建 ——
+	// 这样文件里的 server.<name>.transport.* 无论哪条路都生效于这台 server 的传输层。
+	if cfg.Transport != nil {
+		cfg.TransportConfig = cfg.Transport.Config()
+	} else {
+		cfg.TransportConfig = transport.NewConfig()
+	}
+
+	// 一次绑定，整节装载。此后 cfg.Address / RegistryType / BrokerHost … 都是最终值。
+	config.Bind("server."+cfg.Name, cfg)
+
+	// 初始化 registry（共享实例，按类型与地址引用）
 	if cfg.Registry == nil {
-		if reg := registry.Use(cfg.RegistryType, registry.WithConfigPrefixName(cfg.String()), registry.Addrs(cfg.RegistryHost...)); reg != nil {
+		if reg := registry.Use(cfg.RegistryType, registry.Addrs(cfg.RegistryHost...)); reg != nil {
 			cfg.Init(WithRegistry(registry.NewCacher(reg)))
 		}
 	}
 
 	if cfg.Broker == nil {
-		if bk := broker.Use(cfg.BrokerType, broker.WithConfigPrefixName(cfg.String()), broker.Addrs(cfg.BrokerHost)); bk != nil {
+		if bk := broker.Use(cfg.BrokerType, broker.Addrs(cfg.BrokerHost)); bk != nil {
 			cfg.Init(WithBroker(bk))
 
 			// 把它定为进程默认 broker：只有 server 这份会被注入真 registry
@@ -117,9 +138,9 @@ func newConfig(opts ...Option) *Config {
 	// Transport 在此处初始化，晚于 cfg.Init(opts...)。
 	// 若用户通过 Address() option 提前设置了 cfg.Address（彼时 Transport 为 nil，
 	// Address() 无法同步 Transport.Addrs），此处补偿性地将 cfg.Address 传给 Transport。
-	// 注意：config.Register(cfg) 已在此前调用，cfg.Address 已是最终值（含配置文件覆盖）。
+	// 注意：config.Bind 已在此前调用，cfg.Address 已是最终值（含配置文件覆盖）。
 	if cfg.Transport == nil {
-		cfg.Init(WithTransport(transport.Default()))
+		cfg.Init(WithTransport(transport.NewHTTPTransport(transport.WithConfig(cfg.TransportConfig))))
 		addr := cfg.Address
 		if addr == "" {
 			addr = DefaultAddress
@@ -141,18 +162,6 @@ func newConfig(opts ...Option) *Config {
 	return cfg
 }
 
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "server"}, ".")
-	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"server", self.Name}, ".")
-	}
-
-	return self.Name
-}
-
 // OnReload 声明服务器配置不支持热重载。
 //
 // Address 与 listener 同理：进程启动时就已经绑好端口，改配置文件不会让它换地址。
@@ -160,7 +169,7 @@ func (self *Config) String() string {
 // 一个跑着的 ticker 底下换参数，而收益只是「改注册间隔不用重启」。
 //
 // 被忽略的变更由框架逐条打印并提示需重启（见 config/reload.go）。
-func (self *Config) OnReload(next config.IConfig) error {
+func (self *Config) OnReload(next any) error {
 	return config.ErrReloadUnsupported
 }
 
@@ -231,53 +240,15 @@ func Logger() logger.ILogger {
 	return log
 }
 
-// Server name
+// Name 设定服务器名，也是配置路径 server.<name>。只改字段：绑定在 New 里做一次。
 func Name(name string) Option {
 	return func(cfg *Config) {
-		cfg.Unregister(cfg)
 		cfg.Name = name
-		cfg.Register(cfg)
-
-		prefixName := cfg.String()
-		if cfg.Broker != nil {
-			cfg.Broker.Init(broker.WithConfigPrefixName(prefixName))
-		}
-
-		if cfg.Transport != nil {
-			cfg.Transport.Init(transport.WithConfigPrefixName(prefixName))
-		}
-
-		if cfg.Router != nil {
-			cfg.Router.Config().Init(vrouter.WithConfigPrefixName(prefixName))
-		}
-	}
-}
-
-// 修改Config.json的路径
-func WithConfigPrefixName(prefixName string) Option {
-	return func(cfg *Config) {
-		cfg.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
-
-		prefixName := cfg.String()
-		if cfg.Broker != nil {
-			cfg.Broker.Init(broker.WithConfigPrefixName(prefixName))
-		}
-
-		if cfg.Transport != nil {
-			cfg.Transport.Init(transport.WithConfigPrefixName(prefixName))
-		}
-
-		if cfg.Router != nil {
-			cfg.Router.Config().Init(vrouter.WithConfigPrefixName(prefixName))
-		}
 	}
 }
 
 func WithBroker(bk broker.IBroker) Option {
 	return func(cfg *Config) {
-		bk.Init(broker.WithConfigPrefixName(cfg.String()))
 		cfg.Broker = bk
 		cfg.BrokerType = bk.Config().Name
 		cfg.BrokerHost = bk.Address() // FIXME
@@ -290,7 +261,6 @@ func WithRegistry(r registry.IRegistry) Option {
 		if _, ok := r.(registry.IRegistryCacher); !ok {
 			r = registry.NewCacher(r)
 		}
-		r.Init(registry.WithConfigPrefixName(cfg.String()))
 		cfg.Registry = r
 		cfg.RegistryType = r.Config().Name
 		cfg.RegistryHost = r.Config().Addrs
@@ -310,7 +280,6 @@ func WithRegistry(r registry.IRegistry) Option {
 func WithRouter(router vrouter.IRouter) Option {
 	return func(cfg *Config) {
 		if _, ok := router.(*vrouter.TRouter); ok {
-			router.Config().Init(vrouter.WithConfigPrefixName(cfg.String()))
 			cfg.Router = router
 
 			// 避免执行顺序在WithRegistry后面
@@ -322,9 +291,10 @@ func WithRouter(router vrouter.IRouter) Option {
 }
 
 // Transport mechanism for communication e.g http, rabbitmq, etc
+// WithTransport 注入传输层实例。它的配置结构体成为本 server 的 TransportConfig，
+// 配置节从 transport.default 收编到 server.<name>.transport（见 config.Bind）。
 func WithTransport(t transport.ITransport) Option {
 	return func(cfg *Config) {
-		t.Init(transport.WithConfigPrefixName(cfg.String()))
 		cfg.Transport = t
 	}
 }

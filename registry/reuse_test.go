@@ -10,16 +10,17 @@ import (
 // TestUse_DoesNotRegisterThrowawayConfig 锁定：Use 里的临时 Config 不污染全局配置树。
 //
 // 曾经的缺陷：Use 建一个临时 Config 来解析 Addrs 以便查实例缓存，然后 cfg.Init(opts...)
-// 应用 options —— 而 WithConfigPrefixName 内部直接调 cfg.Register(cfg)。于是每调一次
-// Use，就把一个随即被丢弃的临时对象注册进全局 core.models。命中实例缓存时更糟：
+// 应用 options —— 而那时的 WithConfigPrefixName 内部直接注册配置。于是每调一次
+// Use，就把一个随即被丢弃的临时对象注册进全局配置树。命中实例缓存时更糟：
 // 后面没有第二次注册去覆盖它，该配置路径便永久指向一个没人持有的孤儿对象 ——
 // 改那里的配置不会影响真正在跑的 registry 实例，且毫无提示。
 //
-// 判据用 Origin：临时 cfg 一旦被 Register，其默认值就会被灌进全局 core 的 defaults 层，
+// 现在 option 只写字段、绑定只在实例构造时发生一次；本测试钉住这条性质。
+// 判据用 Origin：临时 cfg 一旦被绑定，其默认值就会被灌进全局树的 defaults 层，
 // 该路径的来源随即从「未知」变成「默认值」。
 func TestUse_DoesNotRegisterThrowawayConfig(t *testing.T) {
 	const prefix = "throwaway_probe"
-	probe := prefix + ".registry.timeout"
+	probe := "registry." + prefix + ".timeout"
 
 	if src := config.Default().Origin(probe).Source; src != config.SourceUnknown {
 		t.Skipf("探针路径已被占用（来源 %v），换个前缀再测", src)
@@ -28,7 +29,7 @@ func TestUse_DoesNotRegisterThrowawayConfig(t *testing.T) {
 	// 反复 Use 一个未注册的后端：走不到实例创建，只会跑临时 cfg 那段
 	for i := 0; i < 3; i++ {
 		Use("no_such_backend_for_test",
-			WithConfigPrefixName(prefix),
+			WithName(prefix),
 			Addrs("127.0.0.1:2379"),
 		)
 	}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/transport"
 )
 
@@ -43,9 +44,9 @@ func TestRouter_DoesNotServeTheWorkingDirectory(t *testing.T) {
 
 	r := New()
 	defer r.Close()
-	// 显式再走一次 Load：注册时机曾经是这条特性时有时无的原因，这里把两条路都覆盖。
-	if err := r.Config().Load(); err != nil {
-		t.Fatalf("Config().Load(): %v", err)
+	// 显式再走一次装载：注册时机曾经是这条特性时有时无的原因，这里把两条路都覆盖。
+	if err := config.Load(); err != nil {
+		t.Fatalf("config.Load(): %v", err)
 	}
 
 	for _, p := range []string{"/secret.xml", "/notes.txt", "/index.html", "/app.json"} {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/volts-dev/volts/internal/acme/autocert"
 	vaddr "github.com/volts-dev/volts/internal/addr"
 	vnet "github.com/volts-dev/volts/internal/net"
 	mls "github.com/volts-dev/volts/internal/tls"
@@ -242,7 +243,12 @@ func (self *HttpTransport) Listen(addr string, opts ...ListenOption) (IListener,
 
 	var l net.Listener
 	var err error
-	if self.config.EnableACME && self.config.ACMEProvider != nil {
+	if self.config.EnableACME {
+		// 没指定证书提供方就用 Let's Encrypt。放在这里而不是装载钩子里：EnableACME 可能来自
+		// 装载之后的一次 config.Load()，只在装载时补默认值会漏掉这条路。
+		if self.config.ACMEProvider == nil {
+			self.config.ACMEProvider = autocert.NewProvider()
+		}
 		// should we check the address to make sure its using :443?
 		//l, err = self.config.ACMEProvider.Listen(self.config.ACMEHosts...)
 		// 注意这里**不能**写成 `config, err := ...`：那样会新建一个 err 把外层的遮住，

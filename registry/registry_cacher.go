@@ -76,7 +76,7 @@ func NewCacher(r IRegistry, opts ...Option) IRegistryCacher {
 
 	return &registryCacher{
 		IRegistry:   r,
-		config:      NewConfig(append(defaultOpts, opts...)...),
+		config:      newCacheConfig(append(defaultOpts, opts...)...),
 		watched:     make(map[string]bool),
 		cache:       make(map[string][]*Service),
 		endpointMap: make(map[string]string),

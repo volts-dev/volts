@@ -168,8 +168,6 @@ var ErrNoUsableProxy = errors.New("core/outbound: 配置的代理一个都不可
 type (
 	// Config 是本包在 config.json 里的那一节。
 	Config struct {
-		config.Config `field:"-"`
-		prefix        string `field:"-"`
 
 		// Profiles 要用的 TLS 指纹（core/ja3 的预置名，如 "chrome_133"）。
 		//
@@ -258,16 +256,13 @@ const (
 var maxSlotHold = 2 * time.Minute
 
 var cfg = &Config{
-	prefix:         "outbound",
 	AllowDirect:    false,
 	Cooldown:       30 * time.Second,
 	RotateOnStatus: []int{http.StatusForbidden, http.StatusTooManyRequests},
 	MaxPerIdentity: 1,
 }
 
-func init() { config.Register(cfg) }
-
-func (c *Config) String() string { return c.prefix }
+func init() { config.Bind("outbound", cfg) }
 
 var (
 	clientOnce sync.Once

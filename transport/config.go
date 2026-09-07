@@ -3,12 +3,10 @@ package transport
 import (
 	"context"
 	"crypto/tls"
-	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/internal/acme"
-	"github.com/volts-dev/volts/internal/acme/autocert"
 	"github.com/volts-dev/volts/logger"
 	"golang.org/x/net/proxy"
 )
@@ -34,30 +32,27 @@ type (
 	DialOption   func(*DialConfig)
 	ListenOption func(*ListenConfig)
 
+	// Config 是传输层的配置。
+	//
+	// 它是一个纯结构体：导出字段就是配置文件里的项，接口 / 函数类型的字段（Listener、
+	// ACMEProvider、Context）是实例引用，天然不进配置；Name 只参与配置路径。
+	//
+	// 它通常**被拥有**：server / client 把它作为字段带着，配置节因此是
+	// server.http.transport.* —— 见 config 包说明。独立创建的传输层绑在 transport.<name>。
 	Config struct {
-		config.Config
-		Name       string `field:"-"` // config name/path in config file
-		PrefixName string `field:"-"` // config prefix name
-		Listener   IListener
+		Name  string `field:"-"` // 独立绑定时的配置路径 transport.<name>
+		Debug bool   `field:"-"`
+
 		// Addrs is the list of intermediary addresses to connect to
-		//Addrs []string
 		Addrs string
 
-		// Codec is the codec interface to use where headers are not supported
-		// by the transport and the entire payload must be encoded
-		//Codec codec.Marshaler
-
 		// 证书
-		EnableACME   bool          `field:"enable_acme"`
-		ACMEHosts    []string      `field:"acme_hosts"`
-		ACMEProvider acme.Provider `field:"-"`
+		EnableACME bool     `field:"enable_acme"`
+		ACMEHosts  []string `field:"acme_hosts"`
 		// Secure tells the transport to secure the connection.
 		// In the case TLSConfig is not specified best effort self-signed
 		// certs should be used
 		Secure bool
-		// TLSConfig to secure the connection. The assumption is that this
-		// is mTLS keypair
-		TlsConfig *tls.Config
 
 		// EnableH2C 允许明文连接上的 HTTP/2（h2c）。默认关闭。
 		//
@@ -98,9 +93,19 @@ type (
 		// MaxHeaderBytes 是请求头的字节上限。标准库默认 1MB，对 RPC/Web 都偏大。
 		MaxHeaderBytes int `field:"max_header_bytes"`
 
+		// ---- 实例，不进配置文件 ----
+
+		Listener     IListener
+		ACMEProvider acme.Provider
+		// TLSConfig to secure the connection. The assumption is that this
+		// is mTLS keypair
+		TlsConfig *tls.Config `field:"-"`
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context context.Context
+
+		// use 由 WithConfig 设置：实例改用调用方持有的这份配置，不再自建、不再自绑。
+		use *Config
 	}
 
 	DialConfig struct {
@@ -144,8 +149,12 @@ func (self *DialConfig) Init(opts ...DialOption) {
 	}
 }
 
-func newConfig(opts ...Option) *Config {
-	cfg := &Config{
+// NewConfig 返回一份带代码默认值、**尚未绑定**到配置树的传输层配置。
+//
+// 给拥有传输层的组件用：把它作为自己的字段带着、随自己一起 Bind，再用
+// New*Transport(WithConfig(cfg)) 建实例。
+func NewConfig() *Config {
+	return &Config{
 		Name:              "default",
 		DialTimeout:       DefaultTimeout,
 		ReadTimeout:       DefaultTimeout,
@@ -154,21 +163,23 @@ func newConfig(opts ...Option) *Config {
 		IdleTimeout:       DefaultIdleTimeout,
 		MaxHeaderBytes:    DefaultMaxHeaderBytes,
 	}
-	cfg.Init(opts...)
-	config.Register(cfg)
-	return cfg
 }
 
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "transport"}, ".")
+// newConfig 是各传输层构造函数共用的入口：默认值 → options → 绑定。
+//
+// options 里带 WithConfig(c) 时改用调用方的 c（options 也施加到 c 上），且不绑定 ——
+// c 已经随它的拥有者绑过了。没有的话绑在 transport.<name>。
+func newConfig(opts ...Option) *Config {
+	cfg := NewConfig()
+	cfg.Init(opts...)
+	if ext := cfg.use; ext != nil {
+		cfg.use = nil
+		ext.Init(opts...)
+		ext.use = nil
+		return ext
 	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"transport", self.Name}, ".")
-	}
-
-	return self.Name
+	config.Bind("transport."+cfg.Name, cfg)
+	return cfg
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -186,27 +197,30 @@ func (self *Config) Init(opts ...Option) {
 // 在 :35999 上 Accept 的监听器换到别的端口。
 //
 // ReadTimeout / WriteTimeout 理论上可以热更（每条连接读一次），但它们同时是整个
-// 框架里被读得最多的配置字段（生产代码里 19 处），热更收益是「改超时不用重启」，
-// 代价是这 19 个读点每一个都与重载写入存在数据竞态。改超时本就是运维动作，重启
-// 完全可以接受，所以这里整节退出热重载 —— 竞态直接归零，而不是收窄。
+// 框架里被读得最多的配置字段，热更收益是「改超时不用重启」，代价是每个读点都与重载
+// 写入存在数据竞态。改超时本就是运维动作，重启完全可以接受，所以这里整节退出热重载
+// —— 竞态直接归零，而不是收窄。
 //
 // 被忽略的变更由框架逐条打印并提示需重启，不会无声无息（见 config/reload.go）。
-func (self *Config) OnReload(next config.IConfig) error {
+func (self *Config) OnReload(next any) error {
 	return config.ErrReloadUnsupported
 }
 
-func (self *Config) Load() error {
-	if err := self.Config.Load(); err != nil {
-		return err
+// WithConfig 让传输层实例使用调用方持有的这份配置，而不是自建一份。
+//
+// 这是「父拥有子」在代码里的形状：server.Config 把 *transport.Config 作为字段带着、
+// 随自己一起绑定（配置节是 server.http.transport.*），再用它建传输层实例。
+func WithConfig(c *Config) Option {
+	return func(cfg *Config) {
+		cfg.use = c
 	}
+}
 
-	// 打开了SSL需要指定自动更新服务者
-	if self.EnableACME && self.ACMEProvider == nil {
-		// 默认是 Let’s Encrypt
-		self.ACMEProvider = autocert.NewProvider()
+// WithName 设定独立绑定时的配置路径 transport.<name>。被拥有的传输层用不到它。
+func WithName(name string) Option {
+	return func(cfg *Config) {
+		cfg.Name = name
 	}
-
-	return nil
 }
 
 // Debug 把读写与拨号超时放到近乎无限，好让调试器在断点上停多久都不会被掐断。
@@ -405,16 +419,5 @@ func WithProxyURL(proxyURL string) DialOption {
 func WithDialer(dialer proxy.Dialer) DialOption {
 	return func(o *DialConfig) {
 		o.dialer = dialer
-	}
-}
-
-// 修改Config.json的路径
-func WithConfigPrefixName(prefixName string) Option {
-	return func(cfg *Config) {
-		// 注销配置
-		config.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		// 重新注册
-		config.Register(cfg)
 	}
 }

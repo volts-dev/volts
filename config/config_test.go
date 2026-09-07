@@ -1,107 +1,20 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-type (
-	testConfig struct {
-		Config
-		NameValue string `field:"name_value"`
-		Expiry    time.Duration
-		Mode      ModeType
-		CanLoad   bool
-		CanSave   bool
-	}
-)
-
-func newTestConfig() *testConfig {
-	Init(
-		WithFileName("config_test.json"),
-		WithWatcher(),
-	)
-
-	cfg := &testConfig{}
-
-	// 测试空结构体Init调用修改配置
-	cfg.SetValue("SetValue", "TEST")
-
-	// 注册配置
-	Register(cfg)
-	return cfg
-}
-
-func (self *testConfig) String() string {
-	return "testConfig"
-}
-
-func (self *testConfig) Load() error {
-	self.CanLoad = true
-	self.Config.Load()
-	return nil
-}
-
-func (self *testConfig) Save(immed ...bool) error {
-	self.CanSave = true
-	self.NameValue = "123"
-	return self.Config.Save(immed...)
-}
-
-func TestLoad(t *testing.T) {
-	cfg := newTestConfig()
-	cfg.Config.LoadFromFile()
-	cfg.Save()
-
-	if !cfg.CanLoad {
-		t.Errorf("Expected Load to be called")
-	}
-	if !cfg.CanSave {
-		t.Errorf("Expected Save to be called")
-	}
-}
-
-func TestLoadAndSave(t *testing.T) {
-	cfg := Default()
-	err := cfg.LoadFromFile("config.json")
-	if err != nil {
-		t.Log(err)
-	}
-
-	cfg.SetValue("project.struct", 11)
-	cfg.SetValue("project2.struct", 11)
-
-	err = cfg.SaveToFile()
-	if err != nil {
-		t.Log(err)
-	}
-}
-
-func TestBuildJsonConfigAndGet(t *testing.T) {
-	cfg := defaultConfig
-	err := cfg.LoadFromFile("config.json")
-	if err != nil {
-		t.Log(err)
-	}
-
-	t.Log(cfg.GetInt64("project.struct", 0))
-	t.Log(cfg.GetInt64("project2.struct", 1))
-	err = cfg.SaveToFile()
-	if err != nil {
-		t.Log(err)
-	}
-}
-
+// TestCoverageSuite 覆盖 Get/Set 各类型与解码钩子。
 func TestCoverageSuite(t *testing.T) {
-	// Covering options
-	testConfModel := newTestConfig()
-	cfg := New("coverageSuite", WithConfig(testConfModel))
+	fn := "coverage_suite.json"
+	defer os.Remove(filepath.Join(AppPath, fn))
+	cfg := newIsolated(t, fn)
 
-	// Cover Unregister and InConfig
-	cfg.Unregister(testConfModel)
 	cfg.InConfig("test_int")
 
-	// Cover Setters and Getters with existing and missing value defaults
 	cfg.SetValue("test_bool", true)
 	cfg.SetValue("test_string", "test")
 	cfg.SetValue("test_int", int(42))
@@ -118,51 +31,43 @@ func TestCoverageSuite(t *testing.T) {
 	if !cfg.GetBool("test_bool_empty", true) {
 		t.Error("GetBool empty fail")
 	}
-
 	if cfg.GetString("test_string", "def") != "test" {
 		t.Error("GetString fail")
 	}
 	if cfg.GetString("test_string_empty", "def") != "def" {
 		t.Error("GetString empty fail")
 	}
-
 	if cfg.GetInt("test_int", 1) != 42 {
 		t.Error("GetInt fail")
 	}
 	if cfg.GetInt("test_int_empty", 1) != 1 {
 		t.Error("GetInt empty fail")
 	}
-
 	if cfg.GetInt32("test_int32", 1) != 42 {
 		t.Error("GetInt32 fail")
 	}
 	if cfg.GetInt32("test_int32_empty", 1) != 1 {
 		t.Error("GetInt32 empty fail")
 	}
-
 	if cfg.GetInt64("test_int64", 1) != 42 {
 		t.Error("GetInt64 fail")
 	}
 	if cfg.GetInt64("test_int64_empty", 1) != 1 {
 		t.Error("GetInt64 empty fail")
 	}
-
 	if cfg.GetFloat64("test_float64", 1.1) != 42.42 {
 		t.Error("GetFloat64 fail")
 	}
 	if cfg.GetFloat64("test_float64_empty", 1.1) != 1.1 {
 		t.Error("GetFloat64 empty fail")
 	}
-
-	// 裸数字按毫秒 —— 与 SaveFromModel 的 d.Milliseconds() 及 withDurationHook 一致。
-	// 这里此前断言的是 `!= 100`（即 100ns），编码的是 GetDuration 按纳秒解释的旧错误行为。
+	// 裸数字按毫秒 —— 与写入端的 d.Milliseconds() 及 withDurationHook 一致。
 	if cfg.GetDuration("test_duration", time.Second) != 100*time.Millisecond {
 		t.Error("GetDuration fail")
 	}
 	if cfg.GetDuration("test_duration_empty", time.Second) != time.Second {
 		t.Error("GetDuration empty fail")
 	}
-
 	s := cfg.GetIntSlice("test_slice", []int{0})
 	if len(s) != 3 || s[0] != 1 {
 		t.Error("GetIntSlice fail")
@@ -171,42 +76,40 @@ func TestCoverageSuite(t *testing.T) {
 	if len(s2) != 1 || s2[0] != 0 {
 		t.Error("GetIntSlice empty fail")
 	}
-
 	cfg.GetTime("test_time", time.Time{})
 	cfg.GetTime("test_time_empty", time.Now())
 
-	// Cover Unmarshal and its decode hooks
+	// 解码钩子：各类整数按毫秒解成 Duration
 	var unmarshalObj struct {
 		TestInt int `field:"test_int"`
 	}
 	if err := cfg.Core().fmt.Unmarshal(&unmarshalObj); err != nil {
 		t.Error(err)
 	}
-
-	var customDurationObj struct {
-		CustomDur time.Duration `field:"test_duration"`
+	if unmarshalObj.TestInt != 42 {
+		t.Errorf("Unmarshal: %d", unmarshalObj.TestInt)
 	}
-	cfg.Core().fmt.Unmarshal(&customDurationObj)
 
-	// Cover various types in Duration DecodeHook
 	cfg.SetValue("test_duration_hook_int", int(100))
 	cfg.SetValue("test_duration_hook_int32", int32(100))
 	cfg.SetValue("test_duration_hook_float", float64(100))
-
-	var durInt struct {
-		CustomDur time.Duration `field:"test_duration_hook_int"`
+	var durs struct {
+		A time.Duration `field:"test_duration_hook_int"`
+		B time.Duration `field:"test_duration_hook_int32"`
+		C time.Duration `field:"test_duration_hook_float"`
+		D time.Duration `field:"test_duration"`
 	}
-	var durInt32 struct {
-		CustomDur time.Duration `field:"test_duration_hook_int32"`
+	if err := cfg.Core().fmt.Unmarshal(&durs); err != nil {
+		t.Error(err)
 	}
-	var durFloat struct {
-		CustomDur time.Duration `field:"test_duration_hook_float"`
+	for name, d := range map[string]time.Duration{"int": durs.A, "int32": durs.B, "float": durs.C, "int64": durs.D} {
+		if d != 100*time.Millisecond {
+			t.Errorf("Duration 钩子对 %s 解错: %v", name, d)
+		}
 	}
 
-	cfg.Core().fmt.Unmarshal(&durInt)
-	cfg.Core().fmt.Unmarshal(&durInt32)
-	cfg.Core().fmt.Unmarshal(&durFloat)
-
-	// Cover Format SetDefault directly
 	cfg.Core().fmt.SetDefault("test_set_def", 123)
+	if cfg.GetInt("test_set_def", 0) != 123 {
+		t.Error("SetDefault fail")
+	}
 }

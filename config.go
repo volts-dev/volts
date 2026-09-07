@@ -49,7 +49,8 @@ func newConfig(opts ...Option) *Config {
 	if cfg.Client == nil {
 		cfg.Client = client.NewRpcClient(
 			/*client.WithTransport(self.Transport)*/
-			client.WithConfigPrefixName(cfg.Server.Config().String()),
+			// 每台 server 一个客户端：配置节 client.<server name>（client.http / client.rpc）
+			client.WithName(cfg.Server.Config().Name),
 		)
 	}
 	return cfg

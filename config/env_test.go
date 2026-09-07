@@ -9,7 +9,6 @@ import (
 )
 
 type envCfg struct {
-	Config
 	Password string            `field:"password"`
 	Host     string            `field:"host"`
 	Plain    string            `field:"plain"`
@@ -23,8 +22,6 @@ type envSub struct {
 	Token string `field:"token"`
 }
 
-func (self *envCfg) String() string { return "envsec" }
-
 // TestExpandString 覆盖展开规则本身。
 func TestExpandString(t *testing.T) {
 	t.Setenv("VOLTS_TEST_A", "aaa")
@@ -35,11 +32,11 @@ func TestExpandString(t *testing.T) {
 		{"${VOLTS_TEST_A}", "aaa"},
 		{"prefix-${VOLTS_TEST_A}-suffix", "prefix-aaa-suffix"},
 		{"${VOLTS_TEST_A}${VOLTS_TEST_A}", "aaaaaa"},
-		{"${VOLTS_TEST_EMPTY}", ""},                                    // 已设置但为空 —— 用它，不报错
-		{"${VOLTS_TEST_MISSING:-fallback}", "fallback"},                // 显式声明可缺省
-		{"${VOLTS_TEST_A:-fallback}", "aaa"},                           // 有值时默认值不生效
-		{"$${NOT_A_REF}", "${NOT_A_REF}"},                              // 转义成字面量
-		{"postgres://u:${VOLTS_TEST_A}@h/db", "postgres://u:aaa@h/db"}, // 连接串内嵌
+		{"${VOLTS_TEST_EMPTY}", ""},
+		{"${VOLTS_TEST_MISSING:-fallback}", "fallback"},
+		{"${VOLTS_TEST_A:-fallback}", "aaa"},
+		{"$${NOT_A_REF}", "${NOT_A_REF}"},
+		{"postgres://u:${VOLTS_TEST_A}@h/db", "postgres://u:aaa@h/db"},
 	}
 	for _, c := range ok {
 		got, err := expandString(c.in)
@@ -52,7 +49,6 @@ func TestExpandString(t *testing.T) {
 		}
 	}
 
-	// 未设置且未声明可缺省 —— 必须报错，不能静默留空
 	if _, err := expandString("${VOLTS_TEST_MISSING}"); err == nil {
 		t.Error("引用未设置的环境变量应报错")
 	} else if !strings.Contains(err.Error(), "VOLTS_TEST_MISSING") {
@@ -60,7 +56,7 @@ func TestExpandString(t *testing.T) {
 	}
 }
 
-// TestExpandEnvRefs_InModel 锁定：模型各类字符串字段都参与展开，非字符串不受影响。
+// TestExpandEnvRefs_InModel 锁定：各类字符串字段都参与展开，非字符串不受影响。
 func TestExpandEnvRefs_InModel(t *testing.T) {
 	t.Setenv("VOLTS_TEST_PW", "s3cret")
 	t.Setenv("VOLTS_TEST_HOST", "db.internal:5432")
@@ -82,7 +78,7 @@ func TestExpandEnvRefs_InModel(t *testing.T) {
 
 	cfg := newIsolated(t, fn)
 	m := &envCfg{}
-	cfg.Register(m)
+	cfg.Bind("envsec", m)
 
 	if m.Password != "s3cret" {
 		t.Errorf("password 未展开: %q", m.Password)
@@ -108,8 +104,6 @@ func TestExpandEnvRefs_InModel(t *testing.T) {
 }
 
 // TestExpandEnvRefs_MissingVarIsAnError 锁定：变量缺失被记为错误，而不是静默留空。
-//
-// 密钥留空会让服务带着空密钥继续跑起来 —— 签名校验退化成人人可伪造，比起不来危险。
 func TestExpandEnvRefs_MissingVarIsAnError(t *testing.T) {
 	fn := "env_missing.json"
 	path := filepath.Join(AppPath, fn)
@@ -119,7 +113,7 @@ func TestExpandEnvRefs_MissingVarIsAnError(t *testing.T) {
 
 	cfg := newIsolated(t, fn)
 	cfg.ClearErrors()
-	cfg.Register(&envCfg{})
+	cfg.Bind("envsec", &envCfg{})
 
 	err := cfg.Errors()
 	if err == nil {
@@ -135,9 +129,6 @@ func TestExpandEnvRefs_MissingVarIsAnError(t *testing.T) {
 
 // TestExpandEnvRefs_NotWrittenBackToFile 锁定：展开后的值不回流到配置树，
 // 因此任何一次保存都不会把密钥明文烤进配置文件。
-//
-// 外置密钥的全部意义就在这里 —— 若解析出的值回写配置树，第一次 SaveToFile 就前功尽弃，
-// 而且是静默的：文件里悄悄从 ${VAR} 变成了真密钥。
 func TestExpandEnvRefs_NotWrittenBackToFile(t *testing.T) {
 	t.Setenv("VOLTS_TEST_PW2", "must-not-leak")
 
@@ -149,12 +140,11 @@ func TestExpandEnvRefs_NotWrittenBackToFile(t *testing.T) {
 
 	cfg := newIsolated(t, fn)
 	m := &envCfg{}
-	cfg.Register(m)
+	cfg.Bind("envsec", m)
 	if m.Password != "must-not-leak" {
 		t.Fatalf("前置条件不成立，password 未展开: %q", m.Password)
 	}
 
-	// 运行期改点别的，然后保存
 	cfg.SetValue("envsec.plain", "changed")
 	if err := cfg.SaveToFile(); err != nil {
 		t.Fatal(err)
@@ -167,7 +157,6 @@ func TestExpandEnvRefs_NotWrittenBackToFile(t *testing.T) {
 	if strings.Contains(string(raw), "must-not-leak") {
 		t.Errorf("展开后的密钥被写进了配置文件:\n%s", raw)
 	}
-
 	var mm map[string]any
 	if err := json.Unmarshal(raw, &mm); err != nil {
 		t.Fatalf("解析落盘结果: %v\n%s", err, raw)
@@ -179,9 +168,6 @@ func TestExpandEnvRefs_NotWrittenBackToFile(t *testing.T) {
 }
 
 // TestReport_SkipsExternalizedSecrets 锁定：已写成 ${VAR} 的凭据不再被报为明文。
-//
-// 否则报告会倒过来催人把已经外置好的密钥改回明文，而一份自相矛盾的安全提示
-// 比没有更糟。
 func TestReport_SkipsExternalizedSecrets(t *testing.T) {
 	t.Setenv("VOLTS_TEST_PW3", "v")
 
@@ -193,7 +179,7 @@ func TestReport_SkipsExternalizedSecrets(t *testing.T) {
 	                "other":{"db_password":"still-plaintext"}}`)
 
 	cfg := newIsolated(t, fn)
-	cfg.Register(&envCfg{})
+	cfg.Bind("envsec", &envCfg{})
 
 	hits := map[string]bool{}
 	for _, s := range cfg.ReportAll().Secrets {
@@ -208,9 +194,6 @@ func TestReport_SkipsExternalizedSecrets(t *testing.T) {
 }
 
 // TestDump_MasksSecrets 锁定：Dump 生成的模板不含明文凭据。
-//
-// 模板的用途就是提交进版本库、发给同事、当部署样例 —— 把明文密钥烤进去等于把它
-// 散布得更广。占位符本身是可用的写法，拿到模板的人设好环境变量即可直接跑。
 func TestDump_MasksSecrets(t *testing.T) {
 	fn := "env_dump.json"
 	path := filepath.Join(AppPath, fn)
@@ -222,7 +205,7 @@ func TestDump_MasksSecrets(t *testing.T) {
 	write(t, path, `{"envsec":{"password":"literal-secret","plain":"visible"}}`)
 
 	cfg := newIsolated(t, fn)
-	cfg.Register(&envCfg{})
+	cfg.Bind("envsec", &envCfg{})
 
 	if err := cfg.Dump(tpl); err != nil {
 		t.Fatal(err)
@@ -231,23 +214,18 @@ func TestDump_MasksSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if strings.Contains(string(raw), "literal-secret") {
 		t.Errorf("Dump 出的模板含明文凭据:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), "${ENVSEC_PASSWORD}") {
 		t.Errorf("凭据字段应被替换成 ${环境变量名} 占位符:\n%s", raw)
 	}
-	// 非凭据字段必须原样保留，否则模板就没法用了
 	if !strings.Contains(string(raw), "visible") {
 		t.Errorf("非凭据字段被误改:\n%s", raw)
 	}
 }
 
-// TestGetString_ExpandsEnvRefs 锁定：GetString 与模型装载路径对 ${VAR} 的处理一致。
-//
-// 两条读路径对同一份数据必须给出同样的结果，否则把密钥外置成 ${VAR} 之后，
-// 走 GetString 的调用方会拿到字面量 "${VS_DB_PASSWORD}" 并把它当密码用。
+// TestGetString_ExpandsEnvRefs 锁定：GetString 与结构体装载路径对 ${VAR} 的处理一致。
 func TestGetString_ExpandsEnvRefs(t *testing.T) {
 	t.Setenv("VOLTS_TEST_GS", "resolved")
 
@@ -264,7 +242,6 @@ func TestGetString_ExpandsEnvRefs(t *testing.T) {
 	if got := cfg.GetString("envsec.plain", "fallback"); got != "raw" {
 		t.Errorf("无引用的值被改动: %q", got)
 	}
-	// 变量缺失时回落默认值，而不是把 ${VAR} 字面量交出去当密码用
 	if got := cfg.GetString("envsec.host", "fallback"); got != "fallback" {
 		t.Errorf("变量缺失时应回落默认值, got %q", got)
 	}

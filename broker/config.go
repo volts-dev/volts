@@ -3,7 +3,6 @@ package broker
 import (
 	"context"
 	"crypto/tls"
-	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/codec"
@@ -19,16 +18,14 @@ type (
 	PublishOption   func(*PublishConfig)
 	SubscribeOption func(*SubscribeConfig)
 
+	// Config 是消息总线的配置。纯结构体：导出字段就是配置项，接口 / 函数类型的字段是
+	// 实例引用，天然不进配置。
+	//
+	// broker 是跨组件**共享**的实例（server 按 BrokerType/BrokerHost 引用它），所以它的
+	// 配置是根节 broker.<name>，不挂在任何 server 下面。
 	Config struct {
-		config.Config `field:"-"`
-		ErrorHandler  Handler            `field:"-"`
-		Codec         codec.ICodec       `field:"-"` // Codec
-		Registry      registry.IRegistry `field:"-"` // Registry used for clustering
-		Context       context.Context    `field:"-"`
-		TLSConfig     *tls.Config        `field:"-"`
-		PrefixName    string             `field:"-"`
-		Name          string             `field:"-"`
-		Addrs         []string
+		Name  string `field:"-"`
+		Addrs []string
 
 		// Handler executed when error happens in broker mesage
 		// processing
@@ -36,10 +33,15 @@ type (
 
 		BroadcastVersion string
 		RegisterTTL      time.Duration `field:"register_ttl"`
-		RegisterInterval time.Duration
+		RegisterInterval time.Duration `field:"register_interval"`
 
-		// Other options for implementations of the interface
-		// can be stored in a context
+		// ---- 实例，不进配置文件 ----
+
+		ErrorHandler Handler
+		Codec        codec.ICodec       // Codec
+		Registry     registry.IRegistry // Registry used for clustering
+		Context      context.Context
+		TLSConfig    *tls.Config `field:"-"`
 	}
 
 	PublishConfig struct {
@@ -82,29 +84,23 @@ var (
 	DefaultBroadcastVersion = "broadcast"
 )
 
-func NewConfig(opts ...Option) *Config {
+// newConfig 返回带默认值、未绑定的配置。Use 用它解析 options 以查实例缓存。
+func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		//Config: config.Default(),
 		Name:             "default",
 		BroadcastVersion: DefaultBroadcastVersion,
 		RegisterTTL:      time.Minute,
 		RegisterInterval: time.Second * 30,
 	}
 	cfg.Init(opts...)
-	config.Register(cfg)
 	return cfg
 }
 
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "broker"}, ".")
-	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"broker", self.Name}, ".")
-	}
-
-	return self.Name
+// NewConfig 给各后端的构造函数用：默认值 → options → 绑到 broker.<name>。
+func NewConfig(opts ...Option) *Config {
+	cfg := newConfig(opts...)
+	config.Bind("broker."+cfg.Name, cfg)
+	return cfg
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -163,21 +159,10 @@ func Queue(name string) SubscribeOption {
 	}
 }
 
-// 修改Config.json的路径
+// WithName 设定后端名，也是配置路径 broker.<name>。
 func WithName(name string) Option {
 	return func(cfg *Config) {
-		//cfg.Unregister(cfg)
 		cfg.Name = name
-		//cfg.Register(cfg)
-	}
-}
-
-// 修改Config.json的路径
-func WithConfigPrefixName(prefixName string) Option {
-	return func(cfg *Config) {
-		cfg.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
 	}
 }
 

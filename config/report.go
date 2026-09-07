@@ -122,7 +122,7 @@ func (self *Config) ReportAll() *Report {
 
 	// 一、无人认领的节
 	for sec, leaves := range bySection {
-		if inAnySection(sec, sections) || isPrefixOfAny(sec, known) {
+		if inAnySection(sec, sections) || isLeafOrUnder(sec, known) {
 			continue
 		}
 		line, _ := core.fmt.fileLine(sec + "." + leaves[0])
@@ -176,6 +176,20 @@ func (self *Config) ReportAll() *Report {
 	sort.Slice(rep.Secrets, func(i, j int) bool { return rep.Secrets[i].Line < rep.Secrets[j].Line })
 
 	return rep
+}
+
+// isLeafOrUnder 报告 sec 本身是不是某个已声明的叶子、或落在某个叶子之下 ——
+// map 类型的字段在文件里展开成一个「节」，但它是叶子，不是孤儿。
+func isLeafOrUnder(sec string, known map[string]string) bool {
+	if _, ok := known[sec]; ok {
+		return true
+	}
+	for k := range known {
+		if strings.HasPrefix(sec, k+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func inAnySection(key string, sections []string) bool {

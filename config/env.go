@@ -27,41 +27,22 @@ import (
 //
 // 不写 ${} 的值原样保留，所以现有配置文件一个字都不用改。
 
-// expandEnvRefs 展开模型里所有字符串字段中的 ${VAR} 引用。
+// expandEnvRefs 展开结构体 ptr 里所有字符串叶子中的 ${VAR} 引用，path 是它在配置树上
+// 的位置（只用于错误定位）。
 //
 // 只走**字符串**（含 []string、map[string]string 和嵌套 struct 里的字符串）：
 // 环境变量本身就是字符串，对数值字段做展开只会带来意外。
-func expandEnvRefs(model IConfig) []error {
-	rv := reflect.ValueOf(model)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+// 字段的取舍与命名跟整个包一致，见 walk.go。
+func expandEnvRefs(ptr any, path string) []error {
+	rv, ok := structValueOf(ptr)
+	if !ok {
 		return nil
 	}
 	var errs []error
-	expandStruct(rv.Elem(), model.String(), &errs)
+	walk(rv, path, nil, func(p string, fv reflect.Value) {
+		expandValue(fv, p, &errs)
+	})
 	return errs
-}
-
-func expandStruct(v reflect.Value, path string, errs *[]error) {
-	if v.Kind() != reflect.Struct {
-		return
-	}
-	t := v.Type()
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		// 匿名内嵌（config.Config 带着 core / model 指针）与不可导出字段一律不碰
-		if f.Anonymous || f.PkgPath != "" {
-			continue
-		}
-		tag := f.Tag.Get("field")
-		if tag == "-" || strings.HasPrefix(tag, "-,") {
-			continue
-		}
-		name := strings.Split(tag, ",")[0]
-		if name == "" {
-			name = f.Name
-		}
-		expandValue(v.Field(i), path+"."+name, errs)
-	}
 }
 
 func expandValue(v reflect.Value, path string, errs *[]error) {
@@ -98,13 +79,6 @@ func expandValue(v reflect.Value, path string, errs *[]error) {
 			v.SetMapIndex(k, reflect.ValueOf(out))
 		}
 
-	case reflect.Struct:
-		expandStruct(v, path, errs)
-
-	case reflect.Ptr:
-		if !v.IsNil() && v.Elem().Kind() == reflect.Struct {
-			expandStruct(v.Elem(), path, errs)
-		}
 	}
 }
 

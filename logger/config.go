@@ -1,20 +1,17 @@
 package logger
 
 import (
-	"strings"
-
 	"github.com/volts-dev/volts/config"
 )
 
 type (
 	Option func(*Config)
 
+	// Config 是一个日志器的配置，配置节 logger.<name>（name 即 New(prefix) 的 prefix）。
 	Config struct {
-		config.Config `field:"-"`
-		Name          string `field:"-"` // config name/path in config file
-		PrefixName    string `field:"-"` // config prefix name
-		Level         Level
-		//Prefix         string
+		Name  string `field:"-"`
+		Debug bool   `field:"-"`
+		Level Level
 	}
 )
 
@@ -24,20 +21,12 @@ var (
 
 func newConfig(opts ...Option) *Config {
 	cfg := &Config{
-		//Config: config.Default(),
 		Level: LevelDebug,
 		Name:  "logger",
 	}
 	cfg.Init(opts...)
-	config.Register(cfg)
+	config.Bind("logger."+cfg.Name, cfg)
 	return cfg
-}
-
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.Name, self.PrefixName}, ".")
-	}
-	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -54,14 +43,10 @@ func Debug() Option {
 	}
 }
 
-// 修改Config.json的路径
-func WithConfigPrefixName(prefixName string) Option {
+// WithName 设定日志器名，也是配置路径 logger.<name>。
+func WithName(name string) Option {
 	return func(cfg *Config) {
-		if cfg.PrefixName != "" {
-			cfg.Unregister(cfg)
-		}
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
+		cfg.Name = name
 	}
 }
 

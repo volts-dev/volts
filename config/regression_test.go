@@ -4,67 +4,49 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// 本文件是 P0 四项修复的回归测试。每一条都对应一个曾经真实存在、且被实测复现过的缺陷，
+// 本文件是历史缺陷的回归测试。每一条都对应一个曾经真实存在、且被实测复现过的缺陷，
 // 删掉任何一条都会让对应缺陷可以无声地回来。
 
 type regParent struct {
-	Config
 	Value string `field:"value"`
 }
 
-func (self *regParent) String() string { return "regowner" }
-
 type regChild struct {
-	Config
 	Port int `field:"port"`
 }
 
-func (self *regChild) String() string { return "regowner.sub" }
-
-// TestRegister_BindsCoreToModel 锁定：Register 必须把自己的 core 注入模型内嵌的 Config。
+// TestBind_ValuesLandInOwnTree 锁定：绑到命名树上的值落在**那棵树**里，不逃逸到默认树。
 //
 // 曾经的缺陷：Register 只把模型指针存进 core.models，模型内嵌的 Config.core 始终为 nil，
 // 其 Save/Load 于是回落到全局 DEFAULT_PREFIX 的 core。表现为 New(name) 建出的命名配置
 // 实体形同虚设 —— 注册两个模型后 SaveToFile() 写出的是 `{}`，值全进了全局单例。
-func TestRegister_BindsCoreToModel(t *testing.T) {
-	fn := "regression_bindcore.json"
+func TestBind_ValuesLandInOwnTree(t *testing.T) {
+	fn := "regression_owntree.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
 	cfg := newIsolated(t, fn)
+	cfg.Bind("regowner.sub", &regChild{Port: 8080})
 
-	child := &regChild{Port: 8080}
-	cfg.Register(child)
-
-	if child.Config.Core() != cfg.Core() {
-		t.Fatal("模型内嵌的 Config 没有绑定到注册方的 core —— core 逃逸回归")
-	}
-
-	// 值必须落在注册方的 core 里，而不是全局单例
 	if got := cfg.GetInt("regowner.sub.port", 0); got != 8080 {
-		t.Errorf("注册方 core 里读不到值: got %d, want 8080", got)
+		t.Errorf("本树里读不到值: got %d, want 8080", got)
+	}
+	if got := Default().GetInt("regowner.sub.port", 0); got != 0 {
+		t.Errorf("值逃逸到了默认树: got %d", got)
 	}
 
-	// Dump 输出全量（含默认值），可用来证明值确实进了**本实例**的 core 而非全局单例。
-	// 这里不能用 SaveToFile 做判据 —— 它只写差异，纯默认值本就不该出现在里面。
 	if err := cfg.Dump(fn); err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("读回配置文件: %v", err)
+		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(raw)) == "{}" {
-		t.Fatal("Dump 结果为空对象 —— 注册的模型没有写进本实例的 core")
-	}
-
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("解析 Dump 结果: %v", err)
@@ -89,16 +71,10 @@ func TestSaveToFile_OnlyPersistsDiff(t *testing.T) {
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	// 文件里预先只有一项，代表「用户真的写过的配置」
-	if err := os.WriteFile(path, []byte(`{"regowner":{"value":"from_file"}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, path, `{"regowner":{"value":"from_file"}}`)
 
 	cfg := newIsolated(t, fn)
-	child := &regChild{Port: 8080} // 纯默认值，没人设定过
-	cfg.Register(child)
-
-	// 运行期显式设定一项
+	cfg.Bind("regowner.sub", &regChild{Port: 8080}) // 纯默认值，没人设定过
 	cfg.SetValue("runtime.explicit", "set_at_runtime")
 
 	if err := cfg.SaveToFile(); err != nil {
@@ -113,17 +89,14 @@ func TestSaveToFile_OnlyPersistsDiff(t *testing.T) {
 		t.Fatalf("解析落盘结果: %v\n%s", err, raw)
 	}
 
-	// 文件里本来就有的，必须保留 —— 否则一次保存就把用户配置抹了
 	owner, _ := m["regowner"].(map[string]any)
 	if owner == nil || owner["value"] != "from_file" {
 		t.Errorf("文件里原有的配置被丢弃: %s", raw)
 	}
-	// 运行期显式设定的，必须落盘
 	rt, _ := m["runtime"].(map[string]any)
 	if rt == nil || rt["explicit"] != "set_at_runtime" {
 		t.Errorf("运行期显式设定的值没有落盘: %s", raw)
 	}
-	// 纯默认值，不得落盘
 	if owner != nil {
 		if _, leaked := owner["sub"]; leaked {
 			t.Errorf("代码默认值被写进了配置文件: %s", raw)
@@ -133,8 +106,8 @@ func TestSaveToFile_OnlyPersistsDiff(t *testing.T) {
 
 // TestLoadFromFile_DoesNotCreateFile 锁定：装载配置不会自动创建/回写配置文件。
 //
-// 取消的是 LoadFromFile 末尾的自动回写。除了会污染配置内容，它还是多进程并发
-// 启动时把 config.json 写截断（服务器随后静默退出而进程还活着）的直接原因。
+// 除了会污染配置内容，自动回写还是多进程并发启动时把 config.json 写截断（服务器随后
+// 静默退出而进程还活着）的直接原因。
 func TestLoadFromFile_DoesNotCreateFile(t *testing.T) {
 	fn := "regression_nocreate.json"
 	path := filepath.Join(AppPath, fn)
@@ -143,28 +116,24 @@ func TestLoadFromFile_DoesNotCreateFile(t *testing.T) {
 
 	cfg := newIsolated(t, fn)
 	child := &regChild{Port: 8080}
-	cfg.Register(child)
+	cfg.Bind("regowner.sub", child)
 
 	if err := cfg.LoadFromFile(); err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
-
 	if _, err := os.Stat(path); err == nil {
 		raw, _ := os.ReadFile(path)
 		t.Errorf("LoadFromFile 自动创建了配置文件: %s", raw)
 	}
-
-	// 但模型仍应拿到默认值，正常跑
 	if child.Port != 8080 {
-		t.Errorf("没有配置文件时模型应保留默认值: got %d", child.Port)
+		t.Errorf("没有配置文件时结构体应保留默认值: got %d", child.Port)
 	}
 }
 
 // TestGetDuration_UnitIsMillisecond 锁定：GetDuration 与写入端单位一致。
 //
-// 曾经的缺陷：SaveFromModel 按 d.Milliseconds() 落盘、withDurationHook 按毫秒解回，
-// 而 GetDuration 是 time.Duration(GetInt64(key)) —— 按纳秒解释。同一份数据两条读路径
-// 相差 100 万倍（5000 读成 5µs 而非 5s）。
+// 曾经的缺陷：写入端按 d.Milliseconds() 落盘、解码钩子按毫秒解回，而 GetDuration 是
+// time.Duration(GetInt64(key)) —— 按纳秒解释，同一份数据两条读路径相差 100 万倍。
 func TestGetDuration_UnitIsMillisecond(t *testing.T) {
 	fn := "regression_duration.json"
 	defer os.Remove(filepath.Join(AppPath, fn))
@@ -174,75 +143,62 @@ func TestGetDuration_UnitIsMillisecond(t *testing.T) {
 	if got := cfg.GetDuration("x.timeout", 0); got != 5*time.Second {
 		t.Errorf("裸数字应按毫秒解释: got %v, want 5s", got)
 	}
-
-	// 带单位字符串是人手写配置的首选形态
 	cfg.SetValue("x.readable", "1500ms")
 	if got := cfg.GetDuration("x.readable", 0); got != 1500*time.Millisecond {
 		t.Errorf("带单位字符串: got %v, want 1.5s", got)
 	}
-
-	// 无法解析时回落默认值，而不是 0
 	cfg.SetValue("x.garbage", "not-a-duration")
 	if got := cfg.GetDuration("x.garbage", 7*time.Second); got != 7*time.Second {
 		t.Errorf("不可解析时应回落默认值: got %v, want 7s", got)
 	}
-
 	if got := cfg.GetDuration("x.missing", 3*time.Second); got != 3*time.Second {
 		t.Errorf("缺失键应回落默认值: got %v, want 3s", got)
 	}
 }
 
-// TestUnregister_DoesNotWriteFile 锁定：Unregister 不再顺手落盘。
+// TestUnbind_DoesNotWriteFile 锁定：Unbind 不顺手落盘。
 //
-// 曾经的缺陷：Unregister 内联调用 SaveToFile。它的主要调用方是 WithConfigPrefixName /
-// Name 这类改名 option，装配期每改一次名就全量写一次盘；多进程并发启动时会把同一个
-// config.json 写截断，服务器随后静默退出而进程还活着。
-func TestUnregister_DoesNotWriteFile(t *testing.T) {
-	fn := "regression_unregister.json"
+// 曾经的缺陷：Unregister 内联调用 SaveToFile，装配期每改一次名就全量写一次盘；
+// 多进程并发启动时会把同一个 config.json 写截断。
+func TestUnbind_DoesNotWriteFile(t *testing.T) {
+	fn := "regression_unbind.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
 	cfg := newIsolated(t, fn)
-	child := &regChild{Port: 8080}
-	cfg.Register(child)
+	cfg.Bind("regowner.sub", &regChild{Port: 8080})
+	os.Remove(path)
+
+	cfg.Unbind("regowner.sub")
 
 	if _, err := os.Stat(path); err == nil {
-		os.Remove(path)
+		t.Error("Unbind 写了配置文件 —— 装配期并发写截断的回归")
 	}
-
-	cfg.Unregister(child)
-
-	if _, err := os.Stat(path); err == nil {
-		t.Error("Unregister 写了配置文件 —— 装配期并发写截断的回归")
+	if contains(cfg.Bound(), "regowner.sub") {
+		t.Error("Unbind 之后节仍在树上")
 	}
 }
 
-// TestRegister_CollectsErrorsInsteadOfExiting 锁定：装载期错误累积可查，不再 os.Exit。
+// TestBind_CollectsErrorsInsteadOfExiting 锁定：装载期错误累积可查，不 os.Exit。
 //
-// 曾经的缺陷：Register / LoadFromFile / Reload 里 7 处 log.Fatal，一个坏 key 直接退进程；
-// 且 Fatalf 的格式化参数里根本没有 err，mapstructure 报出的字段名与原因被整个丢弃，
-// 用户只看得到 "load xxx config failed!"。
-func TestRegister_CollectsErrorsInsteadOfExiting(t *testing.T) {
+// 曾经的缺陷：7 处 log.Fatal，一个坏 key 直接退进程；且格式化参数里根本没有 err，
+// mapstructure 报出的字段名与原因被整个丢弃。
+func TestBind_CollectsErrorsInsteadOfExiting(t *testing.T) {
 	fn := "regression_errors.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
-
-	// 文件里把 port 写成不可解析为 int 的值
-	if err := os.WriteFile(path, []byte(`{"regowner":{"sub":{"port":"not-a-number"}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, path, `{"regowner":{"sub":{"port":"not-a-number"}}}`)
 
 	cfg := newIsolated(t, fn)
 	cfg.ClearErrors()
 
-	child := &regChild{Port: 8080}
-	cfg.Register(child) // 曾经：此处 os.Exit(1)，测试根本跑不到下一行
-
+	if err := cfg.Bind("regowner.sub", &regChild{Port: 8080}); err == nil {
+		t.Error("坏配置应作为 Bind 的返回值报出")
+	}
 	err := cfg.Errors()
 	if err == nil {
 		t.Fatal("坏配置没有被记录为错误")
 	}
-	// 错误信息必须同时带上配置路径和底层原因，否则定位不了是哪一份配置
 	msg := err.Error()
 	if !strings.Contains(msg, "regowner.sub") {
 		t.Errorf("错误信息缺少配置路径: %v", msg)
@@ -259,13 +215,9 @@ func TestRegister_CollectsErrorsInsteadOfExiting(t *testing.T) {
 
 // TestFileOverridesCodeDefaults 锁定：配置文件的值必须盖得过代码默认值。
 //
-// 曾经的缺陷（P0-a 修好 core 逃逸后才暴露）：Register 把模型默认值经 SetValue 灌进
-// viper 的 override 层，而 override 优先级**高于**配置文件。于是启动时灌进去的默认值
-// 永久压住用户在文件里写的真实配置 —— 改了配置没反应，且零提示。
-//
-// 它平时被「首次启动自动把默认值回写进文件、第二次启动 InConfig 为真就不再灌」的行为
-// 掩盖着。真正致命的是两条灌值路径：Register 一条、LoadToModel 里「文件没有该节就
-// model.Save() 兜底」又一条 —— 只修前者、漏掉后者，现象一模一样。本测试同时覆盖两条。
+// 曾经的缺陷：Register 把模型默认值经 SetValue 灌进 viper 的 override 层，而 override
+// 优先级**高于**配置文件。于是启动时灌进去的默认值永久压住用户在文件里写的真实配置
+// —— 改了配置没反应，且零提示。
 func TestFileOverridesCodeDefaults(t *testing.T) {
 	fn := "regression_precedence.json"
 	path := filepath.Join(AppPath, fn)
@@ -273,83 +225,63 @@ func TestFileOverridesCodeDefaults(t *testing.T) {
 
 	cfg := newIsolated(t, fn)
 
-	// 路径一：Register 时文件不存在，默认值必须进 defaults 层
 	parent := &regParent{Value: "code_default"}
-	cfg.Register(parent)
+	cfg.Bind("regowner", parent)
 	if parent.Value != "code_default" {
-		t.Fatalf("首次注册应保留代码默认值: got %q", parent.Value)
+		t.Fatalf("文件不存在时应保留代码默认值: got %q", parent.Value)
 	}
 
-	// 用户手写配置文件
-	if err := os.WriteFile(path, []byte(`{"regowner":{"value":"user_wrote_this"}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	write(t, path, `{"regowner":{"value":"user_wrote_this"}}`)
 	if err := cfg.LoadFromFile(); err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
 	if got := cfg.GetString("regowner.value", "<none>"); got != "user_wrote_this" {
-		t.Errorf("core 里文件值被默认值压住: got %q, want %q", got, "user_wrote_this")
+		t.Errorf("树里文件值被默认值压住: got %q", got)
 	}
 	if parent.Value != "user_wrote_this" {
-		t.Errorf("模型没拿到文件值: got %q, want %q", parent.Value, "user_wrote_this")
+		t.Errorf("结构体没拿到文件值: got %q", parent.Value)
 	}
 
-	// 路径二：LoadToModel 对一个未注册的模型做兜底 Save，同样不得污染 override 层
+	// 再绑一个同路径的新对象：默认值仍只进 defaults 层，文件继续赢
 	fresh := &regParent{Value: "another_default"}
-	if err := cfg.LoadToModel(fresh); err != nil {
-		t.Fatalf("LoadToModel: %v", err)
-	}
+	cfg.Bind("regowner", fresh)
 	if fresh.Value != "user_wrote_this" {
-		t.Errorf("LoadToModel 没拿到文件值: got %q", fresh.Value)
+		t.Errorf("再次 Bind 没拿到文件值: got %q", fresh.Value)
 	}
 	if got := cfg.GetString("regowner.value", "<none>"); got != "user_wrote_this" {
-		t.Errorf("LoadToModel 的兜底 Save 污染了高优先级层: got %q", got)
+		t.Errorf("Bind 的默认值污染了高优先级层: got %q", got)
 	}
 }
 
-// TestRegister_ContinuesAfterBadModel 锁定：一个模型坏掉不影响其余模型装载。
+// TestLoadFromFile_ContinuesAfterBadNode 锁定：一个节坏掉不影响其余节装载。
 //
-// 曾经的缺陷：LoadFromFile 的 Range 回调在保存失败时 `return false`，直接中止遍历，
-// 后面所有模型都不再处理 —— 遇错即停，而不是把问题一次报全。
-func TestRegister_ContinuesAfterBadModel(t *testing.T) {
+// 曾经的缺陷：Range 回调在保存失败时 `return false`，直接中止遍历 —— 遇错即停，
+// 而不是把问题一次报全。
+func TestLoadFromFile_ContinuesAfterBadNode(t *testing.T) {
 	fn := "regression_continue.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	if err := os.WriteFile(path, []byte(
-		`{"regowner":{"value":"ok","sub":{"port":"not-a-number"}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := newIsolated(t, fn)
-	cfg.ClearErrors()
-
 	child := &regChild{Port: 8080}
 	parent := &regParent{Value: "default"}
-	cfg.Register(child)  // 坏的
-	cfg.Register(parent) // 好的，必须仍然被正确装载
+	cfg.Bind("regowner.sub", child)
+	cfg.Bind("regowner", parent)
+	cfg.ClearErrors()
+
+	write(t, path, `{"regowner":{"value":"ok","sub":{"port":"not-a-number"}}}`)
+	cfg.LoadFromFile()
 
 	if cfg.Errors() == nil {
-		t.Error("坏模型没有被记录为错误")
+		t.Error("坏节没有被记录为错误")
 	}
 	if parent.Value != "ok" {
-		t.Errorf("坏模型中断了后续模型的装载: parent.Value = %q, want %q", parent.Value, "ok")
+		t.Errorf("坏节中断了后续节的装载: parent.Value = %q, want %q", parent.Value, "ok")
+	}
+	if child.Port != 8080 {
+		t.Errorf("解码失败的节不该被写成半新半旧: %d", child.Port)
 	}
 }
-
-// newIsolated 建一个每次调用都全新的配置实例。
-//
-// New(name) 按 name 复用内存中已有的 core —— 这是设计如此，生产里一个 name 就是一个
-// 逻辑配置实体。但测试必须彼此隔离：复用 core 会把上一轮留在 override 层的值、
-// 已注册的模型一并继承过来，`go test -count=2` 第二轮便开始互相干扰
-// （实测表现为「代码默认值 IsSet 应为假」「未注册的子组件节被误报」等一串假失败）。
-func newIsolated(t *testing.T, fn string) *Config {
-	t.Helper()
-	return New(t.Name()+"#"+strconv.FormatInt(testSeq.Add(1), 10), WithFileName(fn))
-}
-
-var testSeq atomic.Int64
 
 /*
 配置文件必须能从**工作目录**找到，而不只是可执行文件旁边。
@@ -357,42 +289,32 @@ var testSeq atomic.Int64
 `AppPath` 是可执行文件所在目录，对部署好的服务是对的；但 `go test` 把测试二进制编到
 临时目录里跑，于是包目录下那份 config.json **一次都没被读过**。这不是报错，是每个
 配置模型都停在代码默认值上 —— vectors 那边 storage 的测试因此拿到空 bucket_name，
-报出来的却是 OSS SDK 的 "bucket name len is between [3-63], now is 0"，没有任何东西
-指回"配置没加载"。整整一批 config.json 是摆设，而没人知道。
-
-回落只在「可执行文件旁边没有」时发生，所以正常部署零影响。
+报出来的却是 OSS SDK 的 "bucket name len is between [3-63], now is 0"。
 */
 func TestLoadFromFile_FallsBackToWorkingDir(t *testing.T) {
 	fn := "regression_cwd_fallback.json"
 
-	// 放在工作目录（go test 下就是包目录），**不放** AppPath。
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	cwdPath := filepath.Join(cwd, fn)
-	if err := os.WriteFile(cwdPath, []byte(`{"regowner":{"value":"from_cwd"}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, cwdPath, `{"regowner":{"value":"from_cwd"}}`)
 	defer os.Remove(cwdPath)
 
-	// 前置条件：AppPath 下确实没有同名文件，否则这个用例证明不了任何事。
 	if _, err := os.Stat(filepath.Join(AppPath, fn)); err == nil {
 		t.Skipf("AppPath 下已存在 %s，本用例无法区分两条路径", fn)
 	}
 
 	cfg := newIsolated(t, fn)
 	model := &regParent{Value: "code_default"}
-	cfg.Register(model)
+	cfg.Bind("regowner", model)
 
-	if err := cfg.LoadFromFile(); err != nil {
-		t.Fatalf("LoadFromFile: %v", err)
-	}
 	if got := cfg.GetString("regowner.value", "<none>"); got != "from_cwd" {
-		t.Errorf("core 没读到工作目录里的配置: got %q, want %q", got, "from_cwd")
+		t.Errorf("树没读到工作目录里的配置: got %q, want %q", got, "from_cwd")
 	}
 	if model.Value != "from_cwd" {
-		t.Errorf("模型没拿到工作目录里的配置: got %q, want %q", model.Value, "from_cwd")
+		t.Errorf("结构体没拿到工作目录里的配置: got %q, want %q", model.Value, "from_cwd")
 	}
 }
 
@@ -401,9 +323,7 @@ func TestLoadFromFile_AppPathWinsOverWorkingDir(t *testing.T) {
 	fn := "regression_apppath_wins.json"
 
 	appPathFile := filepath.Join(AppPath, fn)
-	if err := os.WriteFile(appPathFile, []byte(`{"regowner":{"value":"from_apppath"}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, appPathFile, `{"regowner":{"value":"from_apppath"}}`)
 	defer os.Remove(appPathFile)
 
 	cwd, err := os.Getwd()
@@ -412,18 +332,13 @@ func TestLoadFromFile_AppPathWinsOverWorkingDir(t *testing.T) {
 	}
 	if cwd != AppPath {
 		cwdFile := filepath.Join(cwd, fn)
-		if err := os.WriteFile(cwdFile, []byte(`{"regowner":{"value":"from_cwd"}}`), 0644); err != nil {
-			t.Fatal(err)
-		}
+		write(t, cwdFile, `{"regowner":{"value":"from_cwd"}}`)
 		defer os.Remove(cwdFile)
 	}
 
 	cfg := newIsolated(t, fn)
 	model := &regParent{Value: "code_default"}
-	cfg.Register(model)
-	if err := cfg.LoadFromFile(); err != nil {
-		t.Fatalf("LoadFromFile: %v", err)
-	}
+	cfg.Bind("regowner", model)
 	if model.Value != "from_apppath" {
 		t.Errorf("回落抢走了 AppPath 的配置: got %q, want %q", model.Value, "from_apppath")
 	}
@@ -437,15 +352,12 @@ func TestLoadFromFile_HonoursExplicitFileName(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(cwd, fn)
-	if err := os.WriteFile(path, []byte(`{"regowner":{"value":"explicit"}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, path, `{"regowner":{"value":"explicit"}}`)
 	defer os.Remove(path)
 
-	// 故意用别的文件名建，再靠参数切过去。
 	cfg := newIsolated(t, "regression_not_this_one.json")
 	model := &regParent{Value: "code_default"}
-	cfg.Register(model)
+	cfg.Bind("regowner", model)
 
 	if err := cfg.LoadFromFile(fn); err != nil {
 		t.Fatalf("LoadFromFile: %v", err)

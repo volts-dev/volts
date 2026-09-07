@@ -1,10 +1,9 @@
 package config
 
 import (
+	"reflect"
 	"sort"
 	"strings"
-
-	"github.com/volts-dev/utils"
 )
 
 // 未知配置项检查。
@@ -47,16 +46,16 @@ func (self LintIssue) String() string {
 
 func quote(s string) string { return "\"" + s + "\"" }
 
-// Lint 报告配置文件里所有「没有任何已注册模型声明过」的配置项。
+// Lint 报告配置文件里所有「没有任何已绑定结构体声明过」的配置项。
 //
-// 必须在全部组件装配完毕之后调用 —— 差集的正确性依赖于「所有模型都已注册」。
+// 必须在全部组件装配完毕之后调用 —— 差集的正确性依赖于「所有结构体都已绑定」。
 // service.Start() 会自动调一次；独立使用时自行掌握时机。
 func (self *Config) Lint() []LintIssue {
 	core := self.Core()
 
 	known := self.knownKeys()
 	if len(known) == 0 {
-		// 一个模型都没注册，此时任何 key 都会被判为未知 —— 那是误报，直接不报。
+		// 一个结构体都没绑定，此时任何 key 都会被判为未知 —— 那是误报，直接不报。
 		return nil
 	}
 	sections := self.knownSections()
@@ -66,22 +65,19 @@ func (self *Config) Lint() []LintIssue {
 		if _, ok := known[key]; ok {
 			continue
 		}
-		// 该 key 本身未被声明，但它可能是某个已声明项的祖先前缀（例如模型把
-		// 整个子树当一个字段读）。凡是已知项的前缀，都不算未知。
-		if isPrefixOfAny(key, known) {
-			continue
-		}
-		// ★ 只报「已注册的配置节内部」的未知字段。
+		// ★ 只报「某个已绑定结构体内部」的未知字段：key 的父路径必须正是一个结构体节
+		//   （根节，或根节里某个子结构体字段）。
 		//
-		// 整节都没有模型认领时一律跳过：配置模型是**惰性注册**的 —— 只有当代码真的
-		// 创建了某个组件，它的配置才进 core。一个只起了 server 的进程，config.json 里
-		// 的 client.* / 各业务模块节自然无人认领；vectors 那种运行期动态装模块的系统
-		// 更是如此。把这些报成「未知配置项」是纯粹的假阳性，而一个天天误报的检查
-		// 等于没有检查 —— 人会直接无视它，真正的拼写错误也跟着被无视。
+		// 父路径不是结构体节的一律跳过：配置是**惰性绑定**的 —— 只有当代码真的创建了
+		// 某个组件，它的配置才进树。一个只起了 server 的进程，config.json 里的 client.*
+		// / 各业务模块节自然无人认领；vectors 那种运行期动态装模块的系统更是如此。把
+		// 这些报成「未知配置项」是纯粹的假阳性，而一个天天误报的检查等于没有检查 ——
+		// 人会直接无视它，真正的拼写错误也跟着被无视。整节孤儿交给 Report。
 		//
-		// 代价是：历史遗留的整节孤儿（如 client.web.action.* 与 web.action.client.*
-		// 并存）本检查不负责发现，那要靠 P3 的迁移器带全量报告来做。
-		if !isReportable(key, sections, known) {
+		// 「父路径是结构体节」这一条判据是结构体图直接给出的，不用再从字符串反推谁
+		// 声明了谁：一个 map 字段下的键（server.http.metadata.foo）父路径是叶子不是节，
+		// 不报；一个子组件被搬走后留下的旧节，父路径已不在树上，也不报。
+		if !isReportable(key, sections) {
 			continue
 		}
 		line, _ := core.fmt.fileLine(key)
@@ -101,107 +97,55 @@ func (self *Config) Lint() []LintIssue {
 	return issues
 }
 
-// knownKeys 收集所有已注册模型声明过的叶子路径，值是声明它的那个配置节（模型的
-// String()）—— isReportable 靠它分辨「模型自己的嵌套字段」与「另一个子组件的节」。
+// knownKeys 收集所有已绑定结构体声明过的叶子路径，值是叶子所在的那个结构体节路径。
 //
-// 复用 SaveFromModel 的那套展开（utils.Struct2ItfMap + collectLeaves），确保
-// 「模型声明了哪些 key」与「模型会写出哪些 key」用的是同一个答案 —— 两边各写一遍
-// 展开逻辑，迟早会对不上，那时 Lint 就开始误报，比不报还糟。
+// 走的是与灌默认值 / 装载完全相同的走查器（walk.go），所以「结构体声明了哪些 key」
+// 与「结构体会写出 / 读回哪些 key」永远是同一个答案。
 func (self *Config) knownKeys() map[string]string {
 	out := make(map[string]string)
-
-	self.Core().models.Range(func(key any, value any) bool {
-		model, ok := value.(IConfig)
+	self.Core().nodes.Range(func(_ any, value any) bool {
+		n := value.(*node)
+		rv, ok := structValueOf(n.ptr)
 		if !ok {
 			return true
 		}
-		prefix := strings.ToLower(model.String())
-		if prefix == "" {
+		walk(rv, n.path, nil, func(p string, _ reflect.Value) {
+			parent, _ := splitLast(p)
+			out[p] = parent
+		})
+		return true
+	})
+	return out
+}
+
+// knownSections 返回树上所有结构体节的路径：每个根节，加上根节里每个子结构体字段。
+func (self *Config) knownSections() []string {
+	seen := map[string]bool{}
+	self.Core().nodes.Range(func(_ any, value any) bool {
+		n := value.(*node)
+		rv, ok := structValueOf(n.ptr)
+		if !ok {
 			return true
 		}
-
-		fields := utils.Struct2ItfMap(model)
-		for k, v := range fields {
-			if strings.EqualFold("config", k) {
-				continue // 内嵌基类，与 SaveFromModel 保持一致
-			}
-			if sub, ok := v.(map[string]any); ok && len(sub) > 0 {
-				collectLeaves(sub, prefix+"."+strings.ToLower(k), func(p string, _ any) {
-					out[strings.ToLower(p)] = prefix
-				})
-				continue
-			}
-			out[prefix+"."+strings.ToLower(k)] = prefix
-		}
+		walk(rv, n.path, func(p string, _ reflect.Value) { seen[p] = true }, nil)
 		return true
 	})
-
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	sort.Strings(out)
 	return out
 }
 
-// knownSections 返回所有已注册模型的配置节名（即各自的 String()）。
-func (self *Config) knownSections() []string {
-	var out []string
-	self.Core().models.Range(func(key any, value any) bool {
-		if model, ok := value.(IConfig); ok {
-			if s := strings.ToLower(model.String()); s != "" {
-				out = append(out, s)
-			}
-		}
-		return true
-	})
-	return out
-}
-
-// isReportable 报告一个未知 key 是否值得报出来。
-//
-// 判据是它的**父路径**：只有当父路径确实是「某个已注册模型声明过的结构」时，
-// 这个 key 才是该结构里的一个错字；否则它属于一个尚未注册的子节，报了就是假阳性。
-//
-// 父路径合格的两种情形：
-//   - 父路径就是某个已注册配置节本身（server.http.version 的父是 server.http）
-//   - 父路径是某个已声明字段路径的前缀（nested.child.bogus 的父是 nested.child，
-//     而模型确实声明了 nested.child.name）
-//
-// 反例是 server.http.client.pool_size：server.http 这一节注册了，但 server.http.client
-// 是**子组件**的配置节 —— server 模型自己并没有声明 client.* 下的任何字段（那些实例
-// 字段都是 field:"-"）。若只判断「落在已注册节内」，这类 key 会整片被误报；实测对
-// kylin 的 config.json 是 77 条里的绝大多数。
-//
-// 「已声明字段路径的前缀」这一条还要再收一档：父路径必须落在**声明该字段的那个
-// 配置节之内**（等于它，或在它下面）。反例来自 kylin 真栈：server 用
-// WithConfigPrefixName 把 router 的节从 router.default 搬到 server.http.router，
-// 而 router 在 newConfig 时给自己建的 RegistryCacher / Selector 仍留在
-// router.default.registry.* / router.default.selector.* —— 于是 router.default
-// 是「某个已声明字段的前缀」，它下面那十个早已搬走的字段（recover、upload_buf …）
-// 整节被报成未知；server.http.broker 被复用后改挂 server.rpc 时是同一个形状。
-// 这些父路径在**子组件的节之上**，不在任何模型自己的结构里，报了就是误报。
-func isReportable(key string, sections []string, known map[string]string) bool {
+// isReportable 报告一个未知 key 是否值得报出来：它的父路径必须是一个结构体节。
+func isReportable(key string, sections []string) bool {
 	parent, _ := splitLast(key)
 	if parent == "" {
 		return false
 	}
 	for _, s := range sections {
 		if parent == s {
-			return true
-		}
-	}
-	p := parent + "."
-	for k, owner := range known {
-		if !strings.HasPrefix(k, p) {
-			continue
-		}
-		if parent == owner || strings.HasPrefix(parent, owner+".") {
-			return true
-		}
-	}
-	return false
-}
-
-func isPrefixOfAny(key string, known map[string]string) bool {
-	p := key + "."
-	for k := range known {
-		if strings.HasPrefix(k, p) {
 			return true
 		}
 	}

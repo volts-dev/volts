@@ -20,7 +20,7 @@ type (
 )
 
 func (self *registrySelector) newCache() registry.IRegistryCacher {
-	opts := []registry.Option{registry.WithConfigPrefixName(self.config.String())}
+	var opts []registry.Option
 	if self.config.Context != nil {
 		if t, ok := self.config.Context.Value("selector_ttl").(time.Duration); ok {
 			opts = append(opts, registry.RegisterTTL(t))

@@ -2,7 +2,6 @@ package selector
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/config"
@@ -24,13 +23,15 @@ type (
 
 	// OptionFn configures options of server.
 	Option func(*Config)
+
+	// Config 是选择器的配置。纯结构体：导出字段就是配置项，接口 / 函数类型的字段是
+	// 实例引用，天然不进配置。
+	//
+	// 它通常被 router / client **拥有**（配置节 router.default.selector.*），独立创建时
+	// 绑在 selector.<name>。
 	Config struct {
-		config.Config `field:"-"`
-		Name          string             `field:"-"` // config name/path in config file
-		PrefixName    string             `field:"-"` // config prefix name
-		Logger        logger.ILogger     `field:"-"` // 保留:提供给扩展使用
-		Registry      registry.IRegistry `field:"-"`
-		Strategy      Strategy           `field:"-"`
+		Name  string `field:"-"`
+		Debug bool   `field:"-"`
 
 		// BreakerFailures 触发节点熔断所需的连续失败次数。设为 0 关闭熔断。
 		BreakerFailures int `field:"breaker_failures"`
@@ -39,9 +40,16 @@ type (
 		// BreakerMaxCooldown 连续熔断指数退避后的冷却时长上限。
 		BreakerMaxCooldown time.Duration `field:"breaker_max_cooldown"`
 
+		// ---- 实例，不进配置文件 ----
+
+		Logger   logger.ILogger // 保留:提供给扩展使用
+		Registry registry.IRegistry
+		Strategy Strategy
 		// Other options for implementations of the interface
 		// can be stored in a context
-		Context context.Context `field:"-"`
+		Context context.Context
+
+		use *Config // WithConfig
 	}
 )
 
@@ -63,8 +71,10 @@ func (self *Config) BreakerEnabled() bool {
 	return self.BreakerFailures > 0
 }
 
-func newConfig(opts ...Option) *Config {
-	cfg := &Config{
+// NewConfig 返回一份带代码默认值、**尚未绑定**到配置树的选择器配置，给拥有选择器的
+// 组件作为字段带着、随自己一起 Bind，再用 New(WithConfig(cfg), ...) 建实例。
+func NewConfig() *Config {
+	return &Config{
 		Name:               "default",
 		Logger:             log,
 		Strategy:           Random,
@@ -73,21 +83,30 @@ func newConfig(opts ...Option) *Config {
 		BreakerCooldown:    DefaultBreakerCooldown,
 		BreakerMaxCooldown: DefaultBreakerMaxCooldown,
 	}
-	cfg.Init(opts...)
-	config.Register(cfg)
-	return cfg
 }
 
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "selector"}, ".")
+func newConfig(opts ...Option) *Config {
+	cfg := NewConfig()
+	cfg.Init(opts...)
+	if ext := cfg.use; ext != nil {
+		cfg.use = nil
+		// 调用方持有的配置可能是零值起家的（父结构体里 selector.NewConfig() 之外的写法），
+		// 实例字段缺什么补什么。
+		if ext.Logger == nil {
+			ext.Logger = log
+		}
+		if ext.Strategy == nil {
+			ext.Strategy = Random
+		}
+		if ext.Registry == nil {
+			ext.Registry = registry.NewNopRegistry()
+		}
+		ext.Init(opts...)
+		ext.use = nil
+		return ext
 	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"selector", self.Name}, ".")
-	}
-
-	return self.Name
+	config.Bind("selector."+cfg.Name, cfg)
+	return cfg
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -95,6 +114,20 @@ func (self *Config) Init(opts ...Option) {
 		if opt != nil {
 			opt(self)
 		}
+	}
+}
+
+// WithConfig 让选择器实例使用调用方持有的这份配置（父组件的字段），不再自建、不再自绑。
+func WithConfig(c *Config) Option {
+	return func(cfg *Config) {
+		cfg.use = c
+	}
+}
+
+// WithName 设定独立绑定时的配置路径 selector.<name>。
+func WithName(name string) Option {
+	return func(cfg *Config) {
+		cfg.Name = name
 	}
 }
 
@@ -145,14 +178,5 @@ func WithStrategy(name string) Option {
 		if fn := Use(name); fn != nil {
 			cfg.Strategy = Use(name)
 		}
-	}
-}
-
-// 修改Config.json的路径
-func WithConfigPrefixName(prefixName string) Option {
-	return func(cfg *Config) {
-		cfg.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
 	}
 }

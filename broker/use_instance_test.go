@@ -2,8 +2,6 @@ package broker
 
 import (
 	"testing"
-
-	"github.com/volts-dev/volts/config"
 )
 
 // fakeInstance 只实现 Use 会碰到的三个方法，其余靠内嵌接口占位（不会被调用）。
@@ -21,7 +19,6 @@ func (f *fakeInstance) Init(opts ...Option) error {
 
 func newFakeInstance(opts ...Option) IBroker {
 	cfg := &Config{Name: "http"}
-	config.Detach(&cfg.Config)
 	cfg.Init(opts...)
 	return &fakeInstance{cfg: cfg}
 }
@@ -62,7 +59,7 @@ func TestUse_ProcessWideInstanceIsShared(t *testing.T) {
 	resetBrokerState(t)
 
 	// server/config.go 的调用形态：BrokerType、BrokerHost 都是默认空串。
-	srv := Use("", WithConfigPrefixName("server.http"), Addrs(""))
+	srv := Use("", Addrs(""))
 	if srv == nil {
 		t.Fatal("Use(\"\") 返回 nil")
 	}
@@ -76,7 +73,7 @@ func TestUse_ProcessWideInstanceIsShared(t *testing.T) {
 	}
 
 	// 第二个 server（vectors 的 http + rpc 两台）同样落到这一格。
-	if got := Use("", WithConfigPrefixName("server.rpc"), Addrs("")); got != srv {
+	if got := Use("", Addrs("")); got != srv {
 		t.Errorf("第二个 server 拿到了不同实例：%p vs %p", got, srv)
 	}
 }

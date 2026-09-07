@@ -3,7 +3,6 @@ package registry
 import (
 	"context"
 	"crypto/tls"
-	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/config"
@@ -35,18 +34,25 @@ type (
 		Context context.Context
 	}
 
+	// Config 是注册中心的配置。纯结构体：导出字段就是配置项，接口类型的字段是实例引用，
+	// 天然不进配置。
+	//
+	// registry 是跨组件**共享**的实例（server / router / client 按类型与地址引用它），
+	// 所以它的配置是根节 registry.<name>，不挂在任何持有者下面；缓存层（registryCacher）
+	// 用的是一份不绑定的配置，见 newCacheConfig。
 	Config struct {
-		config.Config `field:"-"`
-		Name          string          `field:"-"` //
-		PrefixName    string          `field:"-"` // config prefix name/path in config file
-		Logger        logger.ILogger  `field:"-"` // 实例
-		Context       context.Context `field:"-"`
-		Addrs         []string        `field:"-"`
-		TlsConfig     *tls.Config     `field:"-"`
+		Name      string      `field:"-"` // 配置路径 registry.<name>；也是 Use 的实例缓存键之一
+		Debug     bool        `field:"-"`
+		Addrs     []string    `field:"-"` // 地址由持有者（server.RegistryHost）给出，不在本节
+		TlsConfig *tls.Config `field:"-"`
 
 		Timeout time.Duration
 		Secure  bool
 		TTL     time.Duration `field:"ttl"`
+
+		// ---- 实例，不进配置文件 ----
+		Logger  logger.ILogger
+		Context context.Context
 	}
 
 	WatchConfig struct {
@@ -59,8 +65,20 @@ type (
 	}
 )
 
-// new and init a config
+// NewConfig 给各注册中心实现的构造函数用：默认值 → options → 绑到 registry.<name>。
 func NewConfig(opts ...Option) *Config {
+	cfg := newCacheConfig(opts...)
+	config.Bind("registry."+cfg.Name, cfg)
+	return cfg
+}
+
+// newCacheConfig 返回带默认值、**不绑定**的配置。
+//
+// registryCacher 用它：缓存层的 TTL 是实现参数，不是配置文件里的一节。此前每个持有
+// registry 的组件（server / router / selector / client）都在自己的前缀下把 cacher 的
+// 这份配置登记成 <prefix>.registry，一个 etcd 实例的配置于是在真栈文件里出现了 20 多份。
+// registry.Use 解析 options 查实例缓存时也用它。
+func newCacheConfig(opts ...Option) *Config {
 	cfg := &Config{
 		Name:    "default",
 		Logger:  log,
@@ -74,20 +92,7 @@ func NewConfig(opts ...Option) *Config {
 		Timeout: 5 * time.Second,
 	}
 	cfg.Init(opts...)
-	config.Register(cfg)
 	return cfg
-}
-
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "registry"}, ".")
-	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"registry", self.Name}, ".")
-	}
-
-	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -147,14 +152,5 @@ func WithName(name string) Option {
 		//cfg.Unregister(cfg)
 		cfg.Name = name
 		//cfg.Register(cfg)
-	}
-}
-
-// WithConfigPrefixName changes the prefix name, unregisters the old and registers the new
-func WithConfigPrefixName(prefixName string) Option {
-	return func(cfg *Config) {
-		cfg.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
 	}
 }

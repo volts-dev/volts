@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/volts-dev/volts/codec"
@@ -88,10 +87,18 @@ type (
 	// CallOption used by Call or Stream
 	CallOption func(*CallOptions)
 
+	// Config 是客户端的配置。纯结构体：导出字段就是配置文件里的项，接口 / 函数类型的
+	// 字段是实例引用，天然不进配置。配置节是 client.<name>。
+	//
+	// 客户端**拥有**自己的传输层与选择器：TransportConfig / SelectorConfig 两个字段随它
+	// 一起绑定，配置节因此是 client.<name>.transport.* 与 client.<name>.selector.*。
+	// registry 是共享引用，只留 RegistryType / RegistryHost 两个名字字段。
 	Config struct {
-		config.Config `field:"-"`
-		Name          string `field:"-"` // config name/path in config file
-		PrefixName    string `field:"-"` // config prefix name
+		Name  string `field:"-"` // 配置路径 client.<name>
+		Debug bool   `field:"-"`
+
+		TransportConfig *transport.Config `field:"transport"` // = Transport.Config()
+		SelectorConfig  *selector.Config  `field:"selector"`
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Logger      logger.ILogger         `field:"-"` // 保留:提供给扩展使用
@@ -136,7 +143,7 @@ type (
 		Ja3      transport.Ja3 `field:"-"`
 		ProxyUrl string
 		// http options
-		UserAgent     string
+		UserAgent string
 
 		// Debug mode
 		PrintRequest    bool
@@ -185,28 +192,20 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 
 	cfg.Init(opts...)
 
-	config.Register(cfg)
-	/*
-		// 保存/加载
-		if !config.Default().InConfig(cfg.String()) {
-			// 保存到内存
-			if err := cfg.Save(false); err != nil {
-				log.Fatalf("save %v config failed!", cfg.String())
-			}
-			// 保存到配置文件
-			config.Default().Save()
-		} else if err := cfg.Load(); err != nil {
-			log.Fatalf("load %v config failed!", cfg.String())
-		}
-	*/
+	// 传输层是客户端拥有的：它的配置结构体就是本结构体的 TransportConfig 字段。
+	// WithTransport 可能在 options 里换过实例，所以在 options 之后取。
+	cfg.TransportConfig = cfg.Transport.Config()
+	cfg.SelectorConfig = selector.NewConfig()
+
+	// 一次绑定：client.<name> 整节（含 transport / selector 子节）装载进来；传输层若已
+	// 自己绑过 transport.default，这里把它收编到 client.<name>.transport 下。
+	config.Bind("client."+cfg.Name, cfg)
+
 	// 初始化序列
 	if st := codec.Use(cfg.SerializeType); st != 0 {
 		cfg.Serialize = st
 		cfg.SerializeType = st.String()
 	}
-
-	// 初始化 transport
-	cfg.Transport.Init(transport.WithConfigPrefixName(cfg.String()))
 
 	// 初始化 registry。
 	//
@@ -231,7 +230,7 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 		// 与真实连接不符的值，就是下一次同样难查的起点。
 		cfg.RegistryHost = reg.Config().Addrs
 		cfg.Selector = selector.New(
-			selector.WithConfigPrefixName(cfg.String()), // 配置路径
+			selector.WithConfig(cfg.SelectorConfig), // 拥有：配置节 client.<name>.selector
 			selector.Registry(cfg.Registry),
 			selector.WithStrategy(cfg.SelectorStrategy),
 		)
@@ -248,27 +247,17 @@ func newConfig(tr transport.ITransport, opts ...Option) *Config {
 	return cfg
 }
 
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "client"}, ".")
-	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"client", self.Name}, ".")
-	}
-
-	return self.Name
-}
-
 // init options
+//
+// 此前这里每次都 Save() 一遍：把全部字段写进配置树的 override 层。那一层优先级最高，
+// viper 又按层整块返回子树，于是 config.json 里 client.* 那一节从来没有生效过
+// （见 config/format.go 的 decodeSection）。option 只改结构体，不碰配置树。
 func (self *Config) Init(opts ...Option) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt(self)
 		}
 	}
-
-	self.Save()
 }
 
 // 增加超时到60s
@@ -471,10 +460,10 @@ func WithRetry(fn RetryFunc) Option {
 	}
 }
 
-func WithConfigPrefixName(prefixName string) Option {
+// WithName 设定配置路径 client.<name>。同一进程里用途不同的客户端应各取一名，否则
+// 它们共用 client.default 这一节。
+func WithName(name string) Option {
 	return func(cfg *Config) {
-		cfg.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
+		cfg.Name = name
 	}
 }

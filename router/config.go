@@ -38,18 +38,28 @@ type (
 	//     交给 handler,重定向/链接生成由上层拼回去。
 	PathRewriter func(path string) (newPath, stripped string)
 
+	// Config 是路由器的配置。纯结构体：导出字段就是配置文件里的项，接口 / 函数类型的
+	// 字段（Logger、Selector、Registry、RecoverHandler、PathRewriter）是实例引用，天然
+	// 不进配置。配置节是 router.<name>（默认 router.default）。
+	//
+	// router 是跨 server **共享**的（vectors 把同一个路由器交给 HTTP 与 RPC 两台 server），
+	// 所以它是根节，不挂在 server 下面；它**拥有**自己的 selector，那份配置是它的
+	// SelectorConfig 字段，配置节因此是 router.<name>.selector.*。
 	Config struct {
-		config.Config    `field:"-"`
-		Name             string                   `field:"-"` // config name/path in config file
-		PrefixName       string                   `field:"-"` // config prefix name
-		Logger           logger.ILogger           `field:"-"` // 实例
-		Router           *TRouter                 `field:"-"`
-		Selector         selector.ISelector       `field:"-"`
-		SelectorStrategy string                   `field:"selector_strategy"`
-		Registry         registry.IRegistry       `field:"-"`
-		RegistryCacher   registry.IRegistryCacher `field:"-"` // registry cache
-		RecoverHandler   func(IContext)           `field:"-"`
-		PathRewriter     PathRewriter             `field:"-"` // 路由匹配前的路径改写(多语言 URL 前缀),见类型注释
+		Name  string `field:"-"` // 配置路径 router.<name>
+		Debug bool   `field:"-"`
+
+		SelectorStrategy string           `field:"selector_strategy"`
+		SelectorConfig   *selector.Config `field:"selector"` // 拥有的选择器的配置
+
+		// ---- 实例，不进配置文件 ----
+		Logger         logger.ILogger
+		Router         *TRouter `field:"-"`
+		Selector       selector.ISelector
+		Registry       registry.IRegistry
+		RegistryCacher registry.IRegistryCacher // registry cache
+		RecoverHandler func(IContext)
+		PathRewriter   PathRewriter // 路由匹配前的路径改写(多语言 URL 前缀),见类型注释
 
 		// mapping to config file
 		Recover                   bool   `field:"recover"`
@@ -68,6 +78,8 @@ type (
 		Compress        bool     `field:"compress"`
 		CompressMinSize int      `field:"compress_min_size"` // 小于此字节数不压，0 = DefaultCompressMinSize
 		CompressTypes   []string `field:"compress_types"`    // 参与压缩的 Content-Type，空 = DefaultCompressTypes
+
+		use *Config // WithConfig
 	}
 
 	GroupOption func(*GroupConfig)
@@ -80,8 +92,8 @@ type (
 		IsService      bool   // 是否在registry注册为独立的服务
 		Service        *registry.Service
 		PathPrefix     string
-		EmbedFS        fs.FS          `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
-		StaticCacheTTL int            `field:"-"` // 0 = use default (60s); negative = never expire
+		EmbedFS        fs.FS `field:"-"` // module 层注入的 embed.FS，供 SetStatic 使用
+		StaticCacheTTL int   `field:"-"` // 0 = use default (60s); negative = never expire
 	}
 )
 
@@ -104,8 +116,12 @@ func (self *Config) PrintsRequest() bool {
 	return self.RequestPrinter
 }
 
-func newConfig(opts ...Option) *Config {
-	cfg := &Config{
+// NewConfig 返回一份带代码默认值、**尚未绑定**到配置树的路由器配置。
+//
+// 配合 WithConfig 用：New(WithConfig(NewConfig())) 得到一个不在配置文件里出现的
+// 私有路由器（broker/http 的内部投递路由就是这么建的）。
+func NewConfig() *Config {
+	return &Config{
 		Name:                      "default",
 		Logger:                    log,
 		Recover:                   true,
@@ -114,40 +130,51 @@ func newConfig(opts ...Option) *Config {
 		StaticCacheTTL:            60,
 		RouterTreeRefreshInterval: 60,
 		SelectorStrategy:          "random",
+		SelectorConfig:            selector.NewConfig(),
 	}
+}
+
+func newConfig(opts ...Option) *Config {
+	cfg := NewConfig()
 	cfg.Init(opts...)
-	config.Register(cfg)
+	if ext := cfg.use; ext != nil {
+		cfg.use = nil
+		if ext.Logger == nil {
+			ext.Logger = log
+		}
+		if ext.RecoverHandler == nil {
+			ext.RecoverHandler = recoverHandler
+		}
+		if ext.SelectorConfig == nil {
+			ext.SelectorConfig = selector.NewConfig()
+		}
+		ext.Init(opts...)
+		ext.use = nil
+		cfg = ext
+	} else {
+		// 一次绑定，整棵子树（含 selector）随之装载；子组件在此之后才建，拿的已经是
+		// 文件里的值。
+		config.Bind("router."+cfg.Name, cfg)
+	}
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.NewNopRegistry()
-		cfg.RegistryCacher = registry.NewCacher(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
+		cfg.RegistryCacher = registry.NewCacher(cfg.Registry)
 	} else if rc, ok := cfg.Registry.(registry.IRegistryCacher); ok {
 		cfg.RegistryCacher = rc
 	} else {
-		cfg.RegistryCacher = registry.NewCacher(cfg.Registry, registry.WithConfigPrefixName(cfg.String()))
+		cfg.RegistryCacher = registry.NewCacher(cfg.Registry)
 	}
 
 	if cfg.Selector == nil {
 		cfg.Selector = selector.New(
-			selector.WithConfigPrefixName(cfg.String()), // 配置路径
+			selector.WithConfig(cfg.SelectorConfig), // 拥有：配置节 router.<name>.selector
 			selector.Registry(cfg.Registry),
 			selector.WithStrategy(cfg.SelectorStrategy),
 		)
 	}
 
 	return cfg
-}
-
-func (self *Config) String() string {
-	if len(self.PrefixName) > 0 {
-		return strings.Join([]string{self.PrefixName, "router"}, ".")
-	}
-
-	if len(self.Name) > 0 {
-		return strings.Join([]string{"router", self.Name}, ".")
-	}
-
-	return self.Name
 }
 
 func (self *Config) Init(opts ...Option) {
@@ -164,14 +191,6 @@ func (self *GroupConfig) Init(opts ...GroupOption) {
 			opt(self)
 		}
 	}
-}
-
-func (self *Config) Load() error {
-	if err := self.Config.Load(); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func Debug() Option {
@@ -342,10 +361,16 @@ func WithCompressTypes(types ...string) Option {
 }
 
 // 修改Config.json的路径
-func WithConfigPrefixName(prefixName string) Option {
+// WithName 设定配置路径 router.<name>。
+func WithName(name string) Option {
 	return func(cfg *Config) {
-		cfg.Unregister(cfg)
-		cfg.PrefixName = prefixName
-		cfg.Register(cfg)
+		cfg.Name = name
+	}
+}
+
+// WithConfig 让路由器使用调用方持有的这份配置，不再自建、不再绑定到配置树。
+func WithConfig(c *Config) Option {
+	return func(cfg *Config) {
+		cfg.use = c
 	}
 }

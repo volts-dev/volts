@@ -9,11 +9,9 @@ import (
 )
 
 type valOuter struct {
-	Config
 	Timeout int `field:"timeout"`
 }
 
-func (self *valOuter) String() string { return "valouter" }
 func (self *valOuter) Validate() error {
 	if self.Timeout <= 0 {
 		return Invalid("timeout", "必须为正，当前 %d", self.Timeout)
@@ -22,12 +20,10 @@ func (self *valOuter) Validate() error {
 }
 
 type valInner struct {
-	Config
 	Port int    `field:"port"`
 	Host string `field:"host"`
 }
 
-func (self *valInner) String() string { return "valouter.inner" }
 func (self *valInner) Validate() error {
 	var errs []error
 	if self.Port <= 0 {
@@ -42,17 +38,21 @@ func (self *valInner) Validate() error {
 // 记录校验顺序，用于验证「自底向上」
 var valOrder []string
 
-type ordOuter struct{ Config }
+type ordOuter struct {
+	Deep *ordMid `field:"deep"`
+}
 
-func (self *ordOuter) String() string { return "ord" }
 func (self *ordOuter) Validate() error {
 	valOrder = append(valOrder, "outer")
 	return nil
 }
 
-type ordInner struct{ Config }
+type ordMid struct {
+	Inner ordInner `field:"inner"`
+}
 
-func (self *ordInner) String() string { return "ord.deep.inner" }
+type ordInner struct{ X int }
+
 func (self *ordInner) Validate() error {
 	valOrder = append(valOrder, "inner")
 	return nil
@@ -60,25 +60,20 @@ func (self *ordInner) Validate() error {
 
 // TestValidate_AddsPathAndLine 锁定：校验错误自动带上完整配置路径与文件行号。
 //
-// 业务代码只写相对字段名 —— 组件不知道自己被挂在配置树的哪个位置（transport
-// 可能在 server.http.transport 也可能在 client.rpc.transport），路径只有配置树
-// 知道。让业务代码自己拼，拼错是迟早的事。
+// 业务代码只写相对字段名 —— 组件不知道自己被挂在配置树的哪个位置，路径只有配置树知道。
 func TestValidate_AddsPathAndLine(t *testing.T) {
 	fn := "validate_path.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	content := `{
+	write(t, path, `{
   "valouter": {
     "timeout": -5
   }
-}`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
+}`)
 
 	cfg := newIsolated(t, fn)
-	cfg.Register(&valOuter{Timeout: 30})
+	cfg.Bind("valouter", &valOuter{Timeout: 30})
 
 	err := cfg.ValidateAll()
 	if err == nil {
@@ -98,16 +93,13 @@ func TestValidate_AddsPathAndLine(t *testing.T) {
 	}
 }
 
-// TestValidate_ReportsAllFieldsAtOnce 锁定：一个模型报多个字段时逐条带各自的定位。
-//
-// 合并成一条消息就又变回了「定位不了」——450 个 key 的文件里，「有两个字段不对」
-// 这种消息等于没说。
+// TestValidate_ReportsAllFieldsAtOnce 锁定：一个结构体报多个字段时逐条带各自的定位。
 func TestValidate_ReportsAllFieldsAtOnce(t *testing.T) {
 	fn := "validate_multi.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
 
-	content := `{
+	write(t, path, `{
   "valouter": {
     "timeout": 5,
     "inner": {
@@ -115,14 +107,11 @@ func TestValidate_ReportsAllFieldsAtOnce(t *testing.T) {
       "host": ""
     }
   }
-}`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
+}`)
 
 	cfg := newIsolated(t, fn)
-	cfg.Register(&valOuter{Timeout: 30})
-	cfg.Register(&valInner{})
+	cfg.Bind("valouter", &valOuter{Timeout: 30})
+	cfg.Bind("valouter.inner", &valInner{})
 
 	err := cfg.ValidateAll()
 	if err == nil {
@@ -131,57 +120,96 @@ func TestValidate_ReportsAllFieldsAtOnce(t *testing.T) {
 	msg := err.Error()
 	t.Logf("校验输出:\n%s", msg)
 
-	// 两个字段各自成条，各带各的行号
 	if !strings.Contains(msg, "valouter.inner.port") || !strings.Contains(msg, ":5") {
 		t.Errorf("port 那条缺路径或行号（应为第 5 行）: %s", msg)
 	}
 	if !strings.Contains(msg, "valouter.inner.host") || !strings.Contains(msg, ":6") {
 		t.Errorf("host 那条缺路径或行号（应为第 6 行）: %s", msg)
 	}
-	// 合法的字段不得误报
 	if strings.Contains(msg, "valouter.timeout") {
 		t.Errorf("合法字段被误报: %s", msg)
 	}
 }
 
-// TestValidate_BottomUp 锁定：自底向上校验，父的 Validate 可假设子已验过。
+// TestValidate_NestedChildPath 锁定：拥有的子结构体自己的 Validate 报出来时，路径是它在
+// 父结构体里的位置 —— 子组件不知道也不需要知道自己被挂在哪。
+func TestValidate_NestedChildPath(t *testing.T) {
+	fn := "validate_nested.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+
+	write(t, path, `{
+  "svc": {
+    "timeout": 5,
+    "inner": {
+      "port": -1,
+      "host": "h"
+    }
+  }
+}`)
+
+	type svc struct {
+		Timeout int       `field:"timeout"`
+		Inner   *valInner `field:"inner"`
+	}
+	cfg := newIsolated(t, fn)
+	cfg.Bind("svc", &svc{Inner: &valInner{Port: 80, Host: "x"}})
+
+	err := cfg.ValidateAll()
+	if err == nil {
+		t.Fatal("子结构体的非法配置没有被校验出来")
+	}
+	if !strings.Contains(err.Error(), "svc.inner.port") || !strings.Contains(err.Error(), ":5") {
+		t.Errorf("子结构体错误缺路径或行号: %s", err)
+	}
+}
+
+// TestValidate_BottomUp 锁定：自底向上校验，父的 Validate 可假设子已验过 ——
+// 根之间按路径深度，根之内按结构体嵌套。
 func TestValidate_BottomUp(t *testing.T) {
 	fn := "validate_order.json"
 	defer os.Remove(filepath.Join(AppPath, fn))
 
 	cfg := newIsolated(t, fn)
 	valOrder = nil
-	cfg.Register(&ordOuter{})
-	cfg.Register(&ordInner{})
-
+	cfg.Bind("ord", &ordOuter{Deep: &ordMid{}})
 	if err := cfg.ValidateAll(); err != nil {
 		t.Fatalf("不该有错误: %v", err)
 	}
 	if len(valOrder) != 2 || valOrder[0] != "inner" || valOrder[1] != "outer" {
-		t.Errorf("校验顺序应为自底向上（inner 先于 outer）: got %v", valOrder)
+		t.Errorf("结构体内校验顺序应为自底向上（inner 先于 outer）: got %v", valOrder)
+	}
+
+	valOrder = nil
+	cfg2 := newIsolated(t, fn)
+	cfg2.Bind("a", &valOuter{Timeout: 1})
+	cfg2.Bind("a.b.c", &valInner{Port: 1, Host: "h"})
+	cfg2.Bind("z", &ordInner{})
+	cfg2.Bind("z.deep", &ordOuter{})
+	if err := cfg2.ValidateAll(); err != nil {
+		t.Fatalf("不该有错误: %v", err)
+	}
+	if len(valOrder) != 2 || valOrder[0] != "outer" || valOrder[1] != "inner" {
+		t.Errorf("根之间应按深度自底向上（z.deep 先于 z）: got %v", valOrder)
 	}
 }
 
-// TestValidate_SkipsModelsWithoutValidator 锁定：不实现 IValidator 的模型被跳过。
-func TestValidate_SkipsModelsWithoutValidator(t *testing.T) {
+// TestValidate_SkipsWithoutValidator 锁定：不实现 IValidator 的结构体被跳过。
+func TestValidate_SkipsWithoutValidator(t *testing.T) {
 	fn := "validate_skip.json"
 	defer os.Remove(filepath.Join(AppPath, fn))
 
 	cfg := newIsolated(t, fn)
-	cfg.Register(&regChild{Port: 80}) // 没有 Validate 方法
-
+	cfg.Bind("regowner.sub", &regChild{Port: 80})
 	if err := cfg.ValidateAll(); err != nil {
-		t.Errorf("未实现 IValidator 的模型不该产生错误: %v", err)
+		t.Errorf("未实现 IValidator 的结构体不该产生错误: %v", err)
 	}
 }
 
 type valMixedCase struct {
-	Config
 	Endpoint string `field:"endpoint"`
 }
 
-// String 刻意带大小写，模拟 vectors 的 aliyun 配置（其 String() 返回 "AliyunOSS"）。
-func (self *valMixedCase) String() string { return "MixedCase" }
 func (self *valMixedCase) Validate() error {
 	if self.Endpoint == "" {
 		return Invalid("endpoint", "不能为空")
@@ -191,20 +219,16 @@ func (self *valMixedCase) Validate() error {
 
 // TestValidate_PathIsLowercased 锁定：错误里的配置路径一律小写。
 //
-// 配置键在 viper 里本就大小写不敏感，文件里写的是 mixedcase；若照模型 String() 的
-// 原样打印 MixedCase.endpoint，用户拿这个路径去配置文件里搜是搜不到的。报错要指向
-// 用户能搜到的东西。
+// 配置键在 viper 里本就大小写不敏感，文件里写的是 mixedcase；若照 Bind 时给的
+// 原样打印 MixedCase.endpoint，用户拿这个路径去配置文件里搜是搜不到的。
 func TestValidate_PathIsLowercased(t *testing.T) {
 	fn := "validate_case.json"
 	path := filepath.Join(AppPath, fn)
 	defer os.Remove(path)
-
-	if err := os.WriteFile(path, []byte(`{"mixedcase":{"endpoint":""}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, path, `{"mixedcase":{"endpoint":""}}`)
 
 	cfg := newIsolated(t, fn)
-	cfg.Register(&valMixedCase{})
+	cfg.Bind("MixedCase", &valMixedCase{})
 
 	err := cfg.ValidateAll()
 	if err == nil {

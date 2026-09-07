@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/volts-dev/volts/config"
 	"github.com/volts-dev/volts/logger"
 )
 
@@ -113,14 +112,8 @@ func Register(name string, creator func(opts ...Option) IRegistry) {
 }
 
 func Use(name string, opts ...Option) IRegistry {
-	// 这个 cfg 只用来把 opts 解析出 Addrs 以便查实例缓存，随后丢弃。必须先与全局
-	// 隔离：opts 里通常含 WithConfigPrefixName，而那个 option 内部直接 Register。
-	// 不隔离的话，每调一次 Use 就把一个即将被丢弃的临时对象注册进全局 models；
-	// 命中缓存时后面又没有第二次注册去覆盖它，该配置路径便永久指向一个没人持有的
-	// 孤儿对象 —— 改那里的配置不会影响真正在跑的 registry 实例。
-	cfg := &Config{Name: name}
-	config.Detach(&cfg.Config)
-	cfg.Init(opts...)
+	// 这个 cfg 只用来把 opts 解析出 Addrs 以便查实例缓存，随后丢弃；它不绑定到配置树。
+	cfg := newCacheConfig(append([]Option{WithName(name)}, opts...)...)
 
 	// 加载存在的服务
 	for _, addr := range cfg.Addrs {
@@ -167,9 +160,9 @@ func warnConfigDivergence(regName string, want, got *Config) {
 		return
 	}
 
-	log.Warnf("registry %q 已被复用（同名同地址即同一实例），配置以先创建者 %q 为准；"+
-		"下列来自 %q 的设置不会生效：\n  %s",
-		regName, got.String(), want.String(), strings.Join(diffs, "\n  "))
+	log.Warnf("registry %q 已被复用（同名同地址即同一实例），配置以先创建者为准；"+
+		"本次调用（registry.%s）传入的下列设置不会生效：\n  %s",
+		regName, want.Name, strings.Join(diffs, "\n  "))
 }
 
 // divergence 列出调用方期望的配置与实例现有配置之间的差异。

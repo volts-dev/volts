@@ -54,9 +54,9 @@ IService (volts.go)
 
 ### Key Design Conventions
 
-**Options pattern** — all configuration uses `func(*Config)` closures. Every package exposes `New(opts ...Option)` and a `Default()` singleton.
+**Options pattern** — all configuration uses `func(*Config)` closures. Every package exposes `New(opts ...Option)` and a `Default()` singleton. Options only write struct fields; they never touch the config tree — binding happens once, at the end of `newConfig` (see "Config: the tree is the struct graph").
 
-**`String()` method** — every object must implement `String()` returning its name (see doc.go).
+**`String()` method** — every object must implement `String()` returning its name (see doc.go). Config structs are the exception: they are plain data and have no `String()`; their path is given by whoever binds them.
 
 **Context pooling** — `router/router.go` maintains per-route `sync.Pool` maps (`httpCtxPool`, `rpcCtxPool`) keyed by route pattern to avoid allocations on the hot path.
 
@@ -95,8 +95,8 @@ the binary was reachable.
 
 It never fired, purely by luck: the route tree's placeholder syntax is `{:name}` and that
 line used `<:name>`, so the whole pattern was registered as a *literal* and only ever matched
-the string `/<:fileName>.<:ext>`; on top of that, `config.Register` runs `Load()` while
-`cfg.Router` is still nil inside `New()`, so usually nothing was registered at all. Rewriting
+the string `/<:fileName>.<:ext>`; on top of that, the old `config.Register` ran `Load()` while
+`cfg.Router` was still nil inside `New()`, so usually nothing was registered at all. Rewriting
 the syntax "correctly" would have handed every process a working-directory file server —
 measured: `GET /secret.xml` returns 200 with the file's contents.
 
@@ -309,7 +309,7 @@ passes an `Upgrade` request through to an upstream and never parses a frame.
 | `logger/` | Self-contained leveled logger (writer manager + console writer). **Not** built on zap — `go.uber.org/zap` is pulled in only by `registry/etcd` for clientv3's `LogConfig` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
 | `core/outbound/` | Outbound HTTP for scraping **third-party** sites — browser identity rotation (TLS fingerprint + UA + client hints + proxy exit). See "Outbound: talking to strangers" |
-| `config/` | Config models, load/validate/lint/report. viper is the file codec only — layering, provenance and diff-persistence live in this package (see "Config: the file is a read-only input") |
+| `config/` | Config tree: `Bind(path, ptr)` binds a plain struct, nested structs are subsections; load/validate/lint/report/hot-reload walk the struct graph. viper is the file codec only — layering, provenance and diff-persistence live in this package (see "Config: the tree is the struct graph") |
 
 ### Service Lifecycle
 
@@ -728,68 +728,157 @@ Regressions: `router/store_local_route_shield_test.go`, `registry/cacher_registe
 
 (The former `handler.Services`/`SetServices` field — once documented here as a data race — is gone: it had no readers and `SetServices` was never called, so the race could not occur. Removed rather than locked.)
 
-### Config: the file is a read-only input
+### Config: the tree is the struct graph
 
-**The config file is never written back automatically.** `Register` seeds a model's current
-values as **defaults** (viper's defaults layer), `LoadFromFile` does not flush, and
-`SaveToFile` persists **only the diff** — values someone actually set at runtime, plus keys
-that were already in the file. `Dump()` is the one exit that emits defaults, for generating
-an editable template.
+**A component's config is a plain struct. Its owned children are fields. Shared things are
+names.** That one sentence replaces what used to be a `config.Config` embedded in every model,
+a hand-written `String()` per package computing `prefix.kind` / `kind.name`, and a
+`WithConfigPrefixName` that each parent forwarded to the children it happened to know about.
+The measured result of the old scheme, on kylin's real config.json: 464 leaves, ~120 sections,
+one etcd registry's config copied under 20+ paths, and
+`server.http.broker.router.selector.registry` five levels deep.
 
-Three rules that are easy to get wrong:
+```go
+// transport/config.go — a plain struct; exported fields are config, interface/func fields
+// (Listener, ACMEProvider, Context) are instances and are skipped automatically.
+type Config struct {
+    Name        string `field:"-"`   // only the path segment, not a config key
+    Addrs       string
+    ReadTimeout time.Duration        // untagged multiword → key read_timeout, both directions
+    Listener    IListener            // interface: not config, no tag needed
+    use         *Config              // WithConfig marker
+}
 
-- **Defaults go to the defaults layer, never to override.** `SetValue` writes viper's
-  *override* layer, which outranks the config file; `SetDefault` writes *defaults*, which the
-  file outranks. Seeding a model's defaults through `SetValue` means the file can never win
-  — the user edits config.json and nothing happens, with no diagnostic. There are **two**
-  seeding paths (`Register`, and `LoadToModel`'s "section missing → `model.Save()`" fallback);
-  fixing only one leaves the symptom identical. Both go through `saveDefaults`.
-  Regression: `TestFileOverridesCodeDefaults`.
-- **Writing defaults back is what made `if cfg.X == 0 { fallback }` dead code.** Once a
-  default lands in the file it *is* user config, and changing the constant stops mattering.
-  kylin's config.json held 453 keys, 400+ of them defaults, with `registry.timeout` copied 15
-  times — which is why raising the etcd timeout from 100ms to 5s had no effect anywhere.
-- **Duration units must match on both sides.** `SaveFromModel` persists
-  `d.Milliseconds()`, `withDurationHook` decodes ints as ms — `GetDuration` used to do
-  `time.Duration(GetInt64(key))`, i.e. nanoseconds, so the two read paths disagreed by 10⁶.
-  Bare numbers are milliseconds; unit-suffixed strings (`"5s"`) are preferred in files.
+// server/config.go — owns its transport, references shared things by name
+type Config struct {
+    Name            string            `field:"-"`
+    Address         string
+    TransportConfig *transport.Config `field:"transport"` // owned → server.http.transport.*
+    RegistryType    string                                // reference → registry.<type> is its own root
+    Transport       transport.ITransport                  // instance, skipped
+    Router          vrouter.IRouter                       // shared instance, skipped
+}
 
-**Secrets can be externalized.** A config value of the form `${VAR}` is resolved from the
-environment at load time; `${VAR:-default}` declares it optional. An unset `${VAR}` with no
-default is an **error**, never a silent empty string — an empty signing key lets the service
-come up with signature checking degraded to "anyone can forge", which is worse than failing
-to start. Expansion happens on the **model only**: the config tree keeps the raw `${VAR}`
-literal, so no later `SaveToFile` can bake a resolved secret into the file. Values without
-`${}` are untouched, so existing files need no changes. Regression:
+func newConfig(opts ...Option) *Config {
+    cfg := &Config{ /* code defaults */ }
+    cfg.Init(opts...)                       // options only write fields
+    cfg.TransportConfig = cfg.Transport.Config() // or transport.NewConfig() when none injected
+    config.Bind("server."+cfg.Name, cfg)    // the one and only tree call
+    // children constructed *after* Bind take the file's values:
+    transport.NewHTTPTransport(transport.WithConfig(cfg.TransportConfig))
+}
+```
+
+Rules that fall out of it, each of which replaced a bug:
+
+- **`Bind(path, ptr)` does three things, once:** seeds the struct's current values as
+  *defaults* (viper's defaults layer, below the file), decodes the file's section into the
+  struct (with `${VAR}` expansion), and registers the root. Nested structs — value or non-nil
+  pointer — are subsections at `path.<key>`; `time.Time` is a leaf. `config/walk.go` is the
+  single walker every path uses (defaults, decode, reload diff, validate, lint, env), so
+  "what keys a struct declares" and "what it writes/reads" cannot disagree. The old code had
+  three copies of that rule and they did disagree: untagged multiword fields were written
+  as `selectorstrategy` and read as `selector_strategy`.
+- **What is config is decided by type, not by tag.** Exported + not interface/func/chan +
+  no `field:"-"`. Instance references (`Logger`, `Registry`, `Transport`, `RecoverHandler`)
+  need no tag. Pointers to foreign structs that are *not* config (`*tls.Config`) and plain
+  strings used only as path segments (`Name`) still take `field:"-"`.
+- **Owned child = field; shared instance = name.** The test for "owned" is *who Stops it*.
+  server owns its transport (`server.http.transport`), router and client own their selector
+  (`router.default.selector`, `client.rpc.selector`), client owns its transport. router,
+  registry and broker are shared across servers and are their own roots (`router.default`,
+  `registry.etcd`, `broker.http`); the server holds `RegistryType`/`RegistryHost`,
+  `BrokerType`/`BrokerHost`. The registry cacher's config is deliberately **unbound**
+  (`registry.newCacheConfig`) — it is an implementation parameter, and binding it under every
+  holder's prefix is exactly what produced the 20 copies.
+- **Owner-constructed children use `WithConfig`.** `selector.New(selector.WithConfig(cfg.SelectorConfig), …)`
+  makes the instance use the struct the parent already bound; options given alongside are
+  applied to that struct; nothing is bound again. `router.New(router.WithConfig(router.NewConfig()))`
+  is the idiom for a *private* component that must not appear in the file (broker/http's
+  internal delivery router).
+- **Injected children are adopted.** `transport.NewHTTPTransport()` binds itself at
+  `transport.default`; when `server.WithTransport(t)` hands it in, the server's `Bind` finds
+  that pointer among its nested fields and **removes the old root**. From then on only
+  `server.http.transport.*` reaches that instance. Regression:
+  `server/config_tree_test.go` — the judgement is behavioural (rewrite `transport.default`,
+  the injected transport must not move), because the broker legitimately keeps the shared
+  `transport.Default()` bound at `transport.default`.
+- **Decoding takes the file layer plus runtime overrides, never `viper.Get(section)`.**
+  viper searches layer by layer and returns the *first* layer's whole subtree, so one
+  `SetValue` under a section hid every other file key of that section on decode.
+  `client.Config.Init` used to `Save()` every field into the override layer on every option
+  — config.json's `client.*` section had never taken effect. `format.decodeSection` keeps a
+  file-only tree (`fileTree`) and overlays tracked override keys. Regression:
+  `TestBind_OverrideDoesNotShadowFileSiblings` (SetValue *before* Bind is what makes the old
+  path fail).
+- **Rebinding the same path with the same type is silent** — every `HttpClient` is
+  `client.default` unless named, and vectors builds them on pool miss. A different type on
+  the same path logs once; it is the only genuine collision.
+
+**The file is still a read-only input.** `Bind` seeds defaults into the defaults layer,
+`LoadFromFile` never flushes, `SaveToFile` persists **only the diff** — values set through
+`SetValue`, plus keys already in the file. `Dump()` is the one exit that emits defaults, for
+generating an editable template (with secrets masked to `${VAR}` placeholders). Writing
+defaults back is what made `if cfg.X == 0 { fallback }` dead code and copied
+`registry.timeout` 15 times. Durations are milliseconds as bare numbers at every nesting
+depth; unit-suffixed strings (`"5s"`) are preferred in files.
+
+**Secrets can be externalized.** `${VAR}` is resolved from the environment at load time;
+`${VAR:-default}` declares it optional. An unset `${VAR}` with no default is an **error**,
+never a silent empty string. Expansion happens on the **struct only**: the tree keeps the raw
+literal, so no `SaveToFile` can bake a resolved secret into the file. Regression:
 `TestExpandEnvRefs_NotWrittenBackToFile`.
 
+**Hot reload walks the same graph.** Each root is decoded into a deep *copy* (`cloneConfig`:
+nested pointers reallocated, slices/maps copied — sharing a backing array would let a rejected
+reload half-apply), validated recursively, and only the leaves that actually changed are
+written, under `config.HotRLock`'s writer side. Any struct at any depth may implement
+`IReloadable` (`OnReload(next any) error`): `ErrReloadUnsupported` freezes that subtree and
+logs what was ignored; `server.Config` and `transport.Config` do this, so a reload never
+touches them while `router.Config.Recover` beside them hot-updates. Regressions:
+`config/reload_test.go` (nested cases: `TestReload_WritesNestedChildLeaves`,
+`TestReload_NestedChildCanRefuse`), `config/reload_race_test.go` (needs `-race`),
+`config/hot_field_guard_test.go` (source scan: the five hot fields must be read through
+accessors).
+
 **Diagnostics.** Load errors accumulate (`config.Errors()`) instead of `log.Fatal` — a library
-must not `os.Exit` on the caller's behalf, and vectors registers configs at runtime.
-`service.Start()` is the one place that knows every component has registered, so it reports
-errors, `Lint()` (unknown keys with spelling suggestions) and `Validate()` there, and prints
-`Inspect()` when `VOLTS_CONFIG_REPORT` is set.
+must not `os.Exit` on the caller's behalf. `service.Start()` reports errors, `Lint()` and
+`Validate()`, and prints `Inspect()` when `VOLTS_CONFIG_REPORT` is set. `config.Bound()`
+lists the roots.
 
-**`Lint` is deliberately conservative; `Report` is not.** Config models register **lazily** —
-a section is only known once code actually builds that component. Lint therefore skips any
-section nothing claims, and only reports keys whose *parent path* is a structure some model
-declared (`server.http` is registered, but `server.http.client` is a sub-component's section
-that the server model never declares). Loosening either rule reintroduced 300+ false
-positives against kylin's config. A check that cries wolf daily gets ignored along with the
-real typos. Whole-section orphans are `Report`'s job instead.
+**`Lint` reports a key only when its parent path is a struct node** (a root, or a nested struct
+field of one). That single rule, read straight off the graph, replaces the old string-based
+reverse engineering of "which model declared this prefix": a map field's keys are not typos,
+a section nobody bound is not a typo (configs bind **lazily** — only components that were
+actually built are on the tree), and a subtree left behind by a moved component is not a typo.
+Whole-section orphans are `Report`'s job. Regressions: `config/lint_test.go`.
 
-**Never name a `*Config` method after an interface the models might satisfy.** Every config
-model embeds `config.Config`, so methods get promoted onto all of them — naming the
-tree-wide validator `Validate()` made every model "implement" `IValidator` with an inherited
-body that walks all models, i.e. infinite recursion and a stack overflow. Hence `ValidateAll`
-/ `ReportAll` on the type, with plain `config.Validate()` / `config.Inspect()` as package
-functions (those are not promoted). Regression:
-`TestValidate_SkipsModelsWithoutValidator`.
+**Validation is post-order over the graph.** Nested structs validate before their parent, roots
+deeper in the path before shallower ones. Models return `config.Invalid("read_timeout", …)`
+with a **relative** field name; the framework prefixes the full path and file line
+(`config.json:47: server.http.transport.read_timeout: …`). A component cannot know where it is
+mounted — that is the whole point of the design.
 
-Validation errors carry their own location: models return `config.Invalid("read_timeout", …)`
-with a **relative** field name and the framework prefixes the full path plus file line
-(`config.json:47: server.http.transport.read_timeout: …`). A component cannot know where it
-is mounted — transport may sit under `server.http` or `client.rpc` — so it must not build
-that path itself. Validation runs bottom-up, so a parent may assume its children are valid.
+**Never name a `*Config` method after an interface the models might satisfy.** The legacy
+embedding is still supported (below), so a tree-wide `Validate()` would be promoted onto
+every legacy model and recurse into itself. Hence `ValidateAll` / `ReportAll` on the type,
+`config.Validate()` / `config.Inspect()` as package functions.
+
+**There is no embedding any more, and no shim.** `config.Config` is only the tree handle.
+vectors' ten business configs (`db`, `auth`, `session`, `permcache`, `search`, `mailer`,
+`pdf_printer`, `aliyunoss`, `service.storage`, `service.registry`, plus the `vectors` root) are
+plain structs bound with `config.Bind` / `module.WithConfig(path, cfg)`; the eight
+`client.WithConfigPrefixName("x")` call sites became `client.WithName("x")`, so their
+sections moved from `x.client` to `client.x`. A struct that needs to act after every file
+load (the db config re-pointing an already-built ORM at the file's datasource) implements
+`IAfterLoad` (`AfterLoad() error`), which runs after `Bind` and `LoadFromFile` decode, child
+before parent, and never on hot reload — that path is `IReloadable`'s.
+
+**Migration notes for existing config.json files.** Sections that no longer have an owner
+(`server.http.router.*`, `server.http.registry.*`, `router.default.registry.*`,
+`*.selector.registry.*`, `<prefix>.client.*`) are now orphans: `Report` lists them, `Lint`
+stays quiet. The values that mattered live at the roots (`registry.etcd`, `broker.http`,
+`router.default`) and under the owners (`server.http.transport`, `client.<name>.transport`).
 
 ### Known Issues (tracked in memory)
 

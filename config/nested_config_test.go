@@ -8,41 +8,29 @@ import (
 
 type (
 	ParentConfig struct {
-		Config
 		Value string `field:"value"`
 	}
 
 	ChildConfig struct {
-		Config
 		Value string `field:"value"`
 		Port  int    `field:"port"`
 	}
 )
 
-func (self *ParentConfig) String() string { return "parent" }
-func (self *ChildConfig) String() string  { return "parent.child" }
-
-// TestNestedConfig 验证了框架加载具有点分路径嵌套关系的配置模型的能力。
+// TestNestedConfig 验证两个**独立的根节**可以有点分嵌套的路径（parent 与 parent.child），
+// 各自按自己的路径装载 —— 这是「同一节由不同进程/组件各认领一段」的形状。
 func TestNestedConfig(t *testing.T) {
-	testFileName := "nested_config_test.json"
-	testFile := filepath.Join(AppPath, testFileName)
-	//defer os.Remove(testFile)
+	fn := "nested_config_test.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
 
-	// 1. 创建独立的配置实例以避免单例状态冲突
-	cfg := New("nested_test", WithFileName(testFileName))
-
-	// 2. 注册具有父子层级关系的配置模型
+	cfg := newIsolated(t, fn)
 	parent := &ParentConfig{Value: "p_init"}
-	cfg.Register(parent)
-
+	cfg.Bind("parent", parent)
 	child := &ChildConfig{Value: "c_init", Port: 80}
-	cfg.Register(child)
+	cfg.Bind("parent.child", child)
 
-	// 3. 将初始默认值写入文件
-	cfg.SaveToFile()
-
-	// 4. 模拟外部（或手动）修改 JSON 文件
-	newJson := `{
+	write(t, path, `{
 		"parent": {
 			"value": "p_mod",
 			"child": {
@@ -50,26 +38,16 @@ func TestNestedConfig(t *testing.T) {
 				"port": 443
 			}
 		}
-	}`
-	os.WriteFile(testFile, []byte(newJson), 0644)
-
-	// 5. 重新载入文件内容到内存
+	}`)
 	if err := cfg.LoadFromFile(); err != nil {
 		t.Fatalf("LoadFromFile failed: %v", err)
 	}
 
-	// 6. 将各模型与内存配置同步 (手动调用以确保指向正确的 cfg 实例)
-	cfg.LoadToModel(parent)
-	cfg.LoadToModel(child)
-
-	// 7. 验证字段是否按照 JSON 层级正确加载
-	t.Logf("Reloaded -> Parent value: %s, Child value: %s, port: %d", parent.Value, child.Value, child.Port)
-
 	if parent.Value != "p_mod" {
-		t.Errorf("expected parent_modified, got %s", parent.Value)
+		t.Errorf("expected p_mod, got %s", parent.Value)
 	}
 	if child.Value != "c_mod" {
-		t.Errorf("expected child_modified, got %s", child.Value)
+		t.Errorf("expected c_mod, got %s", child.Value)
 	}
 	if child.Port != 443 {
 		t.Errorf("expected 443, got %d", child.Port)
@@ -81,36 +59,26 @@ type (
 		Name string `field:"name"`
 	}
 	NestedModel struct {
-		Config
 		Title string    `field:"title"`
 		Child SubStruct `field:"child"`
 	}
 )
 
-func (self *NestedModel) String() string { return "nested" }
-
-// TestSingleModelNesting 验证了单个模型内部通过结构体字段实现的嵌套加载。
+// TestSingleModelNesting 验证单个结构体内部通过**值类型**子结构体实现的嵌套装载。
 func TestSingleModelNesting(t *testing.T) {
-	testFileName := "single_model_nest_test.json"
-	testFile := filepath.Join(AppPath, testFileName)
-	defer os.Remove(testFile)
+	fn := "single_model_nest_test.json"
+	path := filepath.Join(AppPath, fn)
+	defer os.Remove(path)
+	write(t, path, `{"nested":{"title":"level1","child":{"name":"level2"}}}`)
 
-	cfg := New("single_nest_test", WithFileName(testFileName))
-
+	cfg := newIsolated(t, fn)
 	nm := &NestedModel{}
-	nm.checkSelf(nm)
-
-	// 设置初始 JSON
-	newJson := `{"nested":{"title":"level1","child":{"name":"level2"}}}`
-	os.WriteFile(testFile, []byte(newJson), 0644)
-
-	// 加载并解析到模型
-	cfg.LoadFromFile()
-	cfg.LoadToModel(nm)
-
-	t.Logf("Single Model -> Title: %s, Child.Name: %s", nm.Title, nm.Child.Name)
+	cfg.Bind("nested", nm)
 
 	if nm.Title != "level1" || nm.Child.Name != "level2" {
 		t.Errorf("Single model nesting failed: got %+v", nm)
+	}
+	if !contains(cfg.knownSections(), "nested.child") {
+		t.Errorf("值类型子结构体也应是子节: %v", cfg.knownSections())
 	}
 }
