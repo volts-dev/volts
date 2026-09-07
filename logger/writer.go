@@ -88,6 +88,10 @@ func (self *TWriterManager) write(level Level, msg string) error {
 		return nil
 	}
 
+	// 结构化出口在排版与异步通道**之前**：它要的是原始正文，而且不能只拿到
+	// 通道没丢的那一部分（见 sink.go）。
+	self.notifySinks(level, msg)
+
 	if self.enableFuncCallDepth.Load() {
 		_, file, line, ok := runtime.Caller(int(self.loggerFuncCallDepth.Load()))
 		if ok {
@@ -96,7 +100,7 @@ func (self *TWriterManager) write(level Level, msg string) error {
 		}
 	}
 
-	msg = "[" + self.config.PrefixName + "]" + msg
+	msg = "[" + self.config.Name + "]" + msg
 
 	// 异步执行
 	if self.asynchronous.Load() {
