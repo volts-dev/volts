@@ -239,6 +239,34 @@ func (self *httpBroker) Start() error { // 开始阻塞监听
 	self.Lock()
 	defer self.Unlock()
 
+	// ★★ **锁内必须再判一次。**
+	//
+	// 这个 broker 是**进程级共享实例**（broker.Use 的裸名缓存），而一个进程里
+	// 常常有两台 server（HTTP + RPC），它们的 Start 是并发的。上面那次
+	// `started` 读发生在**锁外**，于是两条 goroutine 可以同时看到 false：
+	//
+	//	A: started=false → 拿锁 → Listen("127.0.0.1:0") → 绑到 :64720
+	//	   → self.address = ":64720" → started=true → 放锁
+	//	B: started=false（在 A 写 true 之前读的）→ 拿到锁 → **不再判**
+	//	   → Listen(":64720") → address already in use → 返回错误
+	//
+	// 而调用方（service.Start）拿到这个错误就让**那台 server 整个退出**：
+	//
+	//	[server][ERR]  Broker [http] connect error: listen tcp 0.0.0.0:64720: bind: address already in use
+	//	[service][ERR] HttpServer Exit with Error:listen tcp 0.0.0.0:64720: ...
+	//
+	// 后果是**进程活着、另一半协议面没了**：输的是 RPC server 就只剩 HTTP，
+	// 输的是 HTTP server 就只剩 RPC，`run.sh status`（按端口数）照样是绿的，
+	// 日志里只有那两行。表现出来是"跨进程读这个服务的模型一律
+	// `service none available`"或"页面 502"，而两边的业务日志都干净。
+	// 谁输是随机的：同一份二进制重启三次，三次都可能不一样。
+	//
+	// 2026-09-08 在 hr_svc / point_of_sale_svc 上各撞到一次，两次方向相反。
+	// 回归：broker/http/start_race_test.go。
+	if self.started.Load().(bool) {
+		return nil
+	}
+
 	/*
 		var l net.Listener
 		var err error
