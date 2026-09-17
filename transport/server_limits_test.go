@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,5 +114,71 @@ func TestSlowHeaderConnectionIsClosed(t *testing.T) {
 	}
 	if elapsed > 3*time.Second {
 		t.Errorf("放弃得太晚：%v（ReadHeaderTimeout 设的是 300ms）", elapsed)
+	}
+}
+
+// TestDefaultHeaderLimit_AcceptsBrowserCookieLoad 锁定默认上限**装得下真实浏览器
+// 发过来的 cookie**，而不是装得下我们自己以为的那点 cookie。
+//
+// 这条是 2026-09-09 那次 431 的回归测试。默认值曾是 8KiB，注释写的是「足以容纳常规
+// cookie + UA + 自定义头」—— 那句话把 cookie 的量当成本站决定的了。实际上浏览器
+// 按**域**发 cookie，一个挂在共享父域下的主机名会连父域上攒的一起发过来，真机量到
+// 12~16KB。于是标准库在**任何 handler 之前**回 431 并关连接：不进路由、不进中间件、
+// 一行日志都没有，前端看到的只是"打不开 / 账号密码不对"。
+//
+// ★ 判据必须是真连接：上限是标准库读连接时施加的，httptest.ResponseRecorder 结构性
+// 测不到它（recorder 根本不经过读请求头这一段）。
+func TestDefaultHeaderLimit_AcceptsBrowserCookieLoad(t *testing.T) {
+	// 16KiB 取自真机：那台浏览器上 .ti.com 的 cookie 是 12~16KB。低于这个数就等于
+	// 把"共享父域下的部署"排除在支持范围外 —— 而本仓的 workbench 出口正是那种部署。
+	const realWorldCookieBytes = 16 << 10
+
+	if DefaultMaxHeaderBytes < realWorldCookieBytes+2048 {
+		t.Fatalf("DefaultMaxHeaderBytes=%d 装不下真实浏览器的 cookie（实测 12~16KB）+ 其余请求头；"+
+			"调小它之前先读 transport/config.go 里那段注释", DefaultMaxHeaderBytes)
+	}
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	applyServerLimits(srv, newConfig()) // 纯默认，不加任何 option
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	get := func(cookieBytes int) (int, error) {
+		req, err := http.NewRequest("GET", "http://"+ln.Addr().String()+"/", nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Cookie", "bloat="+strings.Repeat("a", cookieBytes))
+		rsp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer rsp.Body.Close()
+		_, _ = io.Copy(io.Discard, rsp.Body)
+		return rsp.StatusCode, nil
+	}
+
+	code, err := get(realWorldCookieBytes)
+	if err != nil {
+		t.Fatalf("发 %dB cookie 出错: %v", realWorldCookieBytes, err)
+	}
+	if code != http.StatusOK {
+		t.Fatalf("默认配置下 %dB 的 cookie 拿到 %d（431 = Request Header Fields Too Large）—— "+
+			"真实浏览器在共享父域下就是发这么多", realWorldCookieBytes, code)
+	}
+
+	// 反向的闸：默认值是"够用"，不是"不限"。1MiB 仍然必须被拒，否则这条测试就成了
+	// 一路放宽的许可证。
+	code, err = get(1 << 20)
+	if err == nil && code == http.StatusOK {
+		t.Fatalf("1MiB 的请求头也被放行了 —— 默认上限形同虚设")
 	}
 }

@@ -190,10 +190,21 @@ func HttpReverseProxy(ctx *THttpContext) {
 	proxy := &httputil.ReverseProxy{
 		Transport: reverseProxyTransport,
 		Rewrite:   rewriteFn,
-		ModifyResponse: func(*http.Response) error {
+		ModifyResponse: func(resp *http.Response) error {
 			// 拿到上游响应即视为节点可达 —— 5xx 是业务语义，不代表节点故障，
 			// 拿它去熔断会把一次业务异常放大成节点摘除。
 			markNode(nil)
+
+			// 431 是**上游在任何 handler 之前**拒掉的（标准库读请求头时就回它，
+			// 不进路由、不进中间件、上游一行日志都没有）。转一手之后调用方看到的
+			// 431 里没有任何东西指得出是哪一跳、超了多少 —— 两次真机排查都因此
+			// 只能逐跳手工灌 cookie 去二分。这里把那两个数补上：谁拒的、多大。
+			//
+			// 只在 431 这一档做，热路径上是一次整型比较。
+			if resp.StatusCode == http.StatusRequestHeaderFieldsTooLarge {
+				log.Warnf("http: upstream rejected oversized request headers (431) | Target: %s | Path: %s | InboundHeaderBytes: %d — 上游那一跳的 transport.max_header_bytes 比本次请求头小；调它或减少 cookie，本进程放行了才轮到上游",
+					service, inReq.URL.Path, requestHeaderBytes(inReq))
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -383,4 +394,27 @@ func isWebSocket(ctx *THttpContext) bool {
 	}
 
 	return false
+}
+
+// requestHeaderBytes 估算一次请求的请求行 + 请求头字节数，用于 431 告警里给出「超了多少」。
+//
+// 只在告警路径上调用，因此按标准库的线路格式重算一遍而不是缓存：请求行是
+// "METHOD SP URI SP HTTP/1.1CRLF"，每个头是 "Name: valueCRLF"，末尾再一个 CRLF。
+// Host 在 Request 里是独立字段、不在 Header 里，要单独加上。
+//
+// 它是估算：上游看到的那份还带反代加的 X-Forwarded-*，所以真实值只会比这个大。
+func requestHeaderBytes(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
+	n := len(r.Method) + len(r.URL.RequestURI()) + len("  HTTP/1.1\r\n")
+	if r.Host != "" {
+		n += len("Host: ") + len(r.Host) + len("\r\n")
+	}
+	for name, values := range r.Header {
+		for _, v := range values {
+			n += len(name) + len(": ") + len(v) + len("\r\n")
+		}
+	}
+	return n + len("\r\n")
 }

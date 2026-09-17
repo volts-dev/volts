@@ -22,9 +22,25 @@ var (
 	// DefaultIdleTimeout 是 keep-alive 连接的默认空闲时限。
 	DefaultIdleTimeout = 120 * time.Second
 
-	// DefaultMaxHeaderBytes 是请求头的默认上限（标准库默认 1MB，对 RPC/Web 都偏大；
-	// 8KiB 足以容纳常规 cookie + UA + 自定义头）。
-	DefaultMaxHeaderBytes = 8 << 10
+	// DefaultMaxHeaderBytes 是请求头的默认上限。标准库默认 1MB，对 RPC/Web 都偏大。
+	//
+	// 这里曾经是 8KiB，理由写的是「足以容纳常规 cookie + UA + 自定义头」——
+	// 这句话被真机证伪了：**cookie 的量不由本站决定**。浏览器按**域**发 cookie，
+	// 不看端口也不看对面是谁，所以一个挂在共享父域下的主机名（本仓的 workbench 出口
+	// 就长在 `.ti.com` 底下）会把父域上攒的每一条 cookie 都发过来。实测那一堆是
+	// 12~16KB，8KiB 那道墙于是**必然**被撞穿。
+	//
+	// 撞穿的样子极难认：标准库在**任何 handler 跑起来之前**就回 431 并关连接，
+	// 不进路由、不进中间件、一行日志都没有；被反代转一手之后，调用方看到的是一个
+	// 不知道出自哪一跳的 431（判据见 router.HttpReverseProxy 里那段 431 告警）。
+	//
+	// ★ 多跳部署里，**只有最小的那堵墙算数**。本仓是 vite → 网关 → 业务进程三跳，
+	// 每个进程还各有一份 config.json —— 逐份去配等于每加一个服务就埋一颗同样的雷，
+	// 所以这个数必须由框架给够，配置只用来在个别部署上再往上抬。
+	//
+	// 32KiB 的取值：比 Node 的 16KiB 宽一档（本仓 dev server 就是 Node，抬到 32KiB
+	// 才不至于换成它当瓶颈），比标准库的 1MB 小 32 倍，DoS 面仍然收着。
+	DefaultMaxHeaderBytes = 32 << 10
 )
 
 type (
