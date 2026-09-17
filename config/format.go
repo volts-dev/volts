@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"path/filepath"
 	"reflect"
@@ -182,18 +183,12 @@ func (self *format) decodeSection(path string, out any) (found bool, err error) 
 		return false, nil
 	}
 
-	dc := &mapstructure.DecoderConfig{
-		Result:           out,
-		WeaklyTypedInput: true,
+	rv, ok := structValueOf(out)
+	if !ok {
+		return true, fmt.Errorf("需要非 nil 的结构体指针，得到 %T", out)
 	}
-	withTagName("field")(dc)
-	withMatchName()(dc)
-	withDurationHook()(dc)
-	dec, err := mapstructure.NewDecoder(dc)
-	if err != nil {
-		return true, err
-	}
-	return true, dec.Decode(m)
+	// 逐字段按 walk.go 的规则解码，而不是把整节丢给 mapstructure —— 理由见 decode.go。
+	return true, decodeStruct(m, rv, strings.ToLower(path))
 }
 
 // sectionMap 取 path 那一节的解码输入：文件层子树的深拷贝，叠上 override 层里以
