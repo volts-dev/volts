@@ -163,7 +163,7 @@ func (self *TTree) Endpoints() (services map[*TGroup][]*registry.Endpoint) {
 	validator := make(map[string]*route)
 	var walk func(node *treeNode)
 	walk = func(node *treeNode) {
-		if node.Route != nil && node.Route.group != nil && node.Route.group.config.IsService {
+		if node.Route != nil && node.Route.group != nil && node.Route.group.config.IsService && !node.Route.localOnly() {
 			grp := node.Route.group
 			// TODO 检测
 			if _, ok := validator[node.Route.path]; !ok {
@@ -851,9 +851,70 @@ func (self *TTree) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bo
 	}
 
 	// 如果:该节点没有对应分支则插入同级的nodes为新的分支
+	if rival := catchAllRival(parent, nodes[i]); rival != nil {
+		onCatchAllRival(rival.Route, nodes[len(nodes)-1].Route)
+	}
 	parent.Children = append(parent.Children, nodes[i])
 	sort.Sort(parent.Children)
 	return nodes[i]
+}
+
+// catchAllRival 返回 parent 下已有的、与 node 争同一位置的通配节点（没有则 nil）。
+//
+// 同一父节点下两个通配子节点（`/*` 与 `/*rootref`）文本不同，Equal 不认为它们是同一
+// 条分支，于是都被挂上；而匹配时只取**先插入**的那个，另一个永远到不了。谁先插入取决于
+// 注册先后 —— 网关上就是服务发现的先后，换一次启动顺序结果就翻过来。
+func catchAllRival(parent *treeNode, node *treeNode) *treeNode {
+	if node.Type != AnyNode {
+		return nil
+	}
+	for _, c := range parent.Children {
+		if c.Type == AnyNode && c.Text != node.Text {
+			return c
+		}
+	}
+	return nil
+}
+
+// warnCatchAllRivals 点名两条争同一位置的通配路由。
+//
+// 2026-09-19 真栈：connect_components 登记了只给自己出口主机用的 `/*rootref`，网关
+// 据此建出代理路由，与 website 的 `/*` 并列在根上 —— 所有 CMS 页面经网关都被送去
+// connect_components 回 404，直连 websvc 一切正常，网关日志里一个字都没有。
+//
+// 做成包级变量只为测试能接住它；生产路径上就是这一个实现。
+var onCatchAllRival = warnCatchAllRivals
+
+func warnCatchAllRivals(existing, incoming *route) {
+	var (
+		oldPath, oldOwner = "?", "?"
+		newPath, newOwner = "?", "?"
+	)
+	if existing != nil {
+		oldPath, oldOwner = existing.path, routeOwner(existing)
+	}
+	if incoming != nil {
+		newPath, newOwner = incoming.path, routeOwner(incoming)
+	}
+	log.Warnf("router: 通配路由 %s（%s）与已有的 %s（%s）落在同一位置，匹配时只有先注册的那个生效，"+
+		"另一个永远到不了 —— 谁先谁后取决于注册/服务发现的顺序。只该在本进程监听上生效的兜底路由"+
+		"请用 OpLocalOnly() 标记，别登记进注册中心",
+		newPath, newOwner, oldPath, oldOwner)
+}
+
+// routeOwner 说出一条路由归谁：本地路由报所属组（模块），代理路由报它转发去的服务。
+func routeOwner(r *route) string {
+	if r.group != nil {
+		if name := r.group.String(); name != "" {
+			return name
+		}
+	}
+	for _, id := range r.Handlers() {
+		if h := defaultHandlerManager.Model(id); h != nil && h.service != "" {
+			return "代理→" + h.service
+		}
+	}
+	return "local"
 }
 
 func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode {

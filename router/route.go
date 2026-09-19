@@ -162,6 +162,14 @@ func (self *route) WithOp(opts ...OpOption) *route {
 	return self
 }
 
+// localOnly 报告路由是否带 OpLocalOnly 标记（不登记进注册中心）。
+func (self *route) localOnly() bool {
+	self.RLock()
+	defer self.RUnlock()
+	op, _ := self.meta.(*Operation)
+	return op != nil && op.LocalOnly
+}
+
 func (self *route) Id() int {
 	return self.id
 }

@@ -81,6 +81,8 @@ type Operation struct {
 	// （单进程里路由表就是全局的，微服务下注册中心的 endpoints 才是）。
 	// 键名由使用方自定；框架自身只占用 "description"（见 RouteToEndpiont）。
 	Meta map[string]string
+	// LocalOnly 为真时路由只在本进程的监听上生效，**不登记进注册中心**（见 OpLocalOnly）。
+	LocalOnly bool
 }
 
 // OpOption 配置 Operation。
@@ -99,6 +101,13 @@ func OpMeta(key, value string) OpOption {
 		o.Meta[key] = value
 	}
 }
+
+// OpLocalOnly 标记路由只在本进程自己的监听上生效，不登记进注册中心。
+//
+// 登记进去的路由会被网关建成代理路由。按主机名兜底的路由（例如只在自己出口域名上才
+// 有意义的根级 `/*xxx`）一旦被网关代理，就会在网关的树上与别的服务争位置 —— 根级通配
+// 尤其如此：两个 `/*` 并列时只有先注册的那个生效（见 tree.go 的 catchAllRival）。
+func OpLocalOnly() OpOption { return func(o *Operation) { o.LocalOnly = true } }
 
 // buildOp 反射 I/O 类型并应用选项（注册期一次）。
 func buildOp[I, O any](opts ...OpOption) *Operation {
