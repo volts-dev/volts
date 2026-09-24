@@ -748,6 +748,24 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THtt
 	self.handlerIndex = 0 // -- 提示目前控制器Index
 	self.isDone = false   // -- 已经提交过
 	self.hijacked = false // -- 上一轮若被 WebSocket 接管，取出复用时必须清掉
+	// ★★★ **必须清空**，与 TRpcContext.reset 同款理由（那边早就清了，HTTP 这边漏了）。
+	//
+	// THttpContext 走 httpCtxPool 按**路由**复用，而 self.context 里挂着的是上一个
+	// 请求往里塞的任何值 —— 在 vectors 里那是 `"AuthSession"`（会话）、调用方身份、
+	// 租户作用域。不清就串给下一个复用到同一路由的请求。
+	//
+	// 危害不是"看到别人的调试值"那么轻：
+	//
+	//   - 鉴权中间件在**认之前**就拒掉的那一支（Token 为空 / 验签失败 → 401），
+	//     它 return 之前不会挂 AuthSession，于是写响应那一路读到的是**上一个请求那位
+	//     已登录用户的会话**。2026-09-24 真栈量到：一个完全不带 Auth 头的
+	//     /api/session/set_debug 拿到了只该给管理员的错误诊断附件。
+	//   - 顺着同一条路还有 `module.InitModelController` 与 `TModel.GetSession()`
+	//     ——它们都按 `ctx.Context().Value("AuthSession")` 取身份。
+	//
+	// 池化对象的每一个字段都必须在 reset 里有明确归宿；这一个的归宿是 nil
+	// （Context() 取到 nil 时自己回落 context.Background()）。
+	self.context = nil
 }
 
 // PathPrefix 返回被 PathRewriter 在路由匹配前摘掉的路径前缀（多语言场景下形如
