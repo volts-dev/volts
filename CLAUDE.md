@@ -145,6 +145,7 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 - **框架永远不服务工作目录。** `UseRootStatics` / `StaticDir` / `StaticExt` 已整块删除；把它"修对"等于给每个进程装一个工作目录文件服务器。要加根级静态服务，先把 `TestRouter_DoesNotServeTheWorkingDirectory` 弄红。
 - 静态文件：**modtime 才换得来 304**（embed 借可执行文件的 mtime），且必须与字节一起缓存；超过 4MiB 的直接流式，不进内存。
 - `router.WithCompress()` **默认关，这是安全决定不是谨慎**（BREACH）。它不是中间件也不能是；判断延到 `minSize` 之后，`Flush` 强制决定；压了就要改 `Content-Length` / `ETag` / `Vary` 三个头。
+- **池化的 context 每个字段都要在 `reset` 里有归宿**，`self.context` 也是（2026-09-24 修）。漏了它，鉴权中间件**认之前**就 401 的那一支会读到上一位登录用户的会话——vectors 的 `AuthSession`/调用方身份/租户作用域全走这条路。没有任何报告，只在同一路由连着两个请求时出现。
 - `WriteHeader` 只是**记下**状态码，真正发出在第一次 `Write` / `Flush` / `Commit()`；204 / 304 / 1xx 不许带正文。
 - WebSocket：升级成功即**脱离 context pool**；`CheckOrigin: nil` 是同源不是放行（CSWSH）；读上限是承重的（每帧一次、合并分片再一次）；一个读协程、多个写协程。
 

@@ -99,6 +99,30 @@ check silently swallowed it. `THttpResponse.Write` therefore refuses a body on 2
 (`http.ErrBodyNotAllowed`, same rule and same error as net/http). See Testing Notes for why
 that guard can only be tested on a recorder, never on a live server.
 
+## 池化的 context：每个字段都要在 reset 里有归宿
+
+`THttpContext` 按**路由**走 `httpCtxPool` 复用（`TRpcContext` 同理走 `rpcCtxPool`）。
+`reset` 里漏掉任何一个字段，那个字段就活到下一个复用同一路由的请求里。已经因此出过的：
+
+- `pathPrefix` —— 上一轮带 `/fr` 前缀这一轮不带，链接生成与重定向凭空多出一门语言；
+- `hijacked` —— 上一轮被 WebSocket 接管过；
+- **`context`** —— 2026-09-24 修。`self.context` 里挂着上一个请求往里塞的**任何值**。
+  `TRpcContext.reset` 一直清着并在注释里写明了危害，HTTP 这一侧是漏的。
+
+最后一条的后果不是"看到别人的调试值"那么轻。vectors 在 context 上挂的是
+`"AuthSession"`（整条会话）、调用方身份、租户作用域，而**鉴权中间件在认之前就拒掉的
+那一支**（Token 为空 / 验签失败 → 401）在 `return` 之前不会挂 AuthSession —— 于是写响应
+那一路读到的是上一位已登录用户的会话。真栈量到的形状：一个完全不带 `Auth` 头的
+`POST /api/session/set_debug` 拿到了只该给管理员的错误诊断附件。顺着同一条路还有
+vectors 的 `module.InitModelController` 与 `core/model.TModel.GetSession()`，两者都按
+`ctx.Context().Value("AuthSession")` 取身份 —— 那就从"看到"升级成"顶着别人的身份执行"。
+
+归宿是 `nil`：`Context()` 取到 nil 时自己回落 `context.Background()`，所以清掉不会让
+任何调用方拿到 nil。回归测试 `router/http_context_pool_leak_test.go`。
+
+**加字段就加 reset**。这一类缺陷没有任何报告：它只在同一条路由上连着来两个请求、且前一个
+恰好塞过值时才出现，看起来是"偶发"。
+
 ## WebSocket
 
 Native server-side WebSocket (RFC 6455) lives in two layers: `transport/websocket.go` is
