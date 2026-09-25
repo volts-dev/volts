@@ -23,7 +23,13 @@
       "Bash(/usr/local/bin/git branch *)",
       "Bash(/usr/local/bin/git log *)",
       "Bash(/usr/local/bin/git status *)",
-      "Bash(lsof -nP -iTCP:35999 -sTCP:LISTEN)"
+      "Bash(lsof -nP -iTCP:35999 -sTCP:LISTEN)",
+      "Bash(GOTOOLCHAIN=auto go build ./...)",
+      "Bash(GOTOOLCHAIN=auto go vet ./...)",
+      "Bash(GOTOOLCHAIN=auto go build ./core/profiling/...)",
+      "Bash(GOTOOLCHAIN=auto go build ./core/...)",
+      "Bash(cd /Users/shadow/SectionZero/MyProject/Go/src/vs *)",
+      "Read(//Users/shadow/SectionZero/MyProject/Go/src/vs/**)"
     ]
   }
 }
