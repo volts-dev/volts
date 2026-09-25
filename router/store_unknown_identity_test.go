@@ -2,6 +2,7 @@ package router
 
 import (
 	"testing"
+	"time"
 
 	"github.com/volts-dev/volts/registry"
 )
@@ -47,7 +48,10 @@ func TestStore_NoProxyRouteWhenIdentityUnknown(t *testing.T) {
 		},
 	}
 
-	r.store([]*registry.Service{selfAsRemote})
+	if deferred := r.store([]*registry.Service{selfAsRemote}); !deferred {
+		t.Error("识别不出自身而整批没建时必须回报 deferred —— refresh() 靠它决定很快重来，" +
+			"否则要等满一个刷新周期（默认 60s），这段时间打到兄弟进程的路径全部 404")
+	}
 
 	if route, _ := r.tree.Match("GET", "/account/static/data/x.xml"); route != nil {
 		t.Fatal("识别不出自身时建出了代理路由 —— 它会指向本进程自己，" +
@@ -78,7 +82,9 @@ func TestStore_BuildsProxyRouteWhenIdentityKnown(t *testing.T) {
 			{Name: "account.static", Method: []string{"GET"}, Path: "/account/static/data/x.xml"},
 		},
 	}
-	r.store([]*registry.Service{remote})
+	if deferred := r.store([]*registry.Service{remote}); deferred {
+		t.Error("自身身份已知时不该回报 deferred（refresh() 会因此按短间隔空转）")
+	}
 
 	if route, _ := r.tree.Match("GET", "/account/static/data/x.xml"); route == nil {
 		t.Fatal("自身身份已知、目标是真远端时，代理路由必须照常建出来")
@@ -114,5 +120,35 @@ func TestStore_NoProxyRouteForSelfHostedService(t *testing.T) {
 
 	if route, _ := r.tree.Match("GET", "/account/static/data/y.xml"); route != nil {
 		t.Fatal("同进程托管的服务建出了代理路由 —— 会自环并顶掉本地路由")
+	}
+}
+
+// refresh() 的等待：有服务被推迟时从 1s 起翻倍、封顶到常规周期；一轮正常就回到常规周期。
+//
+// 2026-09-25 真栈：kylin 重启后首轮刷新落在「还认不出自己」的窗口里，salesvc 的门户路由
+// 整批没建，而下一轮要等 60s —— 客户签名/支付的 POST 连续 52 秒 404。
+func TestNextRefreshDelay_BacksOffWhileDeferred(t *testing.T) {
+	interval := 60 * time.Second
+	var b refreshBackoff
+	var got []time.Duration
+	for i := 0; i < 8; i++ {
+		b = nextRefreshDelay(true, b, interval)
+		got = append(got, b.wait)
+	}
+	want := []time.Duration{1, 2, 4, 8, 16, 32, 60, 60}
+	for i := range want {
+		if got[i] != want[i]*time.Second {
+			t.Fatalf("推迟中的等待序列 = %v，想要 1s 起翻倍、封顶 60s", got)
+		}
+	}
+	b = nextRefreshDelay(false, b, interval)
+	if b.wait != interval || b.step != 0 {
+		t.Fatalf("一轮正常之后应回到常规周期并清掉退避，得 %+v", b)
+	}
+	if b = nextRefreshDelay(true, b, interval); b.wait != time.Second {
+		t.Fatalf("退避清掉之后再推迟应从 1s 重新开始，得 %v", b.wait)
+	}
+	if b = nextRefreshDelay(false, refreshBackoff{}, 0); b.wait != 60*time.Second {
+		t.Fatalf("周期没配（0）时按 60s，得 %v", b.wait)
 	}
 }

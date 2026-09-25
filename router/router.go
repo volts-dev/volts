@@ -791,9 +791,12 @@ func (self *TRouter) hasLocalRoute(methods []string, path string) bool {
 }
 
 // store maps registry services to internal endpoints.
-func (self *TRouter) store(services []*registry.Service) {
+//
+// 返回 deferred=true 表示这一轮因为「还认不出自己」整批没建（见下），调用方应当很快
+// 重来，而不是等下一个完整的刷新周期。
+func (self *TRouter) store(services []*registry.Service) (deferred bool) {
 	if len(services) == 0 {
-		return
+		return false
 	}
 
 	// 收集本进程的“自身身份”（node.Id + 归一化地址），用于剔除指向自己的节点。
@@ -822,11 +825,14 @@ func (self *TRouter) store(services []*registry.Service) {
 	// HTTP 端点很少（account 的 http 节点有 161 个 endpoint，purchase 只有 2 个），
 	// 并非 filteSelf 对它们生效了。
 	//
-	// 代价：识别不出自身的那一轮不更新代理路由，60s 后下一轮重来。这与
-	// isLocalService 那里“宁可假阴性、多跑一轮 store()”是同一个取舍方向 ——
-	// 少一轮路由更新是可恢复的，建出自环路由则不可恢复。
+	// 代价：识别不出自身的那一轮不更新代理路由。这与 isLocalService 那里“宁可假阴性、
+	// 多跑一轮 store()”是同一个取舍方向 —— 少一轮路由更新是可恢复的，建出自环路由则
+	// 不可恢复。但「下一轮」不能是完整的刷新周期（默认 60s）：这个窗口恰好是进程刚开始
+	// 监听的那一分钟，发现来的路由一条都没有，打到兄弟进程的路径全部 404（2026-09-25
+	// 真栈实测：kylin 重启后门户上的签名/支付 POST 连续 52 秒 404）。所以回报 deferred，
+	// refresh() 据此按短间隔退避重来，见 nextRefreshDelay。
 	if me == nil {
-		return
+		return true
 	}
 
 	// 本轮为每个服务名建成的代理路由，用于与上一轮做差量回收（见
@@ -926,6 +932,7 @@ func (self *TRouter) store(services []*registry.Service) {
 	for name, routes := range created {
 		self.trackProxyRoutes(name, routes)
 	}
+	return false
 }
 
 // watch continuously monitors endpoint changes in the Registry.
@@ -1031,11 +1038,12 @@ func (self *TRouter) refresh() {
 	}
 
 	var (
-		err      error
-		services []*registry.Service
-		list     []*registry.Service
-		attempts int
-		maxRetry = 10
+		err        error
+		services   []*registry.Service
+		list       []*registry.Service
+		attempts   int
+		maxRetry   = 10
+		deferRetry refreshBackoff
 	)
 
 	for {
@@ -1064,6 +1072,8 @@ func (self *TRouter) refresh() {
 		// ListServices 成功了才对账：读失败时 list 是空的，那不是"服务都没了"。
 		self.reconcileProxyRoutes(list)
 
+		deferred := false
+
 		if len(list) != 0 {
 			attempts = 0
 
@@ -1083,17 +1093,48 @@ func (self *TRouter) refresh() {
 					}
 					continue
 				}
-				self.store(services)
+				if self.store(services) {
+					deferred = true
+				}
 			}
 		}
 
-		// Refresh interval specified in config.
+		// 常规是配置的刷新周期；有服务因「还认不出自己」没建成时按短间隔退避重来。
+		deferRetry = nextRefreshDelay(deferred, deferRetry, time.Duration(self.config.RouterTreeRefreshInterval)*time.Second)
 		select {
-		case <-time.After(time.Duration(self.config.RouterTreeRefreshInterval) * time.Second):
+		case <-time.After(deferRetry.wait):
 		case <-self.exit:
 			return
 		}
 	}
+}
+
+// refreshBackoff 是 refresh() 的下一轮等待：wait 是这次要等多久，step 是退避的当前台阶
+// （0 表示不在退避中）。
+type refreshBackoff struct {
+	wait, step time.Duration
+}
+
+// nextRefreshDelay 定 refresh() 下一轮等多久。
+//
+// 这一轮有服务被 store() 推迟（启动时还认不出自己）→ 从 1s 起翻倍、封顶到常规周期；
+// 否则回到常规周期并清掉退避。封顶是给「永远认不出自己」的进程（一个本地服务都不注册
+// 的纯网关）留的：它每轮都会推迟，不能让它每秒去注册中心拉一次全量服务列表。
+func nextRefreshDelay(deferred bool, prev refreshBackoff, interval time.Duration) refreshBackoff {
+	if interval <= 0 {
+		interval = 60 * time.Second
+	}
+	if !deferred {
+		return refreshBackoff{wait: interval}
+	}
+	step := time.Second
+	if prev.step > 0 {
+		step = prev.step * 2
+	}
+	if step > interval {
+		step = interval
+	}
+	return refreshBackoff{wait: step, step: step}
 }
 
 // isLocalService checks if a service instance is equivalent to any of the local services.
