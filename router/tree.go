@@ -457,6 +457,16 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 		return node
 
 	case VariantNode:
+		// 余段为空：请求以 `/` 结尾而后面该是一个参数段（GET /shop/page/）。没有内容可匹，
+		// 直接判不匹配，交给 TRouter 的尾斜杠归一（匹配不到才跳，见 trailing_slash_test.go）。
+		//
+		// ★ 少了这一行就是 `index out of range [0] with length 0`：panic 从
+		// TRouter.ServeHTTP 逃到 net/http 的 per-conn recover，客户端看到连接被断
+		// （经网关是 502），日志里只有一条栈。任何爬虫随手补一个斜杠就能打到
+		// （2026-09-29 实测，回归用例在 tree_empty_segment_test.go）。
+		if path == "" {
+			return nil
+		}
 		// # 消除path like /abc 的'/'
 		// 根据首字符判断接下来的处理条件
 		first_Char := path[0]
