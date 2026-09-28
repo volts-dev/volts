@@ -489,6 +489,9 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 
+		// 每次尝试都覆盖：留下的是给出最终答复的那一个（见 Exit）。
+		recordExit(req.Context(), p)
+
 		rsp, err := p.roundTrip(attemptReq)
 
 		switch {
