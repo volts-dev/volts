@@ -59,6 +59,16 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 	if !ok {
 		return fmt.Errorf("the handler is not a rpc handler! %v ", handler)
 	}
+
+	// 登记为进程内直连目标（见 inproc.go）。TLS 监听不登记：管道上没有证书。
+	cfg := self.transport.config
+	if !cfg.Secure && cfg.TlsConfig == nil {
+		unregister := registerInproc(self.listener.Addr(), func(conn net.Conn) {
+			self.serveConn(hd, conn)
+		})
+		defer unregister()
+	}
+
 	var tempDelay time.Duration
 
 	for {
@@ -83,42 +93,48 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 			return err
 		}
 
-		sock := NewTcpTransportSocket(conn, self.transport.config.ReadTimeout, self.transport.config.WriteTimeout)
+		go self.serveConn(hd, conn)
+	}
+}
 
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Errf("rpc: panic serving %s: %v", conn.RemoteAddr(), r)
-				}
-				sock.Close()
-			}()
+// serveConn 服务一条连接上的全部消息，直到对端断开或读超时。
+//
+// 真 TCP 连接与进程内管道（inproc.go）走的是这同一个函数 —— 两条路的语义差别只能
+// 出在 net.Conn 上，不能出在这里。
+func (self *tcpTransportListener) serveConn(hd rpcHandler, conn net.Conn) {
+	sock := NewTcpTransportSocket(conn, self.transport.config.ReadTimeout, self.transport.config.WriteTimeout)
 
-			for {
-				msg := GetMessageFromPool()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errf("rpc: panic serving %s: %v", conn.RemoteAddr(), r)
+		}
+		sock.Close()
+	}()
 
-				// slowloris 防护：客户端必须在 ReadTimeout 内发起下一条消息
-				// （正常请求或心跳）。设为 0 可关闭此保护，但会让恶意 idle 连接
-				// 持有 fd 直到 OS 默认 keepalive 触发，不推荐。
-				if rt := self.transport.config.ReadTimeout; rt > 0 {
-					conn.SetReadDeadline(time.Now().Add(rt))
-				} else {
-					conn.SetReadDeadline(time.Time{})
-				}
+	for {
+		msg := GetMessageFromPool()
 
-				// 等待读取客户端信号
-				err := msg.Decode(conn)
-				if err != nil {
-					PutMessageToPool(msg)
-					return // 连接断开(EOF)或读取错误，退出循环
-				}
+		// slowloris 防护：客户端必须在 ReadTimeout 内发起下一条消息
+		// （正常请求或心跳）。设为 0 可关闭此保护，但会让恶意 idle 连接
+		// 持有 fd 直到 OS 默认 keepalive 触发，不推荐。
+		if rt := self.transport.config.ReadTimeout; rt > 0 {
+			conn.SetReadDeadline(time.Now().Add(rt))
+		} else {
+			conn.SetReadDeadline(time.Time{})
+		}
 
-				ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-				req := NewRpcRequest(ctx, msg, sock)
-				rsp := NewRpcResponse(ctx, req, sock)
+		// 等待读取客户端信号
+		err := msg.Decode(conn)
+		if err != nil {
+			PutMessageToPool(msg)
+			return // 连接断开(EOF)或读取错误，退出循环
+		}
 
-				hd.ServeRPC(rsp, req)
-				PutMessageToPool(msg)
-			}
-		}()
+		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
+		req := NewRpcRequest(ctx, msg, sock)
+		rsp := NewRpcResponse(ctx, req, sock)
+
+		hd.ServeRPC(rsp, req)
+		PutMessageToPool(msg)
 	}
 }

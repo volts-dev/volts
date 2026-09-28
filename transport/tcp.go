@@ -51,6 +51,8 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 			config.MinVersion = tls.VersionTLS12
 		}
 		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
+	} else if serve := self.inprocTarget(addr); serve != nil {
+		conn = dialInproc(serve) // 目标就是本进程：不经网络栈，见 inproc.go
 	} else {
 		conn, err = net.DialTimeout("tcp", addr, dialCfg.DialTimeout)
 	}
@@ -66,6 +68,14 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 		config:             dialCfg,
 		conn:               conn,
 	}, nil
+}
+
+// inprocTarget 判断这次拨号能否走进程内直连（见 inproc.go）；不能返回 nil。
+func (self *tcpTransport) inprocTarget(addr string) inprocServeFunc {
+	if self.config.DisableInproc {
+		return nil
+	}
+	return inprocFor(addr)
 }
 
 func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, error) {

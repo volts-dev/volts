@@ -82,3 +82,36 @@ Two conclusions, both now enforced:
    `TestHttpReverseProxy_NamesTheHopThatRejectedOversizedHeaders`, whose upstream is a real
    server with a deliberately tiny cap (a handler calling `WriteHeader(431)` would not
    exercise "the library refused before the handler ran").
+
+## In-process dialing: a pipe for calls to yourself
+
+A vectors process hosts dozens of module services on one RPC listener, and they call each
+other through the registry like strangers — select a node, dial `127.0.0.1:<own port>`,
+round-trip through the kernel (and through whatever network extension this Mac has
+installed). `transport/inproc.go` cuts exactly that segment: when `tcpTransport.Dial`'s
+target is a TCP listener **in this process**, it returns one end of a `net.Pipe` and hands
+the other to that listener's own `serveConn` loop.
+
+The cut is at `Dial` on purpose. Everything except the `net.Conn` is the same code — pool,
+frame codec, header metadata, deadlines, the server's `context.Background()`-rooted request
+context (the caller's context values never cross), panic recovery, routing and the whole
+middleware chain. A shortcut higher up (calling the handler function directly) would save
+more and would also create one more place where "same process" and "other process" behave
+differently, which is the thing the framework is trying to eliminate.
+
+Rules:
+
+- Registered by port in `tcpTransportListener.Serve`, removed when `Serve` returns. "Local
+  address + port in the table" identifies this process because a host port has one owner.
+- **Not used with TLS** on either side — the pipe carries no certificate.
+- `transport.DisableInproc()` (config `disable_inproc`) forces the real network. **Any test
+  about the TCP wire itself must set it**: tests start their server in the same process, so
+  without it they silently test the pipe. `transport/tcp_test.go` does.
+- Server idle `ReadTimeout` applies to pipes too (`net.Pipe` honours deadlines); the pool's
+  liveness probe sees EOF on a pipe the server closed, same as a TCP FIN.
+
+How to tell which path a request took: `req.Context.Value(transport.RemoteConnContextKey)`
+is a `net.Conn` whose `RemoteAddr().Network()` is `"pipe"`. Regressions:
+`transport/inproc_test.go`, `internal/test/client/rpc_inproc_test.go`
+(`TestRpcClient_LocalServerGoesInprocWithSameResult` — full client→router path, pipe vs TCP
+must differ only in connection kind).

@@ -154,6 +154,8 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 - 四段超时各管连接生命的一段，`applyServerLimits` 是唯一配置点。**`ReadHeaderTimeout` 与 `IdleTimeout` 未设时回落到 `ReadTimeout`**，所以 `Debug()` 把读写放到 999s 时**不碰这两个** —— 否则每个进程都愿意花十六分钟收几百字节请求头（Slowloris 前提）。
 - 请求头上限：**cookie 的量不由本站决定**（浏览器按域发，共享父域下的部署会连父域的一起收到，实测 12~16KB），所以默认值由框架给够（32KiB），配置只用来再往上抬 —— 逐份 config.json 去配等于每加一个服务就重新埋一次雷。**多跳部署里只有最小的那堵墙算数**，而 431 是在任何 handler 之前回的：`Connection: close` 无 `Date` = 这一跳拒的，带 `Date` = 上游拒的被转回来（反代已会点名是哪一跳）。
 
+- **拨往本进程自己的 TCP 监听走 `net.Pipe`**（`transport/inproc.go`），除了 net.Conn 全是同一份代码；TLS 两侧都不走。**测 TCP 线路本身的用例必须 `DisableInproc()`**，否则同进程起的服务端让它静默测的是管道。
+
 ### 设了也没人读的选项 — [docs/claude/dead-options.md](docs/claude/dead-options.md)
 
 - 本仓反复出现的形状：`WithX()` 写了一个**零读者**的字段，调用方没有任何诊断。已批量删掉六个（`WithIgnoreCase` 是默认带上还从没实现的那个）。删 `internal/acme/options.go` 顺带把整个 lego 库带出了依赖树。

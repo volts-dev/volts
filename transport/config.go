@@ -109,6 +109,11 @@ type (
 		// MaxHeaderBytes 是请求头的字节上限。标准库默认 1MB，对 RPC/Web 都偏大。
 		MaxHeaderBytes int `field:"max_header_bytes"`
 
+		// DisableInproc 关掉 TCP 传输的进程内直连（见 inproc.go），拨往本进程自己的
+		// 监听也走真网络。默认开：同进程的调用本来就不该绕内核一圈。要关的场合是
+		// 压测、抓包，以及对照测试"同一个调用走管道和走网络结果是否一致"。
+		DisableInproc bool `field:"disable_inproc"`
+
 		// ---- 实例，不进配置文件 ----
 
 		Listener     IListener
@@ -293,6 +298,13 @@ func Timeout(t time.Duration) Option {
 		cfg.ReadTimeout = t
 		cfg.WriteTimeout = t
 		cfg.DialTimeout = t
+	}
+}
+
+// DisableInproc 让拨往本进程监听的连接也走真网络（见 Config.DisableInproc）。
+func DisableInproc() Option {
+	return func(cfg *Config) {
+		cfg.DisableInproc = true
 	}
 }
 

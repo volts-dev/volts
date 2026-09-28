@@ -33,6 +33,7 @@ func TestTcpRoundTrip(t *testing.T) {
 	tr := NewTCPTransport(
 		ReadTimeout(5*time.Second),
 		WriteTimeout(5*time.Second),
+		DisableInproc(), // 测的是 TCP 线路本身；同进程默认会走管道（inproc.go）
 	)
 
 	// 启动服务端
@@ -89,6 +90,7 @@ func TestTcpConnectionReuse(t *testing.T) {
 	tr := NewTCPTransport(
 		ReadTimeout(5*time.Second),
 		WriteTimeout(5*time.Second),
+		DisableInproc(), // 测的是 TCP 线路本身；同进程默认会走管道（inproc.go）
 	)
 
 	ln, err := tr.Listen(":0")
@@ -142,6 +144,7 @@ func TestTcpConcurrentConnections(t *testing.T) {
 	tr := NewTCPTransport(
 		ReadTimeout(5*time.Second),
 		WriteTimeout(5*time.Second),
+		DisableInproc(), // 测的是 TCP 线路本身；同进程默认会走管道（inproc.go）
 	)
 
 	ln, err := tr.Listen(":0")
