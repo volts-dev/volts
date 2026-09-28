@@ -347,7 +347,6 @@ func (e *etcdRegistry) Register(s *registry.Service, opts ...registry.Option) er
 	return gerr
 }
 
-
 func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()
@@ -400,8 +399,6 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 }
 
 func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
-	versions := make(map[string]*registry.Service)
-
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()
 
@@ -414,29 +411,63 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 		return []*registry.Service{}, nil
 	}
 
+	entries := make([]revisioned, 0, len(rsp.Kvs))
 	for _, n := range rsp.Kvs {
-		sn := decode(n.Value)
-		if sn == nil {
-			continue
+		if sn := decode(n.Value); sn != nil {
+			entries = append(entries, revisioned{svc: sn, rev: n.CreateRevision})
 		}
-		v, ok := versions[sn.Name+sn.Version]
+	}
+	return mergeByNameVersion(entries), nil
+}
+
+// revisioned 是一条注册项连同它在 etcd 里的创建版本号（越大越晚注册）。
+type revisioned struct {
+	svc *registry.Service
+	rev int64
+}
+
+// mergeByNameVersion 把同名同版本的注册项合并成一个 Service：节点全部并进来，
+// **metadata 与端点取最后注册的那一条**（CreateRevision 最大）。
+//
+// 原来取的是 etcd 返回顺序里的第一条，而键里带随机 uuid，于是取到谁全凭运气。平时同一
+// 服务的几个节点 metadata 相同，无所谓；**滚动重启的那几分钟**旧进程的注册项还没过租约，
+// 新旧两份同名同版本、metadata 不同 —— 取到旧的那份，新版本声明的东西（扩展字段、设置
+// 字段、方法贡献）就在这段时间里看不见。2026-09-29 真栈：salesvc 重启后 sale 的设置字段
+// 有几分钟不出现，等旧租约过期才出来。最后注册的那一条就是正在运行的最新版本。
+func mergeByNameVersion(entries []revisioned) []*registry.Service {
+	type merged struct {
+		svc *registry.Service
+		rev int64
+	}
+	byKey := make(map[string]*merged)
+	for _, e := range entries {
+		key := e.svc.Name + "\x00" + e.svc.Version
+		m, ok := byKey[key]
 		if !ok {
-			versions[sn.Name+sn.Version] = sn
+			cp := *e.svc
+			cp.Nodes = append([]*registry.Node(nil), e.svc.Nodes...)
+			byKey[key] = &merged{svc: &cp, rev: e.rev}
 			continue
 		}
-		// append to service:version nodes
-		v.Nodes = append(v.Nodes, sn.Nodes...)
+		m.svc.Nodes = append(m.svc.Nodes, e.svc.Nodes...)
+		if e.rev > m.rev {
+			m.svc.Metadata = e.svc.Metadata
+			m.svc.Endpoints = e.svc.Endpoints
+			m.rev = e.rev
+		}
 	}
 
-	services := make([]*registry.Service, 0, len(versions))
-	for _, service := range versions {
-		services = append(services, service)
+	services := make([]*registry.Service, 0, len(byKey))
+	for _, m := range byKey {
+		services = append(services, m.svc)
 	}
-
-	// sort the services
-	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
-
-	return services, nil
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].Name != services[j].Name {
+			return services[i].Name < services[j].Name
+		}
+		return services[i].Version < services[j].Version
+	})
+	return services
 }
 
 func (e *etcdRegistry) Watcher(opts ...registry.WatchOptions) (registry.Watcher, error) {
