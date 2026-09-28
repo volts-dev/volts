@@ -100,6 +100,7 @@ type (
 		Result       []byte   // -- 最终返回数据由Apply提交
 		handler      *handler // -- 当前处理器
 		handlerIndex int      // -- 提示目前处理器索引
+		forwardDepth int      // -- 同进程改派的层数，见 forward.go
 		isDone       bool     // -- 已经提交过
 		hijacked     bool     // -- 连接已被接管(WebSocket)，禁止 Apply 与池回收
 		inited       bool     // -- 初始化固定值保存进POOL
@@ -746,6 +747,7 @@ func (self *THttpContext) reset(rw *transport.THttpResponse, req *transport.THtt
 	self.ContentType = req.Header().Get("Content-Type")
 	self.Result = nil
 	self.handlerIndex = 0 // -- 提示目前控制器Index
+	self.forwardDepth = 0 // -- 同进程改派层数(见 forward.go)；不清就会把上一轮的层数带进来
 	self.isDone = false   // -- 已经提交过
 	self.hijacked = false // -- 上一轮若被 WebSocket 接管，取出复用时必须清掉
 	// ★★★ **必须清空**，与 TRpcContext.reset 同款理由（那边早就清了，HTTP 这边漏了）。
