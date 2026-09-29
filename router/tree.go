@@ -432,12 +432,42 @@ func (r *TTree) matchNode(node *treeNode, path string, delimitChar byte, params 
 			// "/" 下挂 "/*" catch-all)永远匹配不到路径恰好等于前缀本身的请求
 			// (例如 GET / 匹配不到 /* 路由)；子节点里的 AnyNode 对空余量本就
 			// 有合法语义(捕获空字符串)。
+			//
+			// ★ 某个孩子是"末段参数把带 `/` 的余段整个吞下"才匹配上的：先记作候补，接着试
+			// 它的兄弟，兄弟里有不靠吞就匹配得上的，兄弟赢。
+			//
+			// 同一位置上两个**名字不同**的参数是两个兄弟节点：`/shop/brand/{slug}`（没有子节点）
+			// 与 `/shop/brand/{id}/logo`。按注册顺序先试到 `{slug}`，它把 `1/logo` 吞掉，
+			// `{id}/logo` 从来打不到 —— 真栈上品牌 logo 端点一次都没被调用过，每一张品牌
+			// logo 都回了一整张网店页面（2026-09-29 站点应用挂载 P6 验收量到）。同名参数
+			// （`category/{cat_id}` + `category/{cat_id}/image`）共用一个节点，所以一直是好的。
+			//
+			// **只在兄弟之间**比：吞下来的结果交回上一层之后就是一次普通的命中。若把"吞"降到
+			// 全树最后（先试遍全树不吞的，再试吞的），根级通配 `/*` 会抢在所有吞 `/` 的路由
+			// 前面 —— 静态文件 `/website/static/{:filepath}` 收 `css/site.css` 靠的正是吞，
+			// websvc 上整站样式脚本会落进 CMS 的通配（那一版先在 tree_param_sibling_test.go
+			// 里量出来了，没上栈）。
+			rest := path[len(node.Text):]
+			var fallback *treeNode
+			var fallbackParams Params
 			for _, c := range node.Children {
-				e := r.matchNode(c, path[len(node.Text):], delimitChar, params)
+				e := r.matchNode(c, rest, delimitChar, params)
 				if e != nil {
+					if e == c && c.Type == VariantNode && strings.IndexByte(rest, delimitChar) > -1 {
+						if fallback == nil {
+							fallback = e
+							fallbackParams = append(Params(nil), (*params)[paramsLen:]...)
+						}
+						*params = (*params)[:paramsLen]
+						continue
+					}
 					return e
 				}
 				*params = (*params)[:paramsLen] // 失败回退参数
+			}
+			if fallback != nil {
+				*params = append((*params)[:paramsLen], fallbackParams...)
+				return fallback
 			}
 		}
 	case AnyNode:
