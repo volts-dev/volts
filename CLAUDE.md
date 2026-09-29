@@ -180,6 +180,7 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 
 - 熔断：连续 `BreakerFailures`（默认 3）次失败踢出节点。**调用方必须两种结果都上报** `Mark`；反向代理只算连接级错误。全部节点熔断时**失败打开**。
 - 一个服务名可能由**多个进程**在服务而端点集不同：合并按版本**加端点集指纹**（`registry.EndpointsKey`），选点按被调端点过滤（`selector.FilterEndpointIfKnown`，没人声明该端点时失败打开）。
+- **两跳反代之间 `X-Forwarded-*` 要接着传**：Go 的 Rewrite 会按这一跳的 Host 重写，第二跳就把最初的 Host / https / 客户端 IP 全丢了（属主进程按内网地址认租户）。内部跳（带跳数头 + 环回/内网对端）保留上一跳写的，边缘跳照旧重写。
 - 注册中心驱动的路由更新：**只给 HTTP 端点建代理路由**（RPC 侧没有反向代理实现）；**本地路由永远赢过发现来的代理路由**（`hasLocalRoute` 那道盾）；服务下线的代理路由要**回收**，否则那条路径永远回 503。
 
 ### 消息总线 — [docs/claude/broker.md](docs/claude/broker.md)

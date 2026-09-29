@@ -124,6 +124,54 @@ func RpcReverseProxy(ctx *TRpcContext) {
 	ctx.Abort("rpc reverse proxy is not implemented: call the target service node directly")
 }
 
+// internalHop 报告进来的这个请求是不是**网格内部的一跳**：本框架的反代转出来的（带着跳数头），
+// 且对端是环回或内网地址。只有这种请求上的 X-Forwarded-* 是上一跳自己写的，可以接着往下传。
+//
+// 为什么要分：`httputil.ReverseProxy` 的 Rewrite 钩子会先剥掉出站请求上的 X-Forwarded-*，
+// SetXForwarded 再按**这一跳**进来的请求重写 —— X-Forwarded-Host 取的是 In.Host。单跳
+// （网关 → 属主）没问题；两跳（网关 → 网站进程 → 属主，站点应用挂载的跨进程转交就是这条路）
+// 时，上一跳已经把 Host 改写成了上游地址，于是第二跳发出去的 X-Forwarded-Host 是
+// `127.0.0.1:36399`：最初的 `shop.example` 丢了，按 Host 选租户的属主进程认错租户（或落到默认
+// 租户），页面里拼的绝对地址（og:image、hreflang）全是内网地址；X-Forwarded-Proto 的 https
+// 与客户端 IP 链同样丢在这一跳。
+//
+// 边缘那一跳（没有跳数头，或对端是外网地址）照旧：外部带进来的 X-Forwarded-* 一律不认，按
+// 客户端真实请求的 Host 重写 —— 与改之前逐字相同。跳数头本身客户端也能带，所以还要对端是
+// 环回 / 内网地址；前面挡着一层不剥头的前置代理（nginx 同机）时，客户端伪造的 X-Forwarded-Host
+// 会被当成上一跳写的传下去 —— 这与下游按它选租户时的既有取舍相同（vectors
+// core/frontend.RequestHost：它只用于选租户，数据访问仍走租户隔离与权限判定）。
+func internalHop(r *http.Request, depth int) bool {
+	if r == nil || depth <= 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+}
+
+// setForwarded 设出站请求的 X-Forwarded-*（见 internalHop）：内部跳保留上一跳写下的 Host 与
+// Proto，并把客户端 IP 链接着往后追加；边缘跳就是 Go 的标准行为（SetXForwarded）。
+func setForwarded(pr *httputil.ProxyRequest, internal bool) {
+	if internal {
+		if prior := pr.In.Header.Values("X-Forwarded-For"); len(prior) > 0 {
+			// SetXForwarded 在出站请求已有这个头时往后追加，而 Rewrite 之前它被剥掉了。
+			pr.Out.Header["X-Forwarded-For"] = append([]string(nil), prior...)
+		}
+	}
+	pr.SetXForwarded()
+	if !internal {
+		return
+	}
+	for _, h := range []string{"X-Forwarded-Host", "X-Forwarded-Proto"} {
+		if v := pr.In.Header.Get(h); v != "" {
+			pr.Out.Header.Set(h, v)
+		}
+	}
+}
+
 // TODO 改名称
 func HttpReverseProxy(ctx *THttpContext) {
 	inReq := ctx.Request().Request
@@ -222,6 +270,7 @@ func HttpReverseProxy(ctx *THttpContext) {
 	// 这条路径看 GetBody；另一条 errServerClosedIdle 走的是 Request.isReplayable，
 	// 而它按**方法**判定，POST 一律不可重放（GetBody 有没有都一样）。
 	// 所以下面的 reverseProxyTransport 额外包了 retryStaleIdleConn 补那一条。
+	internal := internalHop(inReq, depth)
 	var rewriteFn func(*httputil.ProxyRequest)
 	if inReq.Body != nil && inReq.ContentLength > 0 && inReq.ContentLength <= maxProxyRetryBody {
 		bodyBytes, err := io.ReadAll(inReq.Body)
@@ -234,7 +283,7 @@ func HttpReverseProxy(ctx *THttpContext) {
 			pr.SetURL(rp)
 			restorePrefix(pr)
 			pr.Out.Host = rp.Host
-			pr.SetXForwarded()
+			setForwarded(pr, internal)
 			// 累计反代跳数，供下游（含本进程自己）的跳数护盾封顶转发环。
 			pr.Out.Header.Set(proxyDepthHeader, strconv.Itoa(depth+1))
 			// 为 outgoing request 设置 GetBody，让 transport 自动重试 stale 连接
@@ -249,7 +298,7 @@ func HttpReverseProxy(ctx *THttpContext) {
 			pr.SetURL(rp)
 			restorePrefix(pr)
 			pr.Out.Host = rp.Host
-			pr.SetXForwarded()
+			setForwarded(pr, internal)
 			// 累计反代跳数，供下游（含本进程自己）的跳数护盾封顶转发环。
 			pr.Out.Header.Set(proxyDepthHeader, strconv.Itoa(depth+1))
 		}
