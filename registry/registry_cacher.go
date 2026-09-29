@@ -47,6 +47,9 @@ type (
 		// Range，每次全量扫 800KB+ 的注册数据。
 		listCache []*Service
 		listTTL   time.Time
+		// listGen 每次失效加一。回源前记下、回来时比对：变了说明拉取途中有注册 / 注销事件，
+		// 拿回来的清单可能早于它，不能缓存（见 ListServices）。
+		listGen uint64
 
 		// exit is used to stop the background watcher
 		exit chan bool
@@ -243,6 +246,7 @@ func (c *registryCacher) update(res *Result) {
 	// 过滤之前**：新上线的服务本来就还没被 watch，若放在过滤之后，新服务要等
 	// 满一个 TTL 才在清单里出现。
 	c.listTTL = time.Time{}
+	c.listGen++
 
 	// only save watched services
 	if _, ok := c.watched[res.Service.Name]; !ok {
@@ -570,8 +574,33 @@ func (c *registryCacher) ListServices() ([]*Service, error) {
 		return cached, nil
 	}
 
+	// ★ 拉取途中来了失效（watch 事件）：拿回来的清单可能早于那次注册，缓存它就等于把失效
+	// 吃掉 —— 旧清单再顶一整个 TTL，而触发这次拉取的往往正是那个事件（vectors 的服务目录
+	// 收到事件就重建快照，拉到的却是缓存器还没来得及作废、或者途中被作废的旧清单）。
+	// 所以回源前后比对 listGen：变了就再拉一次（有限次），拉不稳就只返回、不缓存。
 	val, err, _ := c.sg.Do("*list*", func() (interface{}, error) {
-		return c.IRegistry.ListServices()
+		var services []*Service
+		for try := 0; try < 3; try++ {
+			c.RLock()
+			gen := c.listGen
+			c.RUnlock()
+			got, err := c.IRegistry.ListServices()
+			if err != nil {
+				return nil, err
+			}
+			services = got
+			c.Lock()
+			stable := c.listGen == gen
+			if stable {
+				c.listCache = Copy(got)
+				c.listTTL = time.Now().Add(c.config.TTL)
+			}
+			c.Unlock()
+			if stable {
+				break
+			}
+		}
+		return services, nil
 	})
 	if err != nil {
 		if len(cached) > 0 {
@@ -587,12 +616,7 @@ func (c *registryCacher) ListServices() ([]*Service, error) {
 		c.setStatus(nil)
 	}
 
-	c.Lock()
-	c.listCache = Copy(services)
-	c.listTTL = time.Now().Add(c.config.TTL)
-	c.Unlock()
-
-	return services, nil
+	return Copy(services), nil
 }
 
 func (c *registryCacher) Match(endpoint string) ([]*Service, error) {

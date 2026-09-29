@@ -212,3 +212,53 @@ func TestCacher_MatchConcurrentIsRaceFree(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// midFetchRegistry 在 ListServices 取完清单之后调 hook（模拟：拉取途中来了注册事件）。
+type midFetchRegistry struct {
+	countingRegistry
+	hook func()
+}
+
+func (r *midFetchRegistry) ListServices() ([]*Service, error) {
+	got, err := r.countingRegistry.ListServices()
+	r.mu.Lock()
+	h := r.hook
+	r.hook = nil
+	r.mu.Unlock()
+	if h != nil {
+		h()
+	}
+	return got, err
+}
+
+// 拉取途中来了失效：拿回来的旧清单不许缓存成新的 —— 否则那次注册要再等一整个 TTL 才看得见
+// （vectors 的服务目录收到事件就重建快照，拉到的正是这份旧清单；闲着的进程因此停在旧快照上）。
+func TestCacher_InvalidationDuringFetchIsNotLost(t *testing.T) {
+	reg := &midFetchRegistry{countingRegistry: countingRegistry{w: newFakeWatcher(),
+		svcs: []*Service{{Name: "alpha"}}}}
+	c, ok := NewCacher(reg, RegisterTTL(time.Minute)).(*registryCacher)
+	if !ok {
+		t.Fatal("NewCacher 没有返回 *registryCacher")
+	}
+	defer c.Stop()
+
+	reg.hook = func() {
+		// 取完旧清单之后、返回之前：新服务注册，watch 事件作废缓存
+		reg.mu.Lock()
+		reg.svcs = []*Service{{Name: "alpha"}, {Name: "late"}}
+		reg.mu.Unlock()
+		c.update(&Result{Action: "create", Service: &Service{Name: "late"}})
+	}
+	got, err := c.ListServices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("途中被作废的那次拉取应重拉，拿到 %d 个服务", len(got))
+	}
+	before := reg.count()
+	again, _ := c.ListServices()
+	if len(again) != 2 || reg.count() != before {
+		t.Fatalf("重拉的结果应被缓存：拿到 %d 个、多回源 %d 次", len(again), reg.count()-before)
+	}
+}
