@@ -684,21 +684,33 @@ initMiddlewares:
 	// 这里判定：中间件实现 IMiddlewareTransport 声明了自己只适用于某一侧时，
 	// 从本 handler 的链上原地摘除 —— 不适用的一侧运行期不会看到该条目。
 	// 不实现该接口的默认两侧都装（IMiddleware.Handler 收 IContext，天然协议无关）。
+	//
+	// ★ 实例必须挂在**新建的** handle 上，绝不能写回原来那个：clone 只拷 handle 指针，
+	// 原来那个是原型 funcs 里的、所有克隆共用的。此前这里就地写 handle.Middleware，
+	// 第一个克隆造的实例从此被之后每个克隆（池里没有空闲实例时现克隆的那些）原样复用 ——
+	// 同一路由上的并发请求共享一个中间件实例，谁的 per-request 字段都会被另一个请求改掉，
+	// 先结束的那个请求回收时调的 Reset() 还会把仍在途的那个清空。vectors 的 TenantSession
+	// 挂在每个模型的 RPC 路由上就是这条路：并发下令牌被撕裂（SIGSEGV / 令牌畸形），或被
+	// 清空后把用户请求当成服务身份调用。见 TestRouteMiddleware_OneInstancePerInflightRequest。
 	if len(self.funcs) > 0 {
-		kept := self.funcs[:0] // 原地过滤，不额外分配
-		for _, handle := range self.funcs {
-			if handle.Middleware == nil && handle.MiddlewareCreator != nil {
-				middleware := handle.MiddlewareCreator(router)
+		kept := make([]*handle, 0, len(self.funcs)) // 不能原地过滤：底层数组可能仍是原型的
+		for _, hd := range self.funcs {
+			if hd.MiddlewareCreator != nil {
+				middleware := hd.MiddlewareCreator(router)
 				if !middlewareSupports(middleware, self.TransportType) {
 					log.Dbgf("middleware %T 未声明支持 %v，已从 handler %s 的链上跳过",
 						middleware, self.TransportType, self.Name)
 					continue
 				}
-				handle.Middleware = middleware
-				handle.HttpFunc = WrapHttp(middleware.Handler)
-				handle.RpcFunc = WrapRpc(middleware.Handler)
+				hd = &handle{
+					IsFunc:            hd.IsFunc,
+					MiddlewareCreator: hd.MiddlewareCreator,
+					Middleware:        middleware,
+					HttpFunc:          WrapHttp(middleware.Handler),
+					RpcFunc:           WrapRpc(middleware.Handler),
+				}
 			}
-			kept = append(kept, handle)
+			kept = append(kept, hd)
 		}
 		self.funcs = kept
 	}
