@@ -114,6 +114,14 @@ type (
 		// 压测、抓包，以及对照测试"同一个调用走管道和走网络结果是否一致"。
 		DisableInproc bool `field:"disable_inproc"`
 
+		// LoopbackOnly 让 TCP 监听只绑在环回地址上（127.0.0.1:PORT），只接本机的连接。
+		//
+		// 默认的监听会把 `127.0.0.1:PORT` 也扩成 `:PORT`（internal/net 的 normalizeBindAddr），
+		// 所以单靠地址写成环回做不到这一点。服务间 RPC 端口只给本机的兄弟进程打时就该开：
+		// 绑在全部网卡上等于把内部接口交给同一网段的任何人。注册中心登记的地址随之是
+		// 127.0.0.1 —— 别的机器上的进程连不上，跨机部署不能开。
+		LoopbackOnly bool `field:"loopback_only"`
+
 		// ---- 实例，不进配置文件 ----
 
 		Listener     IListener
@@ -305,6 +313,13 @@ func Timeout(t time.Duration) Option {
 func DisableInproc() Option {
 	return func(cfg *Config) {
 		cfg.DisableInproc = true
+	}
+}
+
+// LoopbackOnly 让 TCP 监听只绑在环回地址上（见 Config.LoopbackOnly）。
+func LoopbackOnly() Option {
+	return func(cfg *Config) {
+		cfg.LoopbackOnly = true
 	}
 }
 

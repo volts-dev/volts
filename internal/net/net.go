@@ -50,8 +50,23 @@ func normalizeBindAddr(addr string) string {
 // Listen takes addr:portmin-portmax and binds to the first available port
 // Example: Listen("localhost:5000-6000", fn)
 func Listen(addr string, fn func(string) (net.Listener, error)) (net.Listener, error) {
-	addr = normalizeBindAddr(addr) // 将回环地址扩展为全接口绑定
+	return listen(normalizeBindAddr(addr), fn) // 将回环地址扩展为全接口绑定
+}
 
+// ListenLoopback 同 Listen，但不论 addr 的主机部分写的是什么，都只绑 127.0.0.1。
+func ListenLoopback(addr string, fn func(string) (net.Listener, error)) (net.Listener, error) {
+	return listen(loopbackBindAddr(addr), fn)
+}
+
+// loopbackBindAddr 把监听地址的主机部分换成 127.0.0.1（端口与端口区间原样保留）。
+func loopbackBindAddr(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return "127.0.0.1" + addr[i:]
+	}
+	return "127.0.0.1:" + addr
+}
+
+func listen(addr string, fn func(string) (net.Listener, error)) (net.Listener, error) {
 	if strings.Count(addr, ":") == 1 && strings.Count(addr, "-") == 0 {
 		return fn(addr)
 	}

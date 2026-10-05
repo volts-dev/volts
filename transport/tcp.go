@@ -53,6 +53,9 @@ func (self *tcpTransport) Dial(addr string, opts ...DialOption) (IClient, error)
 		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, config)
 	} else if serve := self.inprocTarget(addr); serve != nil {
 		conn = dialInproc(serve) // 目标就是本进程：不经网络栈，见 inproc.go
+	} else if p := self.peerTLSFor(); p != nil && p.Mode >= PeerTLSDual {
+		// 服务间 TLS（peer_tls.go）。排在进程内直连之后：管道两端是同一个进程，没什么可互认的。
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialCfg.DialTimeout}, "tcp", addr, p.Client)
 	} else {
 		conn, err = net.DialTimeout("tcp", addr, dialCfg.DialTimeout)
 	}
@@ -127,7 +130,11 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 			return net.Listen("tcp", addr)
 		}
 
-		l, err = vnet.Listen(addr, fn)
+		if self.config.LoopbackOnly {
+			l, err = vnet.ListenLoopback(addr, fn)
+		} else {
+			l, err = vnet.Listen(addr, fn)
+		}
 	}
 
 	if err != nil {
@@ -137,6 +144,7 @@ func (self *tcpTransport) Listen(addr string, opts ...ListenOption) (IListener, 
 	self.config.Listener = &tcpTransportListener{
 		transport: self,
 		listener:  l,
+		peer:      self.peerTLSFor(),
 	}
 
 	return self.config.Listener, nil

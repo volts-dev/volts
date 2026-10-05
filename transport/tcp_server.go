@@ -22,6 +22,9 @@ type (
 		listener  net.Listener
 		transport *tcpTransport
 		sock      *tcpTransportSocket // TODO 还未实现
+		// peer 是建监听那一刻的服务间 TLS（peer_tls.go），与 Secure 一样是这个监听
+		// 一辈子的属性；nil = 只收明文。
+		peer *PeerTLS
 	}
 )
 
@@ -61,6 +64,7 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 	}
 
 	// 登记为进程内直连目标（见 inproc.go）。TLS 监听不登记：管道上没有证书。
+	// 服务间 TLS（peer_tls.go）不算：那是对**别的进程**的要求，本进程自己就是自己。
 	cfg := self.transport.config
 	if !cfg.Secure && cfg.TlsConfig == nil {
 		unregister := registerInproc(self.listener.Addr(), func(conn net.Conn) {
@@ -93,6 +97,15 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 			return err
 		}
 
+		if p := self.peer; p != nil {
+			go func(conn net.Conn) {
+				// 认首字节、握手都在这条连接自己的 goroutine 里：慢的对端不能卡住 Accept。
+				if c, ok := acceptPeer(conn, p, self.transport.config.ReadTimeout); ok {
+					self.serveConn(hd, c)
+				}
+			}(conn)
+			continue
+		}
 		go self.serveConn(hd, conn)
 	}
 }

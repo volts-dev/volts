@@ -26,6 +26,8 @@ import (
 // # 什么时候不走
 //
 //   - 拨号方开了 TLS（Secure / TlsConfig）：对端身份可能正由证书承担，管道没有证书。
+//     进程级的服务间 TLS（peer_tls.go）**照走**：那张证书证明的是"我是本集群的哪个
+//     进程"，而管道两端是同一个进程。服务端经 PeerOf 认得出这是本进程。
 //   - 监听方开了 TLS：不登记，理由同上。
 //   - Config.DisableInproc：显式要求真网络（压测、抓包、对照测试）。
 //   - 目标地址不是本机：本表只登记本进程的监听，别的主机的地址查不到。
@@ -92,6 +94,6 @@ func inprocFor(addr string) inprocServeFunc {
 // dialInproc 建一条进程内连接：返回调用方那一端，另一端交给监听的服务循环。
 func dialInproc(serve inprocServeFunc) net.Conn {
 	client, server := net.Pipe()
-	go serve(server)
+	go serve(&inprocConn{server}) // 包一层让服务端认得出这是本进程（PeerOf）
 	return client
 }

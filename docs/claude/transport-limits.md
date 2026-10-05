@@ -103,7 +103,9 @@ Rules:
 
 - Registered by port in `tcpTransportListener.Serve`, removed when `Serve` returns. "Local
   address + port in the table" identifies this process because a host port has one owner.
-- **Not used with TLS** on either side — the pipe carries no certificate.
+- **Not used with a transport's own TLS** (`Secure` / `TlsConfig`) on either side — the pipe
+  carries no certificate. Process-wide peer TLS (below) is the exception: it proves *which
+  process* is calling, and both ends of a pipe are this process.
 - `transport.DisableInproc()` (config `disable_inproc`) forces the real network. **Any test
   about the TCP wire itself must set it**: tests start their server in the same process, so
   without it they silently test the pipe. `transport/tcp_test.go` does.
@@ -115,3 +117,38 @@ is a `net.Conn` whose `RemoteAddr().Network()` is `"pipe"`. Regressions:
 `transport/inproc_test.go`, `internal/test/client/rpc_inproc_test.go`
 (`TestRpcClient_LocalServerGoesInprocWithSameResult` — full client→router path, pipe vs TCP
 must differ only in connection kind).
+
+## Peer TLS: process-wide mTLS for service-to-service RPC
+
+`transport.SetPeerTLS(&PeerTLS{Mode, Server, Client})` (`transport/peer_tls.go`) applies to
+**every TCP transport in the process that has no `Secure` / `TlsConfig` of its own**. It is
+process-wide because RPC clients are created all over an application (one per service name,
+plus controllers calling `NewRpcClient` themselves); configuring each one would miss one, and
+under `On` the one you missed just fails to connect.
+
+| Mode | listener accepts plaintext | listener accepts TLS | dials with |
+|---|---|---|---|
+| `Off` | yes | — | plaintext |
+| `Accept` | yes | yes | plaintext |
+| `Dual` | yes | yes | TLS |
+| `On` | **no** (closed, logged) | yes | TLS |
+
+Roll forward one step at a time across **all** processes (Accept → Dual → On); within each
+step processes in adjacent modes interoperate, so restarts can go one by one.
+
+- One port serves both, told apart by the **first byte**: a TLS record starts `0x16`, an RPC
+  frame starts `MagicNumber` (`0x08`). Sniff + handshake run in the connection's own goroutine
+  with a deadline (min of `ReadTimeout`, 10s) — a silent peer cannot stall `Accept`.
+- **A listener's mode is fixed when `Listen` is called**, like `Secure`. Call `SetPeerTLS`
+  before the server starts.
+- Identity is the caller's business: `Server` must carry `ClientAuth` + verification,
+  `Client` carries the client certificate. Without a CA, use `InsecureSkipVerify` **plus**
+  `VerifyPeerCertificate` that pins the public key — never `InsecureSkipVerify` alone.
+- In-process dialing still wins over TLS. `transport.PeerOf(conn)` tells a handler what is on
+  the other end: TLS peer certificates, `inproc=true` (this process), or neither (plaintext).
+- `transport.LoopbackOnly()` (config `loopback_only`) binds `127.0.0.1:PORT` — the only way
+  to do so, because the default listen widens `127.0.0.1:PORT` to `:PORT`
+  (`normalizeBindAddr`). The registered address becomes `127.0.0.1`, so only same-host peers
+  can reach it.
+
+Regressions: `transport/peer_tls_test.go`.
