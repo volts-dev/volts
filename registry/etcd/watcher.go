@@ -59,6 +59,12 @@ func (ew *etcdWatcher) Next() (*registry.Result, error) {
 			switch ev.Type {
 			case clientv3.EventTypePut:
 				service = decode(ev.Kv.Value)
+				// 验不过的注册项不进缓存（registry.AcceptRecord）。删除事件不验：删掉一条
+				// 从没被收下的，对缓存是空操作；而收下过的那条，信任表换过之后可能就验不过了，
+				// 拦下它的删除反倒让它在缓存里多活一个 TTL。
+				if service != nil && !registry.AcceptRecord(service) {
+					service = nil
+				}
 
 				if ev.IsCreate() {
 					action = "create"

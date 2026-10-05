@@ -105,3 +105,24 @@ over a bad route nothing will ever correct. Regression:
 Regressions: `router/store_local_route_shield_test.go`, `registry/cacher_register_order_test.go`.
 
 (The former `handler.Services`/`SetServices` field — once documented here as a data race — is gone: it had no readers and `SetServices` was never called, so the race could not occur. Removed rather than locked.)
+
+## Record signing: who wrote this entry?
+
+`registry.SetRecordSecurity(&RecordSecurity{Sign, Verify})` (`registry/record_security.go`)
+is process-wide, like `transport.SetPeerTLS`. The registry decides where traffic goes —
+selector dials node addresses, the gateway builds reverse-proxy routes from endpoints, the
+application reads ownership and method contributions from service metadata — so anyone who
+can write etcd could otherwise insert themselves into someone else's call chain.
+
+- **Sign** runs on a single-node record before it is written. `SignedNode` hands it a
+  **copy** of the node: one `server.Register` call shares one `*Node` across every service,
+  and signatures are per service. Signing happens **before** the node hash, so a change in
+  service metadata / endpoints now re-writes the entry (before, only node changes did).
+- **Verify** runs on every record read back, **before merging** — after a merge only one
+  copy of metadata / endpoints is left and it no longer matches each node's own signature.
+  A failing record is dropped from `GetService` / `ListServices` / watch puts (logged,
+  throttled). Watch **deletes are not verified**: deleting an entry that was never accepted is
+  a no-op, and blocking the delete of one that was would keep it cached for a TTL.
+- Only the etcd backend calls the hooks.
+
+Regressions: `registry/record_security_test.go`.

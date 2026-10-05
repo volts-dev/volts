@@ -218,6 +218,13 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 		}
 	}
 
+	// 签名（registry.SignedNode）要在算哈希之前：签名随 metadata / 端点变，哈希跟着变，
+	// 声明变了才会真的重写这一条（此前哈希只看节点，服务 metadata 变了也被当成"没变"跳过）。
+	node, err := registry.SignedNode(s, node)
+	if err != nil {
+		return err
+	}
+
 	var leaseNotFound bool
 
 	// renew the lease if it exists
@@ -363,7 +370,7 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	serviceMap := map[string]*registry.Service{}
 
 	for _, n := range rsp.Kvs {
-		if sn := decode(n.Value); sn != nil {
+		if sn := decode(n.Value); sn != nil && registry.AcceptRecord(sn) {
 			// ★ 分组键是 版本 + **端点集指纹**，不只是版本。
 			//
 			// 一个服务名下可以有好几个注册项（别的进程 blank-import 了这个模块，
@@ -413,7 +420,7 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 
 	entries := make([]revisioned, 0, len(rsp.Kvs))
 	for _, n := range rsp.Kvs {
-		if sn := decode(n.Value); sn != nil {
+		if sn := decode(n.Value); sn != nil && registry.AcceptRecord(sn) {
 			entries = append(entries, revisioned{svc: sn, rev: n.CreateRevision})
 		}
 	}
