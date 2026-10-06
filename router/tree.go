@@ -262,10 +262,10 @@ func (self *TTree) AddRoute(route *route) error {
 func (self *TTree) RouteOf(method string, path string) *route {
 	method = strings.ToUpper(method)
 
-	var delimitChar byte = '/'
-	if method == "CONNECT" {
-		delimitChar = '.'
-	}
+	// 与 AddRoute 同一把尺子：按路由自己的分隔符（newRoute 一律是 '/'）解析。
+	// 此前这里与 DelRoute 给 CONNECT 写死了 '.'，而 AddRoute 从来不用它 —— RPC 路由于是
+	// 既查不到也删不掉（`/a.b.c` 按 '.' 切成三段，树里存的是一段）。
+	var delimitChar byte = routeDelimitChar
 
 	self.RLock()
 	defer self.RUnlock()
@@ -313,9 +313,10 @@ func (self *TTree) DelRoute(path string, route *route) error {
 			return nil
 		}
 
-		var delimitChar byte = '/'
-		if method == "CONNECT" {
-			delimitChar = '.'
+		// 与 AddRoute 同一把尺子（见 RouteOf）。
+		delimitChar := route.pathDelimitChar
+		if delimitChar == 0 {
+			delimitChar = routeDelimitChar
 		}
 
 		// to parse path as a List node

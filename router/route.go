@@ -116,13 +116,17 @@ func EndpiontToRoute(ep *registry.Endpoint) *route {
 	)
 }
 
+// routeDelimitChar 是路由模式串的分隔符。newRoute 对所有方法（含 CONNECT）都用它，
+// 按模式串查找、删除路由的地方必须用同一个，否则解析出的节点与树里存的对不上。
+const routeDelimitChar byte = '/'
+
 func newRoute(group *TGroup, methods []string, url *TUrl, path, filePath, name, action string) *route {
 	r := &route{
 		group:           group,
 		id:              int(atomic.AddInt32(&idQueue, 1)),
 		url:             url,
 		path:            path,
-		pathDelimitChar: '/',
+		pathDelimitChar: routeDelimitChar,
 		filePath:        filePath,
 		action:          action, //
 		methods:         methods,
