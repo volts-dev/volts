@@ -1,6 +1,7 @@
 package router
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -74,5 +75,32 @@ func TestPanicReturnsHandlerToPool(t *testing.T) {
 	}
 	if cache.Pop() == nil {
 		t.Fatal("panic 后 handler 未归还：对象池为空")
+	}
+}
+
+// http.ErrAbortHandler 是反向代理在客户端断开 / 上游掐断时的**有意中止**：必须原样交还给
+// net/http（它静默关连接），不能当崩溃兜住——那样每次断开都记三行 error，还往写了一半的
+// 响应里再塞一段错误信封。
+func TestRecover_PassesErrAbortHandlerThrough(t *testing.T) {
+	r := New()
+	defer r.Close()
+
+	grp := NewGroup()
+	grp.Url([]string{"GET"}, "/abort-me", func(c *THttpContext) {
+		panic(http.ErrAbortHandler)
+	})
+	r.RegisterGroup(grp)
+
+	w := httptest.NewRecorder()
+	var got any
+	func() {
+		defer func() { got = recover() }()
+		r.ServeHTTP(w, transport.NewHttpRequest(httptest.NewRequest("GET", "/abort-me", nil)))
+	}()
+	if got != http.ErrAbortHandler {
+		t.Fatalf("ErrAbortHandler 应当原样传给 net/http，实际 recover 到 %#v", got)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("中止的请求不该再写错误信封，body=%q", w.Body.String())
 	}
 }

@@ -603,6 +603,14 @@ func (self *TRouter) route(route *route, ctx IContext) {
 	if self.config.RecoverEnabled() {
 		defer func() {
 			if err := recover(); err != nil {
+				// http.ErrAbortHandler 是**有意的中止**，不是崩溃：httputil.ReverseProxy 在
+				// 回包途中客户端断开 / 上游掐断时用它告诉 net/http「这条连接直接扔掉」。
+				// 当崩溃兜住的话，日志里是三行 error（recover 栈 + 脱敏的 500 + 这一行），
+				// 还往一条已经写了一半的响应里再写一段错误信封。原样交还给 net/http，
+				// 它按约定静默关掉连接。
+				if err == http.ErrAbortHandler {
+					panic(err)
+				}
 				log.Err(err)
 
 				if self.config.RecoverHandler != nil {
