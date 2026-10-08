@@ -696,7 +696,7 @@ type selfIdentity struct {
 // 缓存，因此不随 lease 抖动）收集自身身份。返回 nil 表示本地服务尚未注册上来、
 // 暂时无法确定“自己是谁”，由调用方 store() 决定护盾还是放行。
 func (self *TRouter) localIdentity() *selfIdentity {
-	locals := self.config.RegistryCacher.LocalServices()
+	locals := self.localServices()
 	if len(locals) == 0 {
 		return nil
 	}
@@ -718,6 +718,27 @@ func (self *TRouter) localIdentity() *selfIdentity {
 		}
 	}
 	return me
+}
+
+// localServices 是挂在本 router 上的**全部** server 注册出去的服务。
+//
+// 一个 router 可以被多个 server 共用（vectors 的 http 与 rpc 两个 server），每个 server 各持
+// 一个 RegistryCacher、各自只记得自己注册的那份。只问当前那个 cacher 的话，另一个 server
+// 注册的本进程节点在 filteSelf 眼里是"远端"——store() 于是按它的端点建代理路由，只靠
+// hasLocalRoute 那道护盾挡住，每次启动每个服务各报一条「filteSelf 没认出来」（2026-10-08
+// 本机一天几百条）。先前挂过的 cacher 在 WithRegistry 换掉它时留在 priorCachers 里。
+func (self *TRouter) localServices() []*registry.Service {
+	out := self.config.RegistryCacher.LocalServices()
+	if len(self.config.priorCachers) == 0 {
+		return out
+	}
+	out = append([]*registry.Service(nil), out...)
+	for _, c := range self.config.priorCachers {
+		if c != nil && c != self.config.RegistryCacher {
+			out = append(out, c.LocalServices()...)
+		}
+	}
+	return out
 }
 
 // filteSelf 返回一个副本，其中指向本进程自身的节点已被剔除（按 node.Id 或归一化
@@ -1059,7 +1080,7 @@ func (self *TRouter) refresh() {
 		// 5s，那一刻本进程往往还没把全部服务注册完（模块是逐个注册上来的），
 		// 于是这份残缺快照被后续每一轮 60s 刷新永久沿用：已注册但不在快照里的
 		// 本地服务会被反复当成远程服务送进 store()。
-		localServices := self.config.RegistryCacher.LocalServices()
+		localServices := self.localServices()
 
 		list, err = self.config.Registry.ListServices()
 		if err != nil {

@@ -138,3 +138,28 @@ func TestLocalIdentity_CollectsIdsAndAddrs(t *testing.T) {
 		t.Errorf("未收集归一化地址，addrs = %+v", me.addrs)
 	}
 }
+
+// 一个 router 挂在两个 server 上（http + rpc），各带一个 cacher 来：后挂的顶掉先挂的。
+// 先挂的那个 server 注册的本进程节点必须仍然算"自己"——否则 filteSelf 认不出，store()
+// 按它的端点建代理路由，只靠 hasLocalRoute 护盾挡住，每次启动每个服务各报一条告警。
+func TestLocalIdentity_IncludesCachersReplacedByLaterServers(t *testing.T) {
+	httpCacher := registry.NewCacher(registry.NewNopRegistry())
+	rpcCacher := registry.NewCacher(registry.NewNopRegistry())
+	_ = httpCacher.Register(&registry.Service{Name: "purchase_stock", Version: "1",
+		Nodes: []*registry.Node{{Id: "http-node", Address: "127.0.0.1:35999"}}})
+	_ = rpcCacher.Register(&registry.Service{Name: "purchase_stock", Version: "1",
+		Nodes: []*registry.Node{{Id: "rpc-node", Address: "127.0.0.1:45999"}}})
+
+	cfg := &Config{}
+	WithRegistry(httpCacher)(cfg)
+	WithRegistry(rpcCacher)(cfg)
+	me := (&TRouter{config: cfg}).localIdentity()
+	if me == nil {
+		t.Fatal("localIdentity = nil")
+	}
+	for _, id := range []string{"http-node", "rpc-node"} {
+		if _, ok := me.ids[id]; !ok {
+			t.Errorf("%s 是本进程另一个 server 注册的节点，应当算自己", id)
+		}
+	}
+}

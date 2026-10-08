@@ -58,6 +58,8 @@ type (
 		Selector       selector.ISelector
 		Registry       registry.IRegistry
 		RegistryCacher registry.IRegistryCacher // registry cache
+		// priorCachers 是先前挂过、后来被 WithRegistry 换掉的 cacher（见 TRouter.localServices）。
+		priorCachers   []registry.IRegistryCacher
 		RecoverHandler func(IContext)
 		PathRewriter   PathRewriter // 路由匹配前的路径改写(多语言 URL 前缀),见类型注释
 
@@ -261,6 +263,12 @@ func WithPathRewriter(fn PathRewriter) Option {
 func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
 		cfg.Registry = r
+		// 同一个 router 挂在多个 server 上（vectors 的 http/rpc 两个 server 共用一个 router）时，
+		// 每个 server 各带一个 cacher 来、后到的顶掉先到的。被顶掉的那个手里是另一个 server
+		// 注册出去的本进程节点——留着，认"自己"时一并算上（见 TRouter.localServices）。
+		if old := cfg.RegistryCacher; old != nil && old != r {
+			cfg.priorCachers = append(cfg.priorCachers, old)
+		}
 		if rc, ok := r.(registry.IRegistryCacher); ok {
 			cfg.RegistryCacher = rc
 		} else {
