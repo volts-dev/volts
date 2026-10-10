@@ -84,7 +84,7 @@ func (self *TWriterManager) writeDown(msg string, level Level) {
 }
 
 func (self *TWriterManager) write(level Level, msg string) error {
-	if int32(level) > self.level.Load() {
+	if !Level(self.level.Load()).Admits(level) {
 		return nil
 	}
 

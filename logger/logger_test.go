@@ -49,9 +49,11 @@ func newCapturing(t *testing.T, prefix string) (*TLogger, *captureWriter) {
 	return l, w
 }
 
-// 各等级的过滤关系必须成立：write() 的判据是 level > config.Level 则丢弃，
-// 而等级数值是 Info(5) < Warn(6) < Error(7) < Debug(9) —— 数值大的更"啰嗦"。
-// 这条断言把这个反直觉的顺序钉死，避免后人"顺手修正"成常见的反向定义。
+// 各等级的过滤关系按**严重程度序**（Level.Severity）：配成 X 就放行 X 及更严重的。
+//
+// 此前这里钉的是数值序（write() 判 level > config.Level 则丢），于是「Info 只放行 Info」
+// 「Warn 挡掉 Error」—— 配成 info 的进程连错误都不打。所有日志器一直跑在默认 debug(9)
+// 上，所以没人撞到；默认改成 info 时它就露出来了（2026-10-10）。
 func TestLoggerLevelFiltering(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -62,25 +64,36 @@ func TestLoggerLevelFiltering(t *testing.T) {
 		{
 			name:     "Debug 放行全部",
 			level:    LevelDebug,
-			wantSeen: []string{"d-msg", "e-msg", "i-msg", "w-msg"},
+			wantSeen: []string{"d-msg", "t-msg", "e-msg", "i-msg", "w-msg"},
 		},
 		{
-			name:     "Error 挡掉 Debug",
-			level:    LevelError,
-			wantSeen: []string{"e-msg", "i-msg", "w-msg"},
+			name:     "Trace 挡掉 Debug",
+			level:    LevelTrace,
+			wantSeen: []string{"t-msg", "e-msg", "i-msg", "w-msg"},
 			wantGone: []string{"d-msg"},
 		},
 		{
-			name:     "Warn 挡掉 Debug/Error",
-			level:    LevelWarn,
-			wantSeen: []string{"i-msg", "w-msg"},
-			wantGone: []string{"d-msg", "e-msg"},
+			name:     "★ Info 放行 Info/Warn/Error，挡掉 Debug/Trace",
+			level:    LevelInfo,
+			wantSeen: []string{"i-msg", "w-msg", "e-msg"},
+			wantGone: []string{"d-msg", "t-msg"},
 		},
 		{
-			name:     "Info 只放行 Info",
-			level:    LevelInfo,
-			wantSeen: []string{"i-msg"},
-			wantGone: []string{"d-msg", "e-msg", "w-msg"},
+			name:     "Warn 挡掉 Info 及以下",
+			level:    LevelWarn,
+			wantSeen: []string{"w-msg", "e-msg"},
+			wantGone: []string{"d-msg", "t-msg", "i-msg"},
+		},
+		{
+			name:     "Error 只放行 Error",
+			level:    LevelError,
+			wantSeen: []string{"e-msg"},
+			wantGone: []string{"d-msg", "t-msg", "i-msg", "w-msg"},
+		},
+		{
+			name:     "None 是关掉",
+			level:    LevelNone,
+			wantGone: []string{"d-msg", "t-msg", "i-msg", "w-msg", "e-msg"},
 		},
 	}
 
@@ -90,6 +103,7 @@ func TestLoggerLevelFiltering(t *testing.T) {
 			l.SetLevel(c.level)
 
 			l.Dbgf("%s", "d-msg")
+			l.Tracef("%s", "t-msg")
 			l.Errf("%s", "e-msg")
 			l.Infof("%s", "i-msg")
 			l.Warnf("%s", "w-msg")

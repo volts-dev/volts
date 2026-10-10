@@ -68,7 +68,8 @@ func New(Prefix string, opts ...Option) *TLogger {
 		},
 	}
 	log.manager.loggerFuncCallDepth.Store(2)
-	log.manager.level.Store(int32(config.Level))
+	log.manager.level.Store(int32(config.effective()))
+	config.apply = func(lv Level) { log.manager.level.Store(int32(lv)) }
 
 	log.manager.writer["Console"] = NewConsoleWriter()
 	log.manager.writerName = "Console"
@@ -126,13 +127,13 @@ func Assert(cnd bool, format string, args ...interface{}) {
 	}
 }
 
-// Returns true if the given level is at or lower the current logger level
+// Lvl 报告一条 level 等级的日志会不会被写出（按严重程度序，见 Level.Admits）。
 func Lvl(level Level, log ...ILogger) bool {
 	var l ILogger = defaultLogger
 	if len(log) > 0 {
 		l = log[0]
 	}
-	return l.GetLevel() <= level
+	return l.GetLevel().Admits(level)
 }
 
 func Atkf(fmt string, arg ...interface{}) {

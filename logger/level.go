@@ -65,6 +65,21 @@ func (lv Level) Severity() int {
 	return 2
 }
 
+// Admits 报告配置成 lv 的日志器放不放行一条 msg 等级的日志：按 Severity 比，
+// msg 不低于 lv 即放行（配 info → info / warn / error … 都出，debug / trace 不出）。
+//
+// LevelNone 表示「关掉」：只放行 emergency 及以上，与它数值上的老语义一致。
+//
+// 此前 write() 直接比数值（msg > lv 则丢），而数值不是严重程度序：配成 info 会把
+// warn 和 error 一起挡掉。没人发现，是因为所有日志器一直跑在默认的 debug(9) 上。
+func (lv Level) Admits(msg Level) bool {
+	min := lv.Severity()
+	if lv == LevelNone {
+		min = LevelEmergency.Severity()
+	}
+	return msg.Severity() >= min
+}
+
 // ParseLevel 按名字解析等级（大小写不敏感；接受 String() 的输出以及常见别名
 // warning / err / dbg / critical…）。认不出返回 false。
 func ParseLevel(name string) (Level, bool) {
