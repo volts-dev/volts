@@ -34,6 +34,12 @@ RFC5424-ish plus two local levels and are *not* monotonic in severity:
 `lv >= LevelError` silently includes trace/debug and excludes alert/critical.
 `Severity()` (debug 0 … attack 8) is the real order; `ParseLevel` reads the names.
 
+The logger's own filter is `Level.Admits` (severity order) since 2026-10-10. Before that
+`write()` compared raw values, so a logger set to `info` also dropped warn and error —
+unnoticed only because every logger ran at the old default `debug`. The default is now
+**info**; `VOLTS_LOG_LEVEL` overrides every logger, beating config.json (deployed files
+carry a stale persisted `"level": 9` per logger). The console writer colours only on a TTY.
+
 Caller resolution skips frames by **package name** (`…/logger.Func`), not by a fixed depth:
 upper layers wrap this package with their own `logger` package (vectors does), and a fixed
 depth necessarily points at the wrong line for one of the two call paths.
