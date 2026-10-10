@@ -4,6 +4,8 @@ package registry
 import (
 	"math"
 	"math/rand"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +42,9 @@ type (
 		ttls          map[string]time.Time
 		watched       map[string]bool
 		localServices []*Service
+		// readBack 记着每个本地服务（name+version）上一次**成功回读**时的身份指纹
+		// （localIdentityKey）。续租时身份没变就不再回读，见 Register。
+		readBack map[string]string
 
 		// 全量服务清单的缓存。ListServices 此前**完全没有缓存**（结构体只是嵌入
 		// IRegistry，方法直接穿透到后端），而它是按模型找属主服务这类调用的入口，
@@ -84,6 +89,7 @@ func NewCacher(r IRegistry, opts ...Option) IRegistryCacher {
 		cache:       make(map[string][]*Service),
 		endpointMap: make(map[string]string),
 		ttls:        make(map[string]time.Time),
+		readBack:    make(map[string]string),
 		exit:        make(chan bool),
 	}
 }
@@ -668,6 +674,20 @@ func (c *registryCacher) Register(s *Service, opts ...Option) error {
 	// 装/升级模块取不到数据文件而整体失败；每次重启命中的模块还不一样（是竞态）。
 	//
 	// 提前登记的代价只有一种：注册失败时曾短暂多认了一个"自己"，下面立即回滚。
+	//
+	// 续租（server 每 30 秒一轮）时身份没变就只续租、不回读：localServices 里那份
+	// 已经是上次回读出来的，而它的消费者（filteSelf / isLocalService）只看名字、版本、
+	// 节点 id 与地址。此前每轮每个服务都 GetService 一次 —— 一条前缀读 + 整条 JSON
+	// 解码 + 逐条验签（stock 一条 400KB），kylin 约 120 个服务，空闲时 etcd 每分钟
+	// 千余次 Range、发出 150MB，这一处占 kylin 空闲 CPU 的三分之一（2026-10-10 实测）。
+	key, fp := s.Name+"\x00"+s.Version, localIdentityKey(s)
+	c.RLock()
+	known := c.readBack[key] == fp
+	c.RUnlock()
+	if known {
+		return c.IRegistry.Register(s, opts...)
+	}
+
 	restore := c.trackLocalService(s)
 
 	if err := c.IRegistry.Register(s, opts...); err != nil {
@@ -695,11 +715,30 @@ func (c *registryCacher) Register(s *Service, opts ...Option) error {
 		// 集登记成"我自己"，filteSelf 从此认不出自己的节点。
 		if local := withNodesOf(ss, s); len(local.Nodes) > 0 {
 			c.trackLocalService(local)
+			c.Lock()
+			if c.readBack == nil {
+				c.readBack = make(map[string]string)
+			}
+			c.readBack[key] = fp
+			c.Unlock()
 			break
 		}
 	}
 
 	return nil
+}
+
+// localIdentityKey 是一个本地服务在 filteSelf / isLocalService 眼里的身份：
+// 名字、版本、每个节点的 id 与地址（排序后拼接，与节点顺序无关）。
+func localIdentityKey(s *Service) string {
+	parts := make([]string, 0, len(s.Nodes))
+	for _, n := range s.Nodes {
+		if n != nil {
+			parts = append(parts, n.Id+"@"+n.Address)
+		}
+	}
+	sort.Strings(parts)
+	return s.Name + "\x00" + s.Version + "\x00" + strings.Join(parts, ",")
 }
 
 // trackLocalService 把 s 记入/替换本进程的注册记录（按 name+version），返回一个
@@ -773,6 +812,7 @@ func (c *registryCacher) Deregister(s *Service, opts ...Option) error {
 		services = append(services, ls)
 	}
 	c.localServices = services
+	delete(c.readBack, s.Name+"\x00"+s.Version)
 	c.Unlock()
 
 	return c.IRegistry.Deregister(s, opts...)
