@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,11 +54,11 @@ type (
 		config *Config
 
 		// server status
-		started    atomic.Bool // marks the serve as started
-		registered atomic.Bool // used for first registration
-		exit       chan chan error
-		wg         *sync.WaitGroup // graceful exit
-		services   []*registry.Service
+		started     atomic.Bool // marks the serve as started
+		registered  atomic.Bool // used for first registration
+		exit        chan chan error
+		wg          *sync.WaitGroup // graceful exit
+		services    []*registry.Service
 		subscribers map[router.ISubscriber][]broker.ISubscriber
 
 		// registeredAddr 首次注册时**解析出来的**具体地址（如 192.168.1.5:35999），
@@ -298,7 +299,7 @@ func (self *TServer) Register() error {
 	var servics []*registry.Service
 	for _, name := range order {
 		svc := byName[name]
-		svc.Endpoints = dedupEndpoints(svc.Endpoints)
+		svc.Endpoints = sortEndpoints(dedupEndpoints(svc.Endpoints))
 
 		if err := regFunc(svc); err != nil {
 			return err
@@ -667,6 +668,31 @@ func (self *TServer) String() string {
 
 func (self *TServer) Config() *Config {
 	return self.config
+}
+
+// sortEndpoints 把端点排成与收集顺序无关的确定次序（路径 → 方法 → 名字 → Host）。
+//
+// 注册项的**字节**必须只由内容决定。`TTree.Endpoints()` 走的是按方法分桶的 map，
+// 同名服务的多个 group 也来自 map，于是同一份端点集每轮续租都可能换个顺序。注册项
+// 签名（registry.SignedNode）按切片顺序算摘要，顺序一变签名就变，etcd 后端的「内容
+// 未变则跳过」随之失效：每个服务每 30 秒整条重新 Grant + Put 一次（一条 stock 400KB），
+// 旧租约还要再活一个 TTL。2026-10-10 真栈实测稳态 95 秒 33 次 PUT、44 个键挂着 279 个
+// 租约，云上 etcd 因此成为写 I/O 第一大户。
+func sortEndpoints(eps []*registry.Endpoint) []*registry.Endpoint {
+	sort.SliceStable(eps, func(i, j int) bool {
+		a, b := eps[i], eps[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if ma, mb := strings.Join(a.Method, ","), strings.Join(b.Method, ","); ma != mb {
+			return ma < mb
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return strings.Join(a.Host, ",") < strings.Join(b.Host, ",")
+	})
+	return eps
 }
 
 // dedupEndpoints 按 **方法+路径** 去重，保留首次出现的顺序。

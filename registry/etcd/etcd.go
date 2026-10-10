@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"hash/fnv"
 	"net"
 	"path"
 	"sort"
@@ -12,9 +13,7 @@ import (
 	"sync"
 	"time"
 
-	hash "github.com/mitchellh/hashstructure/v2"
 	vtls "github.com/volts-dev/volts/internal/tls"
-	"github.com/volts-dev/volts/logger"
 	"github.com/volts-dev/volts/registry"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -195,22 +194,10 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 			if kv.Lease > 0 {
 				leaseID = clientv3.LeaseID(kv.Lease)
 
-				// decode the existing node
-				srv := decode(kv.Value)
-				if srv == nil || len(srv.Nodes) == 0 {
-					continue
-				}
-
-				// create hash of service; uint64
-				h, err := hash.Hash(srv.Nodes[0], hash.FormatV2, nil)
-				if err != nil {
-					continue
-				}
-
-				// save the info
+				// 与下面同一个判据：库里那条的字节
 				e.Lock()
 				e.leases[s.Name+node.Id] = leaseID
-				e.register[s.Name+node.Id] = h
+				e.register[s.Name+node.Id] = recordHash(kv.Value)
 				e.Unlock()
 
 				break
@@ -228,36 +215,23 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	var leaseNotFound bool
 
 	// renew the lease if it exists
+	//
+	// 稳态下每个服务每轮都走这里，**不打日志**：此前这一行是 Trace，而 logger 默认等级
+	// 放行 Trace，一个 aio 进程几十个服务、每 30 秒一轮，云上 syslog 被它和 SQL 日志
+	// 一起灌到 8GB。只在状态变了（租约丢了、内容变了）时才值得记一笔。
 	if leaseID > 0 {
-		log.Tracef("Renewing existing lease for %s %d", s.Name, leaseID)
-		if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
+		_, err := e.client.KeepAliveOnce(ctx, leaseID)
+		cancel()
+		if err != nil {
 			if err != rpctypes.ErrLeaseNotFound {
 				return err
 			}
 
-			log.Tracef("Lease not found for %s %d", s.Name, leaseID)
+			log.Warnf("Lease %x for %s node %s has expired, registering again", int64(leaseID), s.Name, node.Id)
 			// lease not found do register
 			leaseNotFound = true
 		}
-	}
-
-	// create hash of service; uint64
-	h, err := hash.Hash(node, hash.FormatV2, nil)
-	if err != nil {
-		return err
-	}
-
-	// get existing hash for the service node
-	e.Lock()
-	v, ok := e.register[s.Name+node.Id]
-	e.Unlock()
-
-	// the service is unchanged, skip registering
-	if ok && v == h && !leaseNotFound {
-		if log.GetLevel() == logger.LevelTrace {
-			log.Tracef("Service %s node %s unchanged skipping registration", s.Name, node.Id)
-		}
-		return nil
 	}
 
 	service := &registry.Service{
@@ -266,6 +240,22 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 		Metadata:  s.Metadata,
 		Endpoints: s.Endpoints,
 		Nodes:     []*registry.Node{node},
+	}
+	value := encode(service)
+
+	// 「没变就跳过」比的是**将要写进去的整条字节**，不只是节点：此前只哈希节点，端点 /
+	// 服务 metadata 变了全靠签名间接带进来，关了签名就会漏写。字节相同 ⇔ 内容相同，
+	// 前提是编码确定 —— json 对 map 排序，端点顺序由 server.sortEndpoints 保证。
+	h := recordHash([]byte(value))
+
+	// get existing hash for the service node
+	e.Lock()
+	v, ok := e.register[s.Name+node.Id]
+	e.Unlock()
+
+	// the service is unchanged, skip registering
+	if ok && v == h && !leaseNotFound {
+		return nil
 	}
 
 	var options registry.Config
@@ -276,23 +266,27 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()
 
-	var lgr *clientv3.LeaseGrantResponse
-	if options.TTL.Seconds() > 0 {
+	// 租约还活着就沿用，内容变了只重写这一条。此前一律 Grant 新租约：旧的刚续过、
+	// 还要空挂一个 TTL，每次重写都多一个租约（真栈 44 个键挂着 279 个租约）。
+	useLease := leaseID
+	if leaseNotFound || options.TTL.Seconds() <= 0 {
+		useLease = 0
+	}
+	if useLease == 0 && options.TTL.Seconds() > 0 {
 		// get a lease used to expire keys since we have a ttl
-		lgr, err = e.client.Grant(ctx, int64(options.TTL.Seconds()))
+		lgr, err := e.client.Grant(ctx, int64(options.TTL.Seconds()))
 		if err != nil {
 			return err
 		}
+		useLease = lgr.ID
 	}
 
-	//if logger.V(logger.TraceLevel, logger.DefaultLogger) {
-	log.Dbgf("Registering %s id %s with lease %v and leaseID %v and ttl %v", service.Name, node.Id, lgr, lgr.ID, options.TTL)
-	//}
+	log.Dbgf("Registering %s id %s with lease %x and ttl %v", service.Name, node.Id, int64(useLease), options.TTL)
 	// create an entry for the node
-	if lgr != nil {
-		_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), encode(service), clientv3.WithLease(lgr.ID))
+	if useLease > 0 {
+		_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), value, clientv3.WithLease(useLease))
 	} else {
-		_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), encode(service))
+		_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), value)
 	}
 	if err != nil {
 		return err
@@ -302,12 +296,21 @@ func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, op
 	// save our hash of the service
 	e.register[s.Name+node.Id] = h
 	// save our leaseID of the service
-	if lgr != nil {
-		e.leases[s.Name+node.Id] = lgr.ID
+	if useLease > 0 {
+		e.leases[s.Name+node.Id] = useLease
+	} else {
+		delete(e.leases, s.Name+node.Id)
 	}
 	e.Unlock()
 
 	return nil
+}
+
+// recordHash 是一条注册项字节的指纹，用来判「这一轮要不要重写」。
+func recordHash(b []byte) uint64 {
+	f := fnv.New64a()
+	f.Write(b)
+	return f.Sum64()
 }
 
 func (e *etcdRegistry) Deregister(s *registry.Service, opts ...registry.Option) error {
