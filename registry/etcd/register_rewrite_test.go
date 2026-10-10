@@ -223,3 +223,135 @@ func TestRecordCache_DecodeAndVerifyOncePerRevision(t *testing.T) {
 		t.Fatalf("验签方恢复放行后，注册项没有回来: %d", len(got))
 	}
 }
+
+// 前缀下什么都没变时，整段读只花两次只计数的查询、返回上次的结果；新建、修改、删除
+// （含租约到期）任何一种都必须让下一次读拿到新内容。
+//
+// 此前每次 ListServices / GetService 都整段拉值：全量 7MB，空闲时 etcd 每分钟发出
+// 150MB（2026-10-10 实测）。
+func TestRangePrefix_ReusesUntilSomethingChanges(t *testing.T) {
+	r := liveRegistry(t)
+	ttl := registry.RegisterTTL(30 * time.Second)
+	mk := func(id, summary string) *registry.Service {
+		// 每个节点一个服务名：同名同版本的注册项会被合并、metadata 取最新注册的那条
+		return &registry.Service{Name: "range-probe-" + id, Metadata: map[string]string{"summary": summary},
+			Nodes: []*registry.Node{{Id: id, Address: "127.0.0.1:1"}}}
+	}
+	list := func() map[string]string {
+		t.Helper()
+		srvs, err := r.ListServices()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, s := range srvs {
+			for _, n := range s.Nodes {
+				out[n.Id] = s.Metadata["summary"]
+			}
+		}
+		return out
+	}
+
+	if err := r.Register(mk("n1", "v1"), ttl); err != nil {
+		t.Fatal(err)
+	}
+	first := list()
+	r.rangeMu.Lock()
+	cached := r.ranges[prefix]
+	r.rangeMu.Unlock()
+	if cached == nil || first["n1"] != "v1" {
+		t.Fatalf("首次读没有落缓存或内容不对: %v", first)
+	}
+	list()
+	r.rangeMu.Lock()
+	same := r.ranges[prefix] == cached
+	r.rangeMu.Unlock()
+	if !same {
+		t.Fatal("什么都没变，却又整段拉了一次")
+	}
+
+	// 新建
+	if err := r.Register(mk("n2", "v1"), ttl); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); len(got) != 2 {
+		t.Fatalf("新建的键没读到: %v", got)
+	}
+	// 修改
+	if err := r.Register(mk("n1", "v2"), ttl); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); got["n1"] != "v2" {
+		t.Fatalf("修改没读到: %v", got)
+	}
+	// 删除
+	if err := r.Deregister(mk("n2", "v1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); len(got) != 1 {
+		t.Fatalf("删除没读到: %v", got)
+	}
+	// 删一建一（键数不变）
+	if err := r.Deregister(mk("n1", "v2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(mk("n3", "v3"), ttl); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); len(got) != 1 || got["n3"] != "v3" {
+		t.Fatalf("删一建一没读到: %v", got)
+	}
+	// GetService 走同一套
+	if srvs, err := r.GetService("range-probe-n3"); err != nil || len(srvs) != 1 || srvs[0].Metadata["summary"] != "v3" {
+		t.Fatalf("GetService: %v %+v", err, srvs)
+	}
+}
+
+// 应用给了信任表代号：结论一直复用（不按时间重验），代号一变立即重判。
+func TestRecordCache_GenerationDrivesRecheck(t *testing.T) {
+	r := liveRegistry(t)
+
+	var mu sync.Mutex
+	verifies, reject, gen := 0, false, uint64(1)
+	registry.SetRecordSecurity(&registry.RecordSecurity{
+		Verify: func(s *registry.Service) error {
+			mu.Lock()
+			defer mu.Unlock()
+			verifies++
+			if reject {
+				return errors.New("probe: rejected")
+			}
+			return nil
+		},
+		Generation: func() uint64 { mu.Lock(); defer mu.Unlock(); return gen },
+	})
+	t.Cleanup(func() { registry.SetRecordSecurity(nil) })
+	old := recordRecheck
+	recordRecheck = time.Millisecond
+	t.Cleanup(func() { recordRecheck = old })
+
+	svc := &registry.Service{Name: "gen-probe", Nodes: []*registry.Node{{Id: "n1", Address: "127.0.0.1:1"}}}
+	if err := r.Register(svc, registry.RegisterTTL(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		time.Sleep(3 * time.Millisecond)
+		if _, err := r.GetService(svc.Name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	n := verifies
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("给了代号仍按时间重验（验签 %d 次）", n)
+	}
+
+	// 信任表换了一份、这次拒绝：代号一变就要重判
+	mu.Lock()
+	gen, reject = 2, true
+	mu.Unlock()
+	if srvs, err := r.GetService(svc.Name); err == nil && len(srvs) != 0 {
+		t.Fatalf("代号变了却还在用旧结论: %+v", srvs)
+	}
+}

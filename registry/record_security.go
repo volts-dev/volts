@@ -25,10 +25,35 @@ import (
 //
 // 目前只有 etcd 后端接了这两个钩子（memory / mdns / consul 不调用）。
 
-// RecordSecurity 见文件头。两个钩子都可以为 nil。
+// RecordSecurity 见文件头。钩子都可以为 nil。
 type RecordSecurity struct {
 	Sign   func(*Service) error
 	Verify func(*Service) error
+	// Generation 是 Verify 所依据的东西（信任表）的代号：换了一份就变。可选。
+	//
+	// 后端会缓存「这份字节验过了没有」（etcd 按 ModRevision）。给了代号，结论一直复用到
+	// 代号变；没给，只能按时间复用、定期重验（etcd 后端 30 秒）。稳态下注册项不再重写，
+	// 信任表补上 provides 之后被丢的注册项要靠重验才能回来。
+	Generation func() uint64
+}
+
+// VerdictStamp 标识「验签结论」所依据的条件：同一个戳下，同一份字节的结论不变。
+type VerdictStamp struct {
+	sec *RecordSecurity
+	gen uint64
+}
+
+// CurrentVerdictStamp 返回此刻的戳。exact=false 表示应用没给 Generation，戳相同也不能
+// 担保结论没变（调用方应按时间重验）。没装验签时恒为 exact。
+func CurrentVerdictStamp() (stamp VerdictStamp, exact bool) {
+	sec := recordSecurity.Load()
+	if sec == nil || sec.Verify == nil {
+		return VerdictStamp{sec: sec}, true
+	}
+	if sec.Generation == nil {
+		return VerdictStamp{sec: sec}, false
+	}
+	return VerdictStamp{sec: sec, gen: sec.Generation()}, true
 }
 
 var recordSecurity atomic.Pointer[RecordSecurity]

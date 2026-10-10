@@ -50,6 +50,16 @@ type etcdRegistry struct {
 	// records 缓存每个键**解码并验过签**的注册项，按 ModRevision 认版本，见 record。
 	recMu   sync.Mutex
 	records map[string]*cachedRecord
+
+	// ranges 缓存每个前缀上一次整段读回来的键值，见 rangePrefix。
+	rangeMu sync.Mutex
+	ranges  map[string]*cachedRange
+}
+
+// cachedRange 是一个前缀在某个库版本上的整段读结果。
+type cachedRange struct {
+	rev int64 // 读的那一刻的库版本（Header.Revision）
+	kvs []*mvccpb.KeyValue
 }
 
 // cachedRecord 是一条注册项在某个 ModRevision 上的解码结果与验签结论。
@@ -57,12 +67,14 @@ type cachedRecord struct {
 	rev     int64
 	svc     *registry.Service // nil = 解不出来
 	ok      bool              // registry.AcceptRecord 的结论
-	checked time.Time         // ok 是什么时候判的
+	stamp   registry.VerdictStamp
+	checked time.Time // ok 是什么时候判的
 }
 
-// recordRecheck 是验签结论的有效期。字节没变（ModRevision 相同）结论也可能变：
-// 信任表 30 秒热更新一次，补上 provides 之后此前被丢的注册项要能自己回来，不能等
-// 它被重写（稳态下注册项不再重写）。
+// recordRecheck 是应用没给信任表代号（RecordSecurity.Generation）时验签结论的有效期。
+// 字节没变（ModRevision 相同）结论也可能变：信任表 30 秒热更新一次，补上 provides
+// 之后此前被丢的注册项要能自己回来，不能等它被重写（稳态下注册项不再重写）。给了
+// 代号就不靠时间：结论一直复用到代号变。
 var recordRecheck = 30 * time.Second
 
 func init() {
@@ -380,18 +392,18 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()
 
-	rsp, err := e.client.Get(ctx, servicePath(name)+"/", clientv3.WithPrefix(), clientv3.WithSerializable())
+	kvs, err := e.rangePrefix(ctx, servicePath(name)+"/")
 	if err != nil {
 		return nil, err
 	}
 
-	if len(rsp.Kvs) == 0 {
+	if len(kvs) == 0 {
 		return nil, registry.ErrNotFound
 	}
 
 	serviceMap := map[string]*registry.Service{}
 
-	for _, n := range rsp.Kvs {
+	for _, n := range kvs {
 		if sn := e.record(n); sn != nil {
 			// ★ 分组键是 版本 + **端点集指纹**，不只是版本。
 			//
@@ -431,18 +443,18 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
 	defer cancel()
 
-	rsp, err := e.client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
+	kvs, err := e.rangePrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(rsp.Kvs) == 0 {
+	if len(kvs) == 0 {
 		return []*registry.Service{}, nil
 	}
 
-	entries := make([]revisioned, 0, len(rsp.Kvs))
-	seen := make(map[string]struct{}, len(rsp.Kvs))
-	for _, n := range rsp.Kvs {
+	entries := make([]revisioned, 0, len(kvs))
+	seen := make(map[string]struct{}, len(kvs))
+	for _, n := range kvs {
 		seen[string(n.Key)] = struct{}{}
 		if sn := e.record(n); sn != nil {
 			entries = append(entries, revisioned{svc: sn, rev: n.CreateRevision})
@@ -450,6 +462,54 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 	}
 	e.pruneRecords(seen)
 	return mergeByNameVersion(entries), nil
+}
+
+// rangePrefix 读前缀 p 下的全部键值；自上次整段读之后什么都没变时，只花两次只计数的
+// 查询，返回上次的结果。
+//
+// 「没变」的判据（同一个只读事务里）：键数与上次相同，且没有任何键的 ModRevision 晚于
+// 上次读的库版本（只取键的过滤查询回空）。新建 / 修改必然产生更晚的 ModRevision；删除（含租约到期）不留键，
+// 但会让键数变少 —— 删一建一时，建的那条照样被第二个条件抓到。
+//
+// 此前每次 ListServices / GetService 都整段拉值：全量 7MB，路由刷新、健康监控、
+// Apps 目录、admin 探测各自在拉，空闲时 etcd 每分钟发出 150MB（2026-10-10 实测）。
+func (e *etcdRegistry) rangePrefix(ctx context.Context, p string) ([]*mvccpb.KeyValue, error) {
+	e.rangeMu.Lock()
+	c := e.ranges[p]
+	e.rangeMu.Unlock()
+
+	if c != nil {
+		rsp, err := e.client.Txn(ctx).Then(
+			clientv3.OpGet(p, clientv3.WithPrefix(), clientv3.WithCountOnly(), clientv3.WithSerializable()),
+			// 只取键、不计数：带 MinModRev 过滤时 etcd 回的 Count 是**过滤前**的键数，
+			// 判不出「有没有更新过的」。没变时这一项回空，照样只有几十字节。
+			clientv3.OpGet(p, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable(),
+				clientv3.WithMinModRev(c.rev+1)),
+		).Commit()
+		if err != nil {
+			return nil, err
+		}
+		if len(rsp.Responses) == 2 {
+			total := rsp.Responses[0].GetResponseRange().GetCount()
+			newer := len(rsp.Responses[1].GetResponseRange().GetKvs())
+			if total == int64(len(c.kvs)) && newer == 0 {
+				return c.kvs, nil
+			}
+		}
+	}
+
+	rsp, err := e.client.Get(ctx, p, clientv3.WithPrefix(), clientv3.WithSerializable())
+	if err != nil {
+		return nil, err
+	}
+
+	e.rangeMu.Lock()
+	if e.ranges == nil {
+		e.ranges = make(map[string]*cachedRange)
+	}
+	e.ranges[p] = &cachedRange{rev: rsp.Header.Revision, kvs: rsp.Kvs}
+	e.rangeMu.Unlock()
+	return rsp.Kvs, nil
 }
 
 // record 返回 kv 解码并验过签的注册项；解不出或验不过返回 nil。
@@ -464,6 +524,8 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 func (e *etcdRegistry) record(kv *mvccpb.KeyValue) *registry.Service {
 	key := string(kv.Key)
 
+	stamp, exact := registry.CurrentVerdictStamp()
+
 	e.recMu.Lock()
 	c := e.records[key]
 	e.recMu.Unlock()
@@ -475,7 +537,7 @@ func (e *etcdRegistry) record(kv *mvccpb.KeyValue) *registry.Service {
 			svc.Nodes = svc.Nodes[:len(svc.Nodes):len(svc.Nodes)]
 		}
 		c = &cachedRecord{rev: kv.ModRevision, svc: svc}
-	} else if time.Since(c.checked) < recordRecheck {
+	} else if c.stamp == stamp && (exact || time.Since(c.checked) < recordRecheck) {
 		if c.ok {
 			return c.svc
 		}
@@ -486,6 +548,7 @@ func (e *etcdRegistry) record(kv *mvccpb.KeyValue) *registry.Service {
 	}
 
 	c.ok = c.svc != nil && registry.AcceptRecord(c.svc)
+	c.stamp = stamp
 	c.checked = time.Now()
 
 	e.recMu.Lock()
