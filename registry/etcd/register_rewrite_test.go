@@ -2,7 +2,9 @@ package etcd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,5 +128,98 @@ func TestRegister_LeaseLostRegistersAgain(t *testing.T) {
 	_, lease2 := keyState(t, r, key)
 	if lease2 == 0 || lease2 == lease1 {
 		t.Fatalf("租约丢了之后没有重新拿租约（%x → %x）", lease1, lease2)
+	}
+}
+
+// 注册项字节没变（ModRevision 相同）就不再重复解码、验签；变了必须重验；验签结论
+// 过了 recordRecheck 要重判（信任表热更新后被丢的注册项得能自己回来）。
+//
+// 此前每次读都整条解码 + 整条重新编码算摘要验签：空闲时 kylin 每分钟 22 秒 CPU 里
+// 一大半花在这上面（2026-10-10 采样）。
+func TestRecordCache_DecodeAndVerifyOncePerRevision(t *testing.T) {
+	r := liveRegistry(t)
+
+	var mu sync.Mutex
+	verifies, reject := 0, false
+	registry.SetRecordSecurity(&registry.RecordSecurity{Verify: func(s *registry.Service) error {
+		mu.Lock()
+		defer mu.Unlock()
+		verifies++
+		if reject {
+			return errors.New("probe: rejected")
+		}
+		return nil
+	}})
+	t.Cleanup(func() { registry.SetRecordSecurity(nil) })
+	count := func() int { mu.Lock(); defer mu.Unlock(); return verifies }
+
+	svc := &registry.Service{
+		Name:      "cache-probe",
+		Endpoints: []*registry.Endpoint{{Name: "a", Path: "/a"}},
+		Nodes:     []*registry.Node{{Id: "n1", Address: "127.0.0.1:1"}},
+	}
+	ttl := registry.RegisterTTL(30 * time.Second)
+	if err := r.Register(svc, ttl); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func() []*registry.Service {
+		t.Helper()
+		got, err := r.GetService(svc.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	get()
+	if n := count(); n != 1 {
+		t.Fatalf("首次读验签 %d 次，期望 1", n)
+	}
+	for i := 0; i < 5; i++ {
+		got := get()
+		// 调用方 append 不许写进缓存
+		got[0].Endpoints = append(got[0].Endpoints, &registry.Endpoint{Name: "junk"})
+	}
+	if _, err := r.ListServices(); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("字节没变却重复验签（共 %d 次）", n)
+	}
+	if got := get(); len(got[0].Endpoints) != 1 {
+		t.Fatalf("调用方的 append 写进了缓存：端点 %d 个", len(got[0].Endpoints))
+	}
+
+	// 内容变了 → 新的 ModRevision → 重新解码验签
+	svc.Endpoints = append(svc.Endpoints, &registry.Endpoint{Name: "b", Path: "/b"})
+	if err := r.Register(svc, ttl); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(); len(got[0].Endpoints) != 2 || count() != 2 {
+		t.Fatalf("内容变了：端点 %d 个、验签 %d 次，期望 2 / 2", len(got[0].Endpoints), count())
+	}
+
+	// 结论过期后重判：验签方改口（信任表热更新）要在一个 recordRecheck 内生效
+	old := recordRecheck
+	recordRecheck = 50 * time.Millisecond
+	t.Cleanup(func() { recordRecheck = old })
+	mu.Lock()
+	reject = true
+	mu.Unlock()
+	time.Sleep(60 * time.Millisecond)
+	if _, err := r.GetService(svc.Name); err != registry.ErrNotFound && err != nil {
+		t.Fatal(err)
+	} else if err == nil {
+		if got := get(); len(got) != 0 {
+			t.Fatalf("验签方已拒绝，过了复核期仍返回注册项: %+v", got)
+		}
+	}
+	mu.Lock()
+	reject = false
+	mu.Unlock()
+	time.Sleep(60 * time.Millisecond)
+	if got := get(); len(got) != 1 {
+		t.Fatalf("验签方恢复放行后，注册项没有回来: %d", len(got))
 	}
 }

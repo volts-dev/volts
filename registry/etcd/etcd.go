@@ -15,6 +15,7 @@ import (
 
 	vtls "github.com/volts-dev/volts/internal/tls"
 	"github.com/volts-dev/volts/registry"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -45,7 +46,24 @@ type etcdRegistry struct {
 	sync.RWMutex
 	register map[string]uint64
 	leases   map[string]clientv3.LeaseID
+
+	// records 缓存每个键**解码并验过签**的注册项，按 ModRevision 认版本，见 record。
+	recMu   sync.Mutex
+	records map[string]*cachedRecord
 }
+
+// cachedRecord 是一条注册项在某个 ModRevision 上的解码结果与验签结论。
+type cachedRecord struct {
+	rev     int64
+	svc     *registry.Service // nil = 解不出来
+	ok      bool              // registry.AcceptRecord 的结论
+	checked time.Time         // ok 是什么时候判的
+}
+
+// recordRecheck 是验签结论的有效期。字节没变（ModRevision 相同）结论也可能变：
+// 信任表 30 秒热更新一次，补上 provides 之后此前被丢的注册项要能自己回来，不能等
+// 它被重写（稳态下注册项不再重写）。
+var recordRecheck = 30 * time.Second
 
 func init() {
 	registry.Register("etcd", New)
@@ -65,6 +83,7 @@ func New(opts ...registry.Option) registry.IRegistry {
 		config:   registry.NewConfig(append(defaultOpts, opts...)...),
 		register: make(map[string]uint64),
 		leases:   make(map[string]clientv3.LeaseID),
+		records:  make(map[string]*cachedRecord),
 	}
 
 	configure(reg)
@@ -373,7 +392,7 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 	serviceMap := map[string]*registry.Service{}
 
 	for _, n := range rsp.Kvs {
-		if sn := decode(n.Value); sn != nil && registry.AcceptRecord(sn) {
+		if sn := e.record(n); sn != nil {
 			// ★ 分组键是 版本 + **端点集指纹**，不只是版本。
 			//
 			// 一个服务名下可以有好几个注册项（别的进程 blank-import 了这个模块，
@@ -422,12 +441,75 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 	}
 
 	entries := make([]revisioned, 0, len(rsp.Kvs))
+	seen := make(map[string]struct{}, len(rsp.Kvs))
 	for _, n := range rsp.Kvs {
-		if sn := decode(n.Value); sn != nil && registry.AcceptRecord(sn) {
+		seen[string(n.Key)] = struct{}{}
+		if sn := e.record(n); sn != nil {
 			entries = append(entries, revisioned{svc: sn, rev: n.CreateRevision})
 		}
 	}
+	e.pruneRecords(seen)
 	return mergeByNameVersion(entries), nil
+}
+
+// record 返回 kv 解码并验过签的注册项；解不出或验不过返回 nil。
+//
+// 同一个键的 ModRevision 没变，字节就没变：解码直接复用，验签结论在 recordRecheck
+// 内复用。此前每次 GetService / ListServices 都把每条注册项整条 JSON 解码、再整条
+// 重新编码算摘要验签（stock 一条 400KB、全量 7MB），空闲时 kylin 每分钟 22 秒 CPU
+// 里一大半花在这上面（2026-10-10 采样）。
+//
+// 返回的对象在调用方之间共享（上面的 registryCacher 本来就这么做），切片的容量
+// 收紧到长度，调用方 append 时一定另起底层数组，碰不到这里的缓存。
+func (e *etcdRegistry) record(kv *mvccpb.KeyValue) *registry.Service {
+	key := string(kv.Key)
+
+	e.recMu.Lock()
+	c := e.records[key]
+	e.recMu.Unlock()
+
+	if c == nil || c.rev != kv.ModRevision {
+		svc := decode(kv.Value)
+		if svc != nil {
+			svc.Endpoints = svc.Endpoints[:len(svc.Endpoints):len(svc.Endpoints)]
+			svc.Nodes = svc.Nodes[:len(svc.Nodes):len(svc.Nodes)]
+		}
+		c = &cachedRecord{rev: kv.ModRevision, svc: svc}
+	} else if time.Since(c.checked) < recordRecheck {
+		if c.ok {
+			return c.svc
+		}
+		return nil
+	} else {
+		cp := *c // 别在别人可能正读着的那份上改结论
+		c = &cp
+	}
+
+	c.ok = c.svc != nil && registry.AcceptRecord(c.svc)
+	c.checked = time.Now()
+
+	e.recMu.Lock()
+	if e.records == nil {
+		e.records = make(map[string]*cachedRecord)
+	}
+	e.records[key] = c
+	e.recMu.Unlock()
+
+	if c.ok {
+		return c.svc
+	}
+	return nil
+}
+
+// pruneRecords 丢掉全量清单里已经不在的键（进程重启后旧节点的键）。
+func (e *etcdRegistry) pruneRecords(live map[string]struct{}) {
+	e.recMu.Lock()
+	defer e.recMu.Unlock()
+	for k := range e.records {
+		if _, ok := live[k]; !ok {
+			delete(e.records, k)
+		}
+	}
 }
 
 // revisioned 是一条注册项连同它在 etcd 里的创建版本号（越大越晚注册）。
