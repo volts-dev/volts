@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -325,6 +326,14 @@ func HttpReverseProxy(ctx *THttpContext) {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// 调用方自己走了（浏览器跳页、关标签、取消 fetch）：入站请求的 context 被取消，
+			// RoundTrip 随之以 context.Canceled 收场。上游节点什么错都没有 —— 既不是故障
+			// 日志，更不能上报熔断：此前连着三次跳页就把一个健康节点踢出 10s，单节点服务
+			// 随即落进 fail-open 告警（日志中心：website 一天 600 余条）。也不用回 502，没人收。
+			if canceledByClient(r, err) {
+				log.Dbgf("http: proxy request canceled by client | Method: %s | Path: %s | Target: %s", r.Method, r.URL.Path, service)
+				return
+			}
 			log.Errf("http: proxy error: %v | Method: %s | Path: %s | Target: %s", err, r.Method, r.URL.Path, service)
 			// 连不上/超时/连接被重置才是节点级故障，上报给 selector。
 			markNode(err)
@@ -340,6 +349,13 @@ func HttpReverseProxy(ctx *THttpContext) {
 	}
 
 	proxy.ServeHTTP(ctx.Response(), inReq)
+}
+
+// canceledByClient 判断一次代理失败是不是调用方自己取消的：入站请求的 context 已经结束，
+// 且错误链里是 context.Canceled。两者都要 —— 上游自己报出 canceled 而调用方还在等的情况
+// 仍按故障处理。
+func canceledByClient(r *http.Request, err error) bool {
+	return r.Context().Err() != nil && errors.Is(err, context.Canceled)
 }
 
 // proxyPathWithPrefix 把被 PathRewriter 摘掉的前缀拼回上游路径。
