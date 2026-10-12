@@ -103,4 +103,8 @@ func TestStore_LocalCatchAllShieldsRivalProxyCatchAll(t *testing.T) {
 	if rt := r.tree.RouteOf("GET", "/*"); rt != nil {
 		t.Error("代理来的 /* 仍被挂进了树里：它永远匹配不到，只会在每轮刷新里报告警")
 	}
+	// 本地兜底挡住别人的通配是设计内的常态，不是 filteSelf 没认出自己：不许记进那条护盾告警。
+	if _, reported := r.shieldedServices.Load("website"); reported {
+		t.Error("通配同位被当成「filteSelf 没认出自己」报了护盾告警（真栈 connect_components 启动即报一条）")
+	}
 }

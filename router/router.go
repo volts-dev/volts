@@ -803,26 +803,38 @@ func filteHttpNodes(srv *registry.Service) *registry.Service {
 
 // hasLocalRoute 判断 (methods, path) 是否已由本进程的**本地** handler 提供。
 // 按路由模式串精确查（不是拿请求路径去匹配通配），因此只有"同一条路由"才算命中。
-// 认不出 handler 类型时按本地处理：宁可少建一条代理路由，也不冒覆盖本地 handler 的险。
-//
-// 通配例外：末段是通配时，同一位置上文本不同的**本地**通配（`/*rootref` 之于代理来的
-// `/*`）也算命中。树里两个通配并列时只有先插入的那个能匹配到，而本地通配总是先挂上，
-// 所以那条代理路由挂上去也永远到不了 —— 只剩每次服务发现一条「争同一位置」的告警
-// （2026-10 日志中心：connect_components 每次启动 168 条）。
 func (self *TRouter) hasLocalRoute(methods []string, path string) bool {
-	isLocal := func(r *route) bool {
-		if r == nil {
-			return false
+	for _, m := range methods {
+		if isLocalRoute(self.tree.RouteOf(m, path)) {
+			return true
 		}
-		for _, id := range r.Handlers() {
-			if h := defaultHandlerManager.Model(id); h == nil || h.Type != ProxyHandler {
-				return true
-			}
+	}
+	return false
+}
+
+// hasLocalCatchAllRival 判断 path 末段的通配在同一位置上是否已被文本不同的**本地**通配
+// 占住（`/*rootref` 之于代理来的 `/*`）。树里两个通配并列时只有先插入的那个能匹配到，而
+// 本地通配总是先挂上，所以那条代理路由挂上去也永远到不了 —— 只剩每次服务发现一条「争同一
+// 位置」的告警（2026-10 日志中心：connect_components 每次启动 168 条）。
+//
+// 与 hasLocalRoute 分开：同路径的本地路由被发现结果覆盖，说明 filteSelf 没认出自己，值得
+// 告警；而本地兜底通配挡住别人的通配是设计内的常态（OpLocalOnly 的兜底只在本进程生效）。
+func (self *TRouter) hasLocalCatchAllRival(methods []string, path string) bool {
+	for _, m := range methods {
+		if isLocalRoute(self.tree.CatchAllRivalOf(m, path)) {
+			return true
 		}
+	}
+	return false
+}
+
+// isLocalRoute 认不出 handler 类型时按本地处理：宁可少建一条代理路由，也不冒覆盖本地 handler 的险。
+func isLocalRoute(r *route) bool {
+	if r == nil {
 		return false
 	}
-	for _, m := range methods {
-		if isLocal(self.tree.RouteOf(m, path)) || isLocal(self.tree.CatchAllRivalOf(m, path)) {
+	for _, id := range r.Handlers() {
+		if h := defaultHandlerManager.Model(id); h == nil || h.Type != ProxyHandler {
 			return true
 		}
 	}
@@ -936,6 +948,10 @@ func (self *TRouter) store(services []*registry.Service) (deferred bool) {
 				// 在任何拓扑下都不会更对。
 				if self.hasLocalRoute(sep.Method, sep.Path) {
 					shielded++
+					continue
+				}
+				if self.hasLocalCatchAllRival(sep.Method, sep.Path) {
+					log.Dbgf("router: %s 的通配端点 %s 与本进程的本地通配同位，未建代理路由", service.Name, sep.Path)
 					continue
 				}
 
