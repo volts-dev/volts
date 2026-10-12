@@ -14,8 +14,13 @@ var (
 	defaultRegistry   IRegistry
 	ErrNotFound       = errors.New("service not found") // Not found error when GetService is called
 	ErrWatcherStopped = errors.New("watcher stopped")   // Watcher stopped error when watcher is stopped
-	registryMap       = make(map[string]func(opts ...Option) IRegistry)
-	registryHost      sync.Map
+	// ErrWatchHistoryLost: the backend dropped the history the watch was resuming
+	// from (etcd compaction). The watcher must be recreated and anything that
+	// changed in the gap is only picked up by the next full list — an expected,
+	// self-healing condition, not a fault.
+	ErrWatchHistoryLost = errors.New("watch history compacted")
+	registryMap         = make(map[string]func(opts ...Option) IRegistry)
+	registryHost        sync.Map
 )
 
 type (
