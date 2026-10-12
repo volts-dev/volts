@@ -528,7 +528,13 @@ func (self *handler) init(router *TRouter) {
 		for i := 0; i < ctrl.NumField(); i++ {
 			midVal = ctrl.Field(i) // get the middleware value
 			if !midVal.CanSet() {
-				log.Warnf("Field %s in controller %s is not exported and cannot be set.", ctrl.Type().Field(i).Name, self.ctrlName)
+				// 只有**内嵌**的未导出字段才可能是一个绑不上的中间件（`type myMid struct`
+				// 嵌进控制器）；具名的未导出字段是控制器自己的私有状态（evalCache、
+				// requestBaseUrl……），本来就不归中间件注入管。此前对两者一律告警，
+				// 每个控制器每次初始化刷一条，真正该看的那种淹在里面。
+				if f := ctrl.Type().Field(i); f.Anonymous {
+					log.Warnf("Embedded field %s in controller %s is not exported and cannot be set; a middleware embedded this way never binds.", f.Name, self.ctrlName)
+				}
 				continue
 			}
 

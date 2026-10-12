@@ -74,3 +74,33 @@ func TestEndpoints_SkipLocalOnlyRoutes(t *testing.T) {
 		t.Error("OpLocalOnly 的路由在本进程里也匹配不到了 —— 它只该退出注册中心，不该退出路由树")
 	}
 }
+
+// connect_components 自己挂着本地兜底 `/*rootref`，又从注册中心发现了 website 的 `/*`。
+// 本地通配先挂上，代理来的 `/*` 挂上去也永远匹配不到 —— 此前照挂不误，每次服务发现报一条
+// 「争同一位置」（日志中心 2026-10：一个进程 168 条）。本地通配要像同路径的本地路由一样
+// 挡住它：不建、不报。
+func TestStore_LocalCatchAllShieldsRivalProxyCatchAll(t *testing.T) {
+	var got []string
+	prev := onCatchAllRival
+	onCatchAllRival = func(existing, incoming *route) {
+		got = append(got, routeOwner(incoming)+" vs "+routeOwner(existing))
+	}
+	t.Cleanup(func() { onCatchAllRival = prev })
+
+	r := newReclaimRouter(t)
+	grp := NewGroup(WithAloneService(true, "connect_components"))
+	grp.Url([]string{"GET"}, "/*rootref", func(ctx *THttpContext) {}).WithOp(OpLocalOnly())
+	r.RegisterGroup(grp)
+
+	r.store([]*registry.Service{catchAllSvc("website", "192.0.2.2:36399", "/*")})
+
+	if len(got) != 0 {
+		t.Errorf("本地通配已占住位置，代理来的 /* 不该再挂上去报争位：%v", got)
+	}
+	if route, _ := r.tree.Match("GET", "/anything"); route == nil || route.Path() != "/*rootref" {
+		t.Error("本地 /*rootref 不再是这个位置上的匹配结果")
+	}
+	if rt := r.tree.RouteOf("GET", "/*"); rt != nil {
+		t.Error("代理来的 /* 仍被挂进了树里：它永远匹配不到，只会在每轮刷新里报告警")
+	}
+}

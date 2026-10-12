@@ -804,16 +804,26 @@ func filteHttpNodes(srv *registry.Service) *registry.Service {
 // hasLocalRoute 判断 (methods, path) 是否已由本进程的**本地** handler 提供。
 // 按路由模式串精确查（不是拿请求路径去匹配通配），因此只有"同一条路由"才算命中。
 // 认不出 handler 类型时按本地处理：宁可少建一条代理路由，也不冒覆盖本地 handler 的险。
+//
+// 通配例外：末段是通配时，同一位置上文本不同的**本地**通配（`/*rootref` 之于代理来的
+// `/*`）也算命中。树里两个通配并列时只有先插入的那个能匹配到，而本地通配总是先挂上，
+// 所以那条代理路由挂上去也永远到不了 —— 只剩每次服务发现一条「争同一位置」的告警
+// （2026-10 日志中心：connect_components 每次启动 168 条）。
 func (self *TRouter) hasLocalRoute(methods []string, path string) bool {
-	for _, m := range methods {
-		r := self.tree.RouteOf(m, path)
+	isLocal := func(r *route) bool {
 		if r == nil {
-			continue
+			return false
 		}
 		for _, id := range r.Handlers() {
 			if h := defaultHandlerManager.Model(id); h == nil || h.Type != ProxyHandler {
 				return true
 			}
+		}
+		return false
+	}
+	for _, m := range methods {
+		if isLocal(self.tree.RouteOf(m, path)) || isLocal(self.tree.CatchAllRivalOf(m, path)) {
+			return true
 		}
 	}
 	return false
@@ -1022,7 +1032,14 @@ func (self *TRouter) watch() {
 		for {
 			res, err := w.Next()
 			if err != nil {
-				log.Errf("error getting next endpoint: %v", err)
+				if errors.Is(err, registry.ErrWatchHistoryLost) {
+					// etcd 压缩掉了 watch 续接所需的历史：重建 watcher 即可，空档里的
+					// 变更由 refresh() 的下一轮全量对账补上。这是自愈的常态，不是故障 ——
+					// 此前按 ERR 记，每次压缩每个进程各一条。
+					log.Warnf("router: registry watch history was compacted, re-watching (gap is reconciled by the next refresh): %v", err)
+				} else {
+					log.Errf("error getting next endpoint: %v", err)
+				}
 				cancel()
 				break
 			}

@@ -298,6 +298,48 @@ func (self *TTree) RouteOf(method string, path string) *route {
 	return p.Route
 }
 
+// CatchAllRivalOf 返回与模式串 path 的末段通配争同一位置、但文本不同的那条已注册路由
+// （`/*` 之于 `/*rootref`），没有则 nil。path 末段不是通配时恒为 nil。
+//
+// 与 RouteOf 同一把尺子定位父节点；判「争位置」与 addNode 里告警用的 catchAllRival 是
+// 同一个函数，store() 据此在建代理路由之前就让本地通配挡住它，而不是挂上去再报告警。
+func (self *TTree) CatchAllRivalOf(method string, path string) *route {
+	method = strings.ToUpper(method)
+
+	self.RLock()
+	defer self.RUnlock()
+
+	root := self.root[method]
+	if root == nil {
+		return nil
+	}
+
+	nodes, err := self.parsePath(path, routeDelimitChar)
+	if err != nil || len(nodes) == 0 {
+		return nil
+	}
+
+	p := root
+	for i := 0; i < len(nodes)-1; i++ {
+		var next *treeNode
+		for _, n := range p.Children {
+			if n.Equal(nodes[i]) {
+				next = n
+				break
+			}
+		}
+		if next == nil {
+			return nil
+		}
+		p = next
+	}
+
+	if rival := catchAllRival(p, nodes[len(nodes)-1]); rival != nil {
+		return rival.Route
+	}
+	return nil
+}
+
 // delete the route
 func (self *TTree) DelRoute(path string, route *route) error {
 	if route == nil {
