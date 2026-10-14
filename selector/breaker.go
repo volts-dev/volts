@@ -1,6 +1,7 @@
 package selector
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,15 @@ const (
 	healthPurgeInterval = 5 * time.Minute
 	// healthEntryTTL 超过此时长未被访问的条目视为陈旧（节点已下线）。
 	healthEntryTTL = 10 * time.Minute
+
+	// failOpenLogEvery 同一组服务的 fail-open 告警最多每这么久记一条。
+	//
+	// fail-open 发生在**每一次选点**上：单节点服务的那个节点一熔断，冷却期（10s 起、
+	// 退避到 2min）里打向它的每个请求都走一遍 filterHealthy。属主进程重启（kylin 冷启动
+	// 要几分钟）时，websvc / connect_components 上一次重启就是几十上百条同一句话
+	// （日志中心 2026-10-14：两组合计 1600 余条），把真正的新告警淹掉。限频不改行为，
+	// 只把「这一分钟里又放行了 N 次」并进下一条。
+	failOpenLogEvery = time.Minute
 )
 
 type (
@@ -54,6 +64,15 @@ type (
 
 		purgeMu   sync.Mutex
 		lastPurge time.Time
+
+		// fail-open 告警限频，见 failOpenLogEvery。键是参与这次选点的服务名（排序后拼接）。
+		failOpenMu sync.Mutex
+		failOpen   map[string]*failOpenLog
+	}
+
+	failOpenLog struct {
+		last       time.Time
+		suppressed int // 上一条告警之后被并掉的次数
 	}
 )
 
@@ -204,9 +223,47 @@ func (self *healthTracker) filterHealthy(services []*registry.Service) []*regist
 
 	if total > 0 && kept == 0 {
 		// fail-open：宁可把请求发给可能已恢复的节点，也不制造一次完全不可用。
-		log.Warnf("%d 个候选节点全部处于熔断状态，本次放行全部节点(fail-open)", total)
+		self.warnFailOpen(services, total)
 		return services
 	}
 
 	return out
+}
+
+// warnFailOpen 记一条 fail-open 告警，同一组服务每 failOpenLogEvery 最多一条。
+//
+// 告警里点名服务：此前只有「1 个候选节点」，几个服务同时熔断时分不出是谁。
+func (self *healthTracker) warnFailOpen(services []*registry.Service, total int) {
+	names := make([]string, 0, len(services))
+	for _, svc := range services {
+		names = append(names, svc.Name)
+	}
+	sort.Strings(names)
+	key := strings.Join(names, ",")
+
+	now := time.Now()
+	self.failOpenMu.Lock()
+	if self.failOpen == nil {
+		self.failOpen = make(map[string]*failOpenLog)
+	}
+	st := self.failOpen[key]
+	if st == nil {
+		st = &failOpenLog{}
+		self.failOpen[key] = st
+	}
+	if !st.last.IsZero() && now.Sub(st.last) < failOpenLogEvery {
+		st.suppressed++
+		self.failOpenMu.Unlock()
+		return
+	}
+	suppressed := st.suppressed
+	st.last, st.suppressed = now, 0
+	self.failOpenMu.Unlock()
+
+	if suppressed > 0 {
+		log.Warnf("服务 %s 的 %d 个候选节点全部处于熔断状态，本次放行全部节点(fail-open)；上一条之后另有 %d 次同样放行未单独记录",
+			key, total, suppressed)
+		return
+	}
+	log.Warnf("服务 %s 的 %d 个候选节点全部处于熔断状态，本次放行全部节点(fail-open)", key, total)
 }

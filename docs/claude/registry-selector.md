@@ -18,6 +18,10 @@ Two rules that are easy to get wrong:
 
 When every node of a service is tripped the filter **fails open** and returns them all: a
 breaker that removes 100% of capacity is worse than the failure it guards against.
+That fail-open happens on *every* selection during the cooldown, so its warning is
+throttled per service set (`failOpenLogEvery`, one line a minute carrying the count it
+swallowed): a single-node owner cold-starting for a few minutes used to log hundreds of
+identical lines per peer process.
 
 ## Endpoint-aware node selection
 

@@ -282,3 +282,36 @@ func TestBreakerNoBackoffWithoutMax(t *testing.T) {
 		t.Fatalf("冷却时长 %v 明显短于配置的 200ms", second)
 	}
 }
+
+// fail-open 告警按服务限频：放行行为每次都在，告警一分钟一条。单节点服务的属主进程冷启动
+// 那几分钟里，每个打向它的请求都会走到 fail-open，此前一次重启就是上百条同一句话。
+func TestFailOpenWarningIsThrottledPerService(t *testing.T) {
+	h := &healthTracker{}
+	cfg := testConfig()
+	for i := 0; i < 3; i++ {
+		h.mark("solo", "a", errBoom, cfg)
+		h.mark("other", "b", errBoom, cfg)
+	}
+
+	for i := 0; i < 5; i++ {
+		if ids := nodeIds(h.filterHealthy([]*registry.Service{svc("solo", "a")})); !contains(ids, "a") {
+			t.Fatalf("全部熔断时必须 fail-open 放行，第 %d 次剩余 = %v", i, ids)
+		}
+	}
+	if st := h.failOpen["solo"]; st == nil || st.suppressed != 4 {
+		t.Fatalf("同一服务一分钟内应只记 1 条、并掉 4 条，得到 %+v", st)
+	}
+
+	// 别的服务有自己的窗口，不被 solo 的限频吞掉。
+	h.filterHealthy([]*registry.Service{svc("other", "b")})
+	if st := h.failOpen["other"]; st == nil || st.suppressed != 0 || st.last.IsZero() {
+		t.Fatalf("other 的第一条应当照记，得到 %+v", st)
+	}
+
+	// 窗口过去之后再记一条，并清零计数。
+	h.failOpen["solo"].last = time.Now().Add(-2 * failOpenLogEvery)
+	h.filterHealthy([]*registry.Service{svc("solo", "a")})
+	if st := h.failOpen["solo"]; st.suppressed != 0 {
+		t.Fatalf("窗口过后应记一条并清零，得到 %+v", st)
+	}
+}
