@@ -183,6 +183,7 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 - 一个服务名可能由**多个进程**在服务而端点集不同：合并按版本**加端点集指纹**（`registry.EndpointsKey`），选点按被调端点过滤（`selector.FilterEndpointIfKnown`，没人声明该端点时失败打开）。
 - **两跳反代之间 `X-Forwarded-*` 要接着传**：Go 的 Rewrite 会按这一跳的 Host 重写，第二跳就把最初的 Host / https / 客户端 IP 全丢了（属主进程按内网地址认租户）。内部跳（带跳数头 + 环回/内网对端）保留上一跳写的，边缘跳照旧重写。
 - **注册项签名是进程级的 `registry.SetRecordSecurity`**：写入前在节点**副本**上签（一次注册里所有服务共用一个 `*Node`），读出后**合并之前**逐条验，验不过的不进结果、不进缓存；watch 的删除不验。只有 etcd 后端接了。
+- **etcd 后端不许用只读 Txn**：etcd 3.5.4 下客户端一超时就把 etcd 整个 panic 掉（10-14 一天 14 次）。同一快照的多次读用几个 `Get` + `WithRev(第一次的 Revision)`。
 - 注册中心驱动的路由更新：**只给 HTTP 端点建代理路由**（RPC 侧没有反向代理实现）；**本地路由永远赢过发现来的代理路由**（`hasLocalRoute` 那道盾）；服务下线的代理路由要**回收**，否则那条路径永远回 503。
 
 ### 消息总线 — [docs/claude/broker.md](docs/claude/broker.md)

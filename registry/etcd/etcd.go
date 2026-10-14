@@ -467,7 +467,7 @@ func (e *etcdRegistry) ListServices() ([]*registry.Service, error) {
 // rangePrefix 读前缀 p 下的全部键值；自上次整段读之后什么都没变时，只花两次只计数的
 // 查询，返回上次的结果。
 //
-// 「没变」的判据（同一个只读事务里）：键数与上次相同，且没有任何键的 ModRevision 晚于
+// 「没变」的判据（同一个库版本上的两次读）：键数与上次相同，且没有任何键的 ModRevision 晚于
 // 上次读的库版本（只取键的过滤查询回空）。新建 / 修改必然产生更晚的 ModRevision；删除（含租约到期）不留键，
 // 但会让键数变少 —— 删一建一时，建的那条照样被第二个条件抓到。
 //
@@ -479,22 +479,28 @@ func (e *etcdRegistry) rangePrefix(ctx context.Context, p string) ([]*mvccpb.Key
 	e.rangeMu.Unlock()
 
 	if c != nil {
-		rsp, err := e.client.Txn(ctx).Then(
-			clientv3.OpGet(p, clientv3.WithPrefix(), clientv3.WithCountOnly(), clientv3.WithSerializable()),
-			// 只取键、不计数：带 MinModRev 过滤时 etcd 回的 Count 是**过滤前**的键数，
-			// 判不出「有没有更新过的」。没变时这一项回空，照样只有几十字节。
-			clientv3.OpGet(p, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable(),
-				clientv3.WithMinModRev(c.rev+1)),
-		).Commit()
+		// ★ 两次 Get 钉在同一个库版本上，**不能**合成一个只读 Txn。
+		//
+		// etcd 3.5.4（本机 brew 装的就是它）的只读 Txn 走请求路径、用的是客户端的 ctx：
+		// 应用到一半客户端超时或取消，applyTxn 拿到 context canceled / deadline exceeded，
+		// 直接 panic「unexpected error during txn」（apply.go:638），整个 etcd 进程退出。
+		// 负载一高客户端就超时，etcd 一崩全栈注册失败，客户端重试又压上来 —— 2026-10-14
+		// 一天崩了十四次（11:59 开了日志之后 40 分钟里就 11 次），全是这个栈。普通的 Range 被取消只回错误，不会 panic。
+		//
+		// 第二次 Get 带 WithRev(第一次的库版本)，读的是同一个快照：与原来同一事务里两次读等价。
+		cnt, err := e.client.Get(ctx, p, clientv3.WithPrefix(), clientv3.WithCountOnly(), clientv3.WithSerializable())
 		if err != nil {
 			return nil, err
 		}
-		if len(rsp.Responses) == 2 {
-			total := rsp.Responses[0].GetResponseRange().GetCount()
-			newer := len(rsp.Responses[1].GetResponseRange().GetKvs())
-			if total == int64(len(c.kvs)) && newer == 0 {
-				return c.kvs, nil
-			}
+		// 只取键、不计数：带 MinModRev 过滤时 etcd 回的 Count 是**过滤前**的键数，
+		// 判不出「有没有更新过的」。没变时这一项回空，照样只有几十字节。
+		upd, err := e.client.Get(ctx, p, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable(),
+			clientv3.WithMinModRev(c.rev+1), clientv3.WithRev(cnt.Header.Revision))
+		if err != nil {
+			return nil, err
+		}
+		if cnt.Count == int64(len(c.kvs)) && len(upd.Kvs) == 0 {
+			return c.kvs, nil
 		}
 	}
 

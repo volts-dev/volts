@@ -130,3 +130,22 @@ can write etcd could otherwise insert themselves into someone else's call chain.
 - Only the etcd backend calls the hooks.
 
 Regressions: `registry/record_security_test.go`.
+
+## etcd backend: no read-only Txn
+
+etcd **3.5.4** (the brew build on the dev machine) applies a read-only Txn on the request path
+with the client's ctx. If the client times out or cancels mid-apply, `applyTxn` gets
+`context canceled` / `deadline exceeded` and **panics the whole etcd process**
+(`apply.go:638 "unexpected error during txn"`). Under load clients time out, etcd dies, every
+service fails to register, the retries pile on — 2026-10-14 saw 14 crashes in one day, all this
+stack, all from `rangePrefix`'s two-Range Txn. A plain Range that gets cancelled just returns an
+error.
+
+So: when you need several reads from one snapshot, do separate `Get`s and pin the later ones
+with `clientv3.WithRev(<first response's Header.Revision>)` — same consistency, no Txn.
+Txns that carry a write (Compare + Put, as `vectors/cmd/id_node.go` does) go through raft and are
+not affected. Upgrading etcd past 3.5.4 removes the hazard but this rule stays: deployments
+don't get to pick their etcd.
+
+Regression: `registry/etcd/register_rewrite_test.go` `TestRangePrefix_ReusesUntilSomethingChanges`
+(live etcd, test-only prefix).
