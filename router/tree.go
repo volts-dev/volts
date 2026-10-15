@@ -132,11 +132,25 @@ func (self subNodes) Less(i, j int) bool {
 
 	if self[j].Type == StaticNode {
 		return false
-	} else {
-		return self[i].Level > self[j].Level
 	}
+	// 同一位置上的参数：**更具体的先试**——带类型 / 枚举 / 正则的参数排在无类型参数前面，通配最后。
+	// 原来只比 Level（同一层的兄弟总是相等），谁先试取决于插入顺序：`/web/image/{id:int}` 与 `/web/image/{xmlid}`
+	// 并列时，后者先挂上就把数字 id 也吞了（TestTypedParamTriedBeforeUntypedSibling）。
+	if si, sj := paramSpecificity(self[i]), paramSpecificity(self[j]); si != sj {
+		return si > sj
+	}
+	return self[i].Level > self[j].Level
+}
 
-	//return i < j
+// paramSpecificity 给非静态节点排先后：正则 / 枚举 / 带类型的参数 > 无类型参数 > 通配。
+func paramSpecificity(n *treeNode) int {
+	switch {
+	case n.Type == AnyNode:
+		return 0
+	case n.Type == RegexpNode, len(n.Values) > 0, n.ContentType != AllType:
+		return 2
+	}
+	return 1
 }
 
 func NewRouteTree(opts ...ConfigOption) *TTree {
@@ -852,7 +866,7 @@ func (self *TTree) conbine(target, from *treeNode) {
 	// 或者:遍历添加所有没有的新Node
 	if exist_node == nil {
 		target.Children = append(target.Children, from)
-		sort.Sort(target.Children)
+		sort.Stable(target.Children)
 		return
 	} else {
 		if exist_node.Type == RegexpNode {
@@ -935,7 +949,7 @@ func (self *TTree) addNode(parent *treeNode, nodes []*treeNode, i int, isHook bo
 		onCatchAllRival(rival.Route, nodes[len(nodes)-1].Route)
 	}
 	parent.Children = append(parent.Children, nodes[i])
-	sort.Sort(parent.Children)
+	sort.Stable(parent.Children)
 	return nodes[i]
 }
 
@@ -1039,7 +1053,7 @@ func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode
 		}
 	}
 
-	sort.Sort(parent.Children)
+	sort.Stable(parent.Children)
 	return nodes[i]
 }
 
