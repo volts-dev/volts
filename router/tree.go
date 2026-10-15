@@ -369,12 +369,9 @@ func (self *TTree) DelRoute(path string, route *route) error {
 		// 绑定Route用于删除匹配
 		nodes[len(nodes)-1].Route = route
 
-		var p *treeNode = n // 复制方法对应的Root
-
-		// 层级插入Nodes的Node到Root
-		for idx := range nodes {
-			p = self.delNode(p, nodes, idx)
-		}
+		// delNode 自己逐层递归到末段：只调一次。原来这里再按层循环调它，末段被反复走到——剥 handler
+		// 本身幂等，可计数器每多走一次就多减一次，而剥空后摘掉路由对象（见 delNode）之后再走一次就是空指针。
+		self.delNode(n, nodes, 0)
 	}
 
 	return nil
@@ -1006,6 +1003,9 @@ func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode
 		if n.Equal(nodes[i]) {
 			// 如果:已经到末尾,则为该节点注销路由
 			if i == len(nodes)-1 {
+				if n.Route == nil {
+					return n // 这个位置本来就没有路由（只是别的路由的中间节点）
+				}
 				// 剥离目标控制器
 				n.Route.stripHandler(nodes[i].Route)
 				// 确保计数器不低于 0，避免溢出
@@ -1013,8 +1013,18 @@ func (self *TTree) delNode(parent *treeNode, nodes []*treeNode, i int) *treeNode
 					self.Count.Dec()
 				}
 
-				// 优化:如果该节点没有 Handler 且没有子节点，则将该节点从父节点中移除
-				if len(n.Route.handlers) == 0 && len(n.Children) == 0 {
+				// 剥空了的路由**连对象一起摘掉**（n.Route = nil），不留一个零 handler 的空壳：
+				//   - 匹配只看 `node.Route != nil`，空壳照样被命中 —— 请求落到一条什么都不做的路由上，回
+				//     200 空正文（2026-10-15 真栈：websvc 把 `/courses/{id}` 改名 `{course}` 之后，网关上
+				//     旧的 `{id}` 节点剥空了却还挂着空壳，又排在新兄弟 `{course}` 前面，`/courses/<任何>`
+				//     经网关全是 200 空正文）；
+				//   - 上一层递归的清理判据是 `n.Route == nil`，空壳让它永远不成立，有子节点的旧参数节点
+				//     在子路由回收之后也摘不掉。回归 TestReclaim_ParamRenamedSamePosition。
+				if len(n.Route.handlers) == 0 {
+					n.Route = nil
+				}
+				// 没有路由也没有子节点：把节点从父节点中移除
+				if n.Route == nil && len(n.Children) == 0 {
 					parent.Children = append(parent.Children[:idx], parent.Children[idx+1:]...)
 				}
 			} else {
