@@ -170,3 +170,27 @@ Disguise failure is **completely silent**: drop the `core/ja3` blank import and 
 still compiles, tests pass and requests return 200 — they just go out as Go. Any service
 relying on it needs a wiring guard asserting `outbound.Status()` reports no
 `no-fingerprint` identity.
+
+## URLs you did not write: `WithPublicOnly`
+
+When the target address comes from outside — an AI tool fetching "this page", where the
+URL is chosen by a model whose input a web page can steer — mark the request context with
+`outbound.WithPublicOnly(ctx)`. Without it one sentence makes the server read the local
+etcd (`localhost:2379`), an intranet admin port, or the cloud metadata service (Aliyun
+`100.100.100.200`, AWS/GCP `169.254.169.254`).
+
+It is two gates, and each one has a test that goes red without it (`guard_test.go`):
+
+- **Every hop, at the top of `RoundTrip`**: the host is resolved and every address must be
+  public. Redirects re-enter `RoundTrip`, so "302 to 127.0.0.1" is caught. This gate also
+  covers **pooled connections**: the pool reuses by host:port, so an idle connection that an
+  unguarded request opened to an internal host never goes through the dialer again.
+- **At dial time, on direct connections** (`net.Dialer.Control`): checks the IP actually
+  being connected. The first gate sees one DNS answer and the dialer resolves again; a
+  rebinding domain (TTL 0, public first and loopback second) slips between the two.
+
+Proxied identities only get the first gate — the proxy resolves and connects. With a local
+**fake-IP** proxy (Clash: every domain resolves to `198.18.x.x`), a domain resolving to
+127.0.0.1 is connected by the proxy to its own loopback. Production must not run like that.
+`198.18.0.0/15` and `2001:2::/48` are deliberately **not** blocked: blocking them stops every
+fetch on a fake-IP dev machine, and no real server lives there.

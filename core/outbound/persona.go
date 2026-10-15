@@ -235,7 +235,11 @@ func (p *persona) dialTLS(ctx context.Context, network, addr string) (net.Conn, 
 // dialRaw 建底层 TCP 连接：走本身份的代理，没有代理就直连。
 func (p *persona) dialRaw(ctx context.Context, network, addr string) (net.Conn, error) {
 	if p.out == nil {
-		return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, addr)
+		d := &net.Dialer{Timeout: 10 * time.Second}
+		if publicOnly(ctx) {
+			d.Control = publicDialControl // 第二道闸，见 WithPublicOnly
+		}
+		return d.DialContext(ctx, network, addr)
 	}
 	// transport.NewProxyDialer 回的三种（HTTP CONNECT / HTTPS CONNECT / SOCKS5）
 	// 都实现了 ContextDialer。退路留着是因为 proxy.Dialer 接口本身不要求它 ——

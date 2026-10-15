@@ -211,3 +211,4 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 
 - `core/ja3` 是**独立 Go module**，blank import 才启用（主模块因此不依赖 utls）。**优先用预设名而不是 JA3 串** —— JA3 只记扩展 id 不记内容，手抄出来的是一个"谁也不是"的客户端。没导入子模块却设了指纹会返回 `ErrJa3NotRegistered`，绝不静默退回普通 TLS。
 - `core/outbound` 打的是第三方站点（`client/` 打的是自己人）。**一个身份 = 指纹 + UA + 客户端提示 + 出口 IP，各自独立连接池**；**被拒不是传输错误**（403/429 要换身份并丢掉空闲连接）；**一个出口就只该有一个身份**，多出来的指纹当预备队，只在现役全在冷却时才上；**配了代理不许静默直连**（`allow_direct` 默认 false）。
+- **网址不是自己写的（AI 工具"抓这个网页"）就标 `outbound.WithPublicOnly(ctx)`**：每一跳 RoundTrip 先解析、全是公网才放（挡重定向与连接池里通往内网的旧连接），直连拨号时再查一次实际 IP（挡 DNS rebinding）。198.18.0.0/15 故意不拦（fake-IP 代理的假地址）；100.64.0.0/10 要拦（阿里云元数据）。

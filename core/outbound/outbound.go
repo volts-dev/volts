@@ -434,6 +434,12 @@ func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err := r.err(); err != nil {
 		return nil, err
 	}
+	// 第一道闸，见 WithPublicOnly。重定向的每一跳都会回到这里。
+	if publicOnly(req.Context()) {
+		if err := checkPublicHost(req.Context(), req.URL.Hostname()); err != nil {
+			return nil, err
+		}
+	}
 
 	var (
 		firstErr error
