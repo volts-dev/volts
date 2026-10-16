@@ -258,6 +258,14 @@ func (self *TLogger) RemoveWriter(name string) error {
 	return nil
 }
 
+// admits：这一级的日志会不会被写出。**格式化之前**判：参数可能很贵（qweb 每个 t-call 的调试日志带着整个
+// 渲染上下文，按键排序打印一遍，调试级别关着时也照付——2026-10-16 网店类目页 CPU 的四分之一）。
+// 与 manager.write 里那道闸同一个判据，被它拦下的本来就不写、也不进 sink，所以提前返回不改行为。
+// Err / Errf / Panic / Fatal 不提前返回：它们的返回值或 panic 要那条消息。
+func (self *TLogger) admits(level Level) bool {
+	return Level(self.manager.level.Load()).Admits(level)
+}
+
 func (self *TLogger) GetLevel() Level {
 	return Level(self.manager.level.Load())
 }
@@ -359,6 +367,9 @@ func (self *TLogger) Critical(format string, v ...interface{}) {
 
 // Log INFORMATIONAL level message.
 func (self *TLogger) Infof(format string, v ...interface{}) {
+	if !self.admits(LevelInfo) {
+		return
+	}
 	msg := fmt.Sprintf("[INFO] "+format, v...)
 	self.manager.write(LevelInfo, msg)
 }
@@ -377,6 +388,9 @@ func (self *TLogger) Fatalf(format string, args ...interface{}) {
 
 // Log WARNING level message.
 func (self *TLogger) Warnf(format string, v ...interface{}) {
+	if !self.admits(LevelWarn) {
+		return
+	}
 	msg := fmt.Sprintf("[WARN] "+format, v...)
 	self.manager.write(LevelWarn, msg)
 }
@@ -390,29 +404,44 @@ func (self *TLogger) Errf(format string, v ...interface{}) error {
 
 // Log DEBUG level message.
 func (self *TLogger) Dbgf(format string, v ...interface{}) {
+	if !self.admits(LevelDebug) {
+		return
+	}
 	msg := fmt.Sprintf("[DBG] "+format, v...)
 	self.manager.write(LevelDebug, msg)
 }
 
 func (self *TLogger) Tracef(format string, v ...interface{}) {
+	if !self.admits(LevelTrace) {
+		return
+	}
 	msg := fmt.Sprintf("[TRACE] "+format, v...)
 	self.manager.write(LevelTrace, msg)
 }
 
 // Log Attack level message.
 func (self *TLogger) Atkf(format string, v ...interface{}) {
+	if !self.admits(LevelAttack) {
+		return
+	}
 	msg := fmt.Sprintf("[ATK] "+format, v...)
 	self.manager.write(LevelAttack, msg)
 }
 
 // Log INFORMATIONAL level message.
 func (self *TLogger) Info(v ...interface{}) {
+	if !self.admits(LevelInfo) {
+		return
+	}
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelInfo, "[INFO] "+msg)
 }
 
 // Log WARNING level message.
 func (self *TLogger) Warn(v ...interface{}) {
+	if !self.admits(LevelWarn) {
+		return
+	}
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelWarn, "[WARN] "+msg)
 }
@@ -443,18 +472,27 @@ func (self *TLogger) Fatal(v ...interface{}) {
 
 // Log DEBUG level message.
 func (self *TLogger) Dbg(v ...interface{}) {
+	if !self.admits(LevelDebug) {
+		return
+	}
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelDebug, "[DBG] "+msg)
 }
 
 // Log Trace level message.
 func (self *TLogger) Trace(v ...interface{}) {
+	if !self.admits(LevelTrace) {
+		return
+	}
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelTrace, "[TRACE] "+msg)
 }
 
 // Log Attack level message.
 func (self *TLogger) Atk(v ...interface{}) {
+	if !self.admits(LevelAttack) {
+		return
+	}
 	msg := fmt.Sprint(v...)
 	self.manager.write(LevelAttack, "[ATK] "+msg)
 }
