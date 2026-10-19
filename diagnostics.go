@@ -28,7 +28,12 @@ var processRuntimeOnce sync.Once
 func setupProcessRuntime() {
 	switch r := memlimit.Apply(); r.Source {
 	case "cgroup":
-		log.Infof("memory limit: cgroup %s → GC soft limit %s", formatBytes(int64(r.Cgroup)), formatBytes(r.Limit))
+		if b := r.Budget; b.Shared != 0 {
+			log.Infof("memory limit: shared budget %s on %s (own cap %s) → GC soft limit %s, rebalanced every %s",
+				formatBytes(int64(b.Shared)), b.SharedName, formatBytes(int64(b.Own)), formatBytes(r.Limit), memlimit.Interval)
+		} else {
+			log.Infof("memory limit: cgroup %s → GC soft limit %s", formatBytes(int64(b.Own)), formatBytes(r.Limit))
+		}
 	case "GOMEMLIMIT":
 		log.Infof("memory limit: GOMEMLIMIT %s", formatBytes(r.Limit))
 	}
