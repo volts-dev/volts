@@ -45,6 +45,7 @@ type (
 
 // NewService creates and returns a new Service based on the packages within.
 func New(opts ...Option) IService {
+	processRuntimeOnce.Do(setupProcessRuntime)
 	return &service{
 		config: newConfig(opts...),
 	}
