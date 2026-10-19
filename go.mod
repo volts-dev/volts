@@ -3,7 +3,6 @@ module github.com/volts-dev/volts
 go 1.27
 
 require (
-	github.com/bwmarrin/snowflake v0.3.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getkin/kin-openapi v0.144.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
