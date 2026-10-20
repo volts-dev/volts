@@ -105,6 +105,7 @@ Because the framework serves HTTP and RPC from separate handler objects (the han
 | `logger/` | Self-contained leveled logger (writer manager + console writer, plus process-wide structured `Sink`s). **Not** built on zap — `go.uber.org/zap` is pulled in only by `registry/etcd` for clientv3's `LogConfig` |
 | `internal/` | Shared utilities (pool, metadata, TLS helpers, mDNS, ACME, backoff) |
 | `core/outbound/` | Outbound HTTP for scraping **third-party** sites — browser identity rotation (TLS fingerprint + UA + client hints + proxy exit). See "Outbound: talking to strangers" |
+| `core/memory/` | Process memory budget → GC soft limit (cgroup / `VOLTS_MEMORY_RESERVE` host reserve / `GOMEMLIMIT`), OS pressure signals, and the `Reclaimer` registry caches use to shed under pressure. Applied once in `volts.New`. Only register caches whose entries can be recomputed |
 | `config/` | Config tree: `Bind(path, ptr)` binds a plain struct, nested structs are subsections; load/validate/lint/report/hot-reload walk the struct graph. viper is the file codec only — layering, provenance and diff-persistence live in this package (see "Config: the tree is the struct graph") |
 
 ### Service Lifecycle

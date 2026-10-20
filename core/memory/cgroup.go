@@ -1,37 +1,10 @@
-// Package memlimit 让 Go 运行时知道本进程能用多少内存。
+package memory
+
+// cgroup.go —— 内核那一侧的预算：从 cgroup 读上限与用量（Linux）。
 //
-// # 为什么需要
-//
-// Go 的 GC 默认只看 GOGC：堆涨到上次存活量的两倍才收。它不知道机器有多大，
-// 也不知道同机还跑着别的进程。一台 3.4G 的机器上跑三个服务进程，每个都按
-// 「存活 ×2 + 尖峰」去要内存，彼此看不见，总和一过物理内存就进 swap ——
-// 缺页 IO 把磁盘打满，而 CPU 几乎是空的（2026-10 阿里云单机就是这样死的）。
-//
-// # 两种上限
-//
-// cgroup（systemd 的 MemoryHigh / MemoryMax）是内核那一侧的线：到线了才回收、
-// 才杀，Go 运行时并不知道。这个包把线读出来，换成 debug.SetMemoryLimit 的软上限。
-//
-//   - **独占**：线设在本进程自己的 cgroup（服务单元）上 —— 软上限 = 线 × Ratio，
-//     启动时设一次。
-//   - **共享**：线设在上层（例如同机所有服务共用的 vs.slice）—— 这条线是大家的，
-//     谁也不能独占。各进程不互相通信，把**内核的账本**当共享状态：每 Interval 读
-//     一次那一层的 memory.current（扣掉可回收的 inactive_file），按自己占的比例分
-//     剩下的空间：
-//
-//     软上限 = 自己 + (预算×Ratio − 大家) × 自己/大家
-//
-//     各进程的软上限加起来正好是 预算×Ratio。谁冲高（catalog 全量发布），剩下的
-//     空间就变小，别的进程的 GC 跟着收紧；冲高的那个也不会被拒绝分配 —— 软上限
-//     只让 GC 更勤，不是硬墙。
-//
-// 两种都有时取小的。
-//
-// # 优先级
-//
-// 显式的 GOMEMLIMIT 环境变量永远赢（包括 GOMEMLIMIT=off）—— 运行时启动时已经
-// 读过它，这里什么都不做。没有 cgroup 上限（本机开发、没配的部署）也什么都不做。
-package memlimit
+// 独占：线设在本进程自己的 cgroup（服务单元）上 —— 软上限 = 线 × Ratio。
+// 共享：线设在上层（例如同机所有服务共用的 vs.slice）—— 各进程不互相通信，把**内核
+// 的账本**当共享状态，按自己占的比例分剩下的空间（SharedLimit）。
 
 import (
 	"bufio"
@@ -39,23 +12,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime/debug"
-	"runtime/metrics"
 	"strconv"
 	"strings"
-	"time"
 )
-
-// Ratio 软上限占 cgroup 上限的比例。剩下的 10% 留给 Go 运行时不计入的部分
-// （mmap 的文件页、cgo、线程栈）以及 GC 收紧到位之前的那一段过冲。
-const Ratio = 0.9
-
-// Interval 共享预算下重算软上限的间隔。
-const Interval = 5 * time.Second
-
-// MinLimit 共享预算下软上限的下限。软上限低于存活堆时 Go 会把 GC 的 CPU 封顶在
-// 约 50%，不会死循环，但没必要把一个小进程压到那一步。
-const MinLimit = 64 << 20
 
 // v1Unlimited cgroup v1 不设上限时 limit_in_bytes 是一个接近 2^63 的页对齐值。
 const v1Unlimited = 1 << 62
@@ -66,64 +25,6 @@ type Budget struct {
 	Shared     uint64 // 上层（多个进程共用）的上限，0 = 没有
 	SharedDir  string // Shared 所在的 cgroup 目录（读 memory.current / memory.stat）
 	SharedName string // 那一层的 cgroup 路径，日志用
-}
-
-// Result Apply 做了什么。
-type Result struct {
-	Source string // "GOMEMLIMIT" / "cgroup" / ""
-	Budget Budget
-	Limit  int64 // 当前设给运行时的软上限（字节），0 = 没设
-}
-
-// Apply 按 cgroup 上限设置运行时的软内存上限；共享预算时起一个后台协程按
-// Interval 重算。每个进程调一次。
-func Apply() Result {
-	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
-		return Result{Source: "GOMEMLIMIT", Limit: debug.SetMemoryLimit(-1)}
-	}
-	self, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil {
-		return Result{}
-	}
-	b := FindBudget("/", self)
-	if b.Own == 0 && b.Shared == 0 {
-		return Result{}
-	}
-	limit := b.limit(goMemory(), sharedUsage(b.SharedDir))
-	debug.SetMemoryLimit(limit)
-	if b.Shared != 0 {
-		go b.loop(limit)
-	}
-	return Result{Source: "cgroup", Budget: b, Limit: limit}
-}
-
-func (self Budget) loop(last int64) {
-	t := time.NewTicker(Interval)
-	defer t.Stop()
-	for range t.C {
-		next := self.limit(goMemory(), sharedUsage(self.SharedDir))
-		// 变化不到 2% 不动：SetMemoryLimit 本身便宜，但没必要每 5 秒抖一次。
-		if d := next - last; d > last/50 || -d > last/50 {
-			debug.SetMemoryLimit(next)
-			last = next
-		}
-	}
-}
-
-// limit 按上限与当前用量算软上限。mine = 本进程 Go 运行时占的内存；used = 共享
-// 那一层所有进程的用量（读不到时为 0）。
-func (self Budget) limit(mine, used uint64) int64 {
-	var lim int64
-	if self.Own != 0 {
-		lim = int64(float64(self.Own) * Ratio)
-	}
-	if self.Shared != 0 {
-		s := SharedLimit(self.Shared, used, mine)
-		if lim == 0 || s < lim {
-			lim = s
-		}
-	}
-	return lim
 }
 
 // SharedLimit 共享预算下本进程的软上限：自己 + 剩余空间 × 自己/大家。
@@ -141,20 +42,6 @@ func SharedLimit(budget, used, mine uint64) int64 {
 		lim = MinLimit
 	}
 	return int64(lim)
-}
-
-// goMemory 本进程 Go 运行时从系统拿着的内存（总映射减去已还给系统的堆页），
-// 与 GOMEMLIMIT 的口径一致。走 runtime/metrics，不 STW。
-func goMemory() uint64 {
-	s := []metrics.Sample{
-		{Name: "/memory/classes/total:bytes"},
-		{Name: "/memory/classes/heap/released:bytes"},
-	}
-	metrics.Read(s)
-	if s[0].Value.Kind() != metrics.KindUint64 || s[1].Value.Kind() != metrics.KindUint64 {
-		return 0
-	}
-	return s[0].Value.Uint64() - s[1].Value.Uint64()
 }
 
 // sharedUsage 共享那一层当前的工作集：memory.current − inactive_file。

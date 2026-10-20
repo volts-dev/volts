@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/volts-dev/volts/internal/memlimit"
+	"github.com/volts-dev/volts/core/memory"
 )
 
 // EnvPprofAddr 设了就在这个地址上另起一个只服务 /debug/pprof/ 的监听，例如
@@ -26,14 +26,25 @@ var processRuntimeOnce sync.Once
 // 与 RpcServer 两个 service，都会走到这里。放在 New 而不是 Start：冷启动（加载
 // 模块、反查表结构）本身就是内存尖峰，上限要在那之前就位。
 func setupProcessRuntime() {
-	switch r := memlimit.Apply(); r.Source {
-	case "cgroup":
-		if b := r.Budget; b.Shared != 0 {
+	r := memory.Apply()
+	if r.Err != nil {
+		log.Errf("memory limit: %v", r.Err)
+	}
+	b := r.Budget
+	switch r.Source {
+	case "cgroup", "cgroup+host":
+		if b.Shared != 0 {
 			log.Infof("memory limit: shared budget %s on %s (own cap %s) → GC soft limit %s, rebalanced every %s",
-				formatBytes(int64(b.Shared)), b.SharedName, formatBytes(int64(b.Own)), formatBytes(r.Limit), memlimit.Interval)
+				formatBytes(int64(b.Shared)), b.SharedName, formatBytes(int64(b.Own)), formatBytes(r.Limit), memory.Interval)
 		} else {
 			log.Infof("memory limit: cgroup %s → GC soft limit %s", formatBytes(int64(b.Own)), formatBytes(r.Limit))
 		}
+		if r.Source == "cgroup+host" {
+			log.Infof("memory limit: also keeping %s=%s free on the host (the smaller limit wins)", memory.EnvReserve, r.Reserve)
+		}
+	case "host":
+		log.Infof("memory limit: keep %s free on the host (%s) → GC soft limit %s, rebalanced every %s",
+			r.Reserve, memory.EnvReserve, formatBytes(r.Limit), memory.Interval)
 	case "GOMEMLIMIT":
 		log.Infof("memory limit: GOMEMLIMIT %s", formatBytes(r.Limit))
 	}

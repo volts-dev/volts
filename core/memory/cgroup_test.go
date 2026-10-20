@@ -1,4 +1,4 @@
-package memlimit
+package memory
 
 import (
 	"os"
@@ -148,8 +148,8 @@ func TestSharedLimit_UnknownUsage(t *testing.T) {
 }
 
 func TestBudgetLimit_OwnCapsShared(t *testing.T) {
-	b := Budget{Own: 500 * mib, Shared: 2600 * mib}
-	if got := b.limit(100*mib, 300*mib); got != int64(500*mib*Ratio) {
+	c := &controller{budget: Budget{Own: 500 * mib, Shared: 2600 * mib}}
+	if got := c.softLimit(sample{mine: 100 * mib, shared: 300 * mib}); got != int64(500*mib*Ratio) {
 		t.Fatalf("got %d, want own cap %d", got, int64(500*mib*Ratio))
 	}
 }
