@@ -94,6 +94,19 @@ func TestSoftLimit_TakesTheSmallestSource(t *testing.T) {
 	}
 }
 
+// 状态快照里的余量按当前物理内存折算成字节（admin 拿它与主机可用内存比）；没设为 0。
+func TestPublish_ReserveInBytes(t *testing.T) {
+	s := sample{hostOK: true, host: Host{Total: 4000 * mib, Available: 1000 * mib}}
+	publish(&controller{reserve: Reserve{Percent: 15}}, s)
+	if got := Current().Reserve; got != 600*mib {
+		t.Fatalf("15%% of 4000MiB: got %d", got)
+	}
+	publish(&controller{}, s)
+	if got := Current().Reserve; got != 0 {
+		t.Fatalf("没设余量应为 0：got %d", got)
+	}
+}
+
 func TestLevelOf(t *testing.T) {
 	const lim = 1000 * mib
 	cases := []struct {

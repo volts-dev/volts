@@ -171,8 +171,11 @@ type CacheStatus struct {
 
 // Status 本进程内存管理的当前状态，监控上报用。
 type Status struct {
-	Source   string // 同 Result.Source
-	Limit    int64  // 当前软上限，0 = 没设
+	Source string // 同 Result.Source
+	Limit  int64  // 当前软上限，0 = 没设
+	// Reserve 按 EnvReserve 给系统与别的进程留的余量（字节，按当前物理内存折算），
+	// 0 = 没设。主机可用内存跌破它，说明这台机器已经装不下现在这些进程。
+	Reserve  int64
 	Mine     uint64 // Go 运行时占的内存
 	Live     uint64 // 存活堆
 	Level    Level  // 当前回收级别
@@ -196,6 +199,10 @@ func publish(c *controller, s sample) {
 	statusMu.Lock()
 	status.Source = c.source
 	status.Limit = c.effectiveLimit()
+	status.Reserve = 0
+	if c.reserve.set() && s.hostOK {
+		status.Reserve = int64(c.reserve.bytes(s.host.Total))
+	}
 	status.Mine = s.mine
 	status.Live = s.live
 	status.Level = c.level
