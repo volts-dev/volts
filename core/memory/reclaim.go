@@ -39,6 +39,21 @@ type Reclaimer interface {
 	Reclaim(level Level) Usage
 }
 
+// Func 用名字和两个函数拼一个 Reclaimer，登记方不必为每个缓存单写一个类型。
+func Func(name string, usage func() Usage, reclaim func(Level) Usage) Reclaimer {
+	return &funcReclaimer{name: name, usage: usage, reclaim: reclaim}
+}
+
+type funcReclaimer struct {
+	name    string
+	usage   func() Usage
+	reclaim func(Level) Usage
+}
+
+func (self *funcReclaimer) String() string            { return self.name }
+func (self *funcReclaimer) Usage() Usage              { return self.usage() }
+func (self *funcReclaimer) Reclaim(level Level) Usage { return self.reclaim(level) }
+
 var (
 	reclaimersMu sync.Mutex
 	reclaimers   []Reclaimer

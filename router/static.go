@@ -16,6 +16,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/volts-dev/cacher"
 	"github.com/volts-dev/cacher/memory"
+	coremem "github.com/volts-dev/volts/core/memory"
 )
 
 // ------------------------------------------------------------
@@ -31,6 +32,51 @@ func registerStaticStore(s *TStaticStore) {
 	staticStoresMu.Lock()
 	allStaticStores = append(allStaticStores, s)
 	staticStoresMu.Unlock()
+	staticReclaimerOnce.Do(func() {
+		coremem.Register(coremem.Func("router.static", staticCacheUsage, reclaimStaticCaches))
+	})
+}
+
+// 所有静态文件缓存合起来登记成一个 Reclaimer（core/memory）：内存吃紧时让它们让路。
+// 丢掉的文件下次请求从磁盘 / embed 重读 —— 按请求一份一份地读，没有"整表重建"那种
+// 并发踩踏。
+var staticReclaimerOnce sync.Once
+
+func staticStores() []*TStaticStore {
+	staticStoresMu.Lock()
+	defer staticStoresMu.Unlock()
+	return append([]*TStaticStore(nil), allStaticStores...)
+}
+
+// staticCacheUsage 只数条目：字节数要逐条 Get 才拿得到，而 Get 会续空闲期 —— 监控
+// 每 15 秒读一次，就等于让所有条目永不过期。
+func staticCacheUsage() coremem.Usage {
+	var u coremem.Usage
+	for _, s := range staticStores() {
+		u.Entries += s.cache.Len()
+	}
+	return u
+}
+
+// reclaimStaticCaches Trim 丢四分之一（缓存没有按访问时间取键的接口，Keys 的顺序
+// 是 map 的随机序），Shed 以上整份清掉。
+func reclaimStaticCaches(level coremem.Level) coremem.Usage {
+	var freed coremem.Usage
+	for _, s := range staticStores() {
+		before := s.cache.Len()
+		if level == coremem.Trim {
+			keys := s.cache.Keys()
+			for _, k := range keys[:len(keys)/4] {
+				s.cache.Delete(k)
+			}
+		} else {
+			s.cache.Clear()
+		}
+		if d := before - s.cache.Len(); d > 0 {
+			freed.Entries += d
+		}
+	}
+	return freed
 }
 
 // StopAllStaticStores 停止所有 watcher goroutine。
