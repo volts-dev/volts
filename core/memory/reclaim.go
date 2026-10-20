@@ -175,11 +175,16 @@ type Status struct {
 	Limit  int64  // 当前软上限，0 = 没设
 	// Reserve 按 EnvReserve 给系统与别的进程留的余量（字节，按当前物理内存折算），
 	// 0 = 没设。主机可用内存跌破它，说明这台机器已经装不下现在这些进程。
-	Reserve  int64
-	Mine     uint64 // Go 运行时占的内存
-	Live     uint64 // 存活堆
-	Level    Level  // 当前回收级别
-	Pressure Pressure
+	Reserve int64
+	// PausedUntil 自动回收暂停到什么时候（PauseReclaim），零值 = 没暂停。
+	PausedUntil time.Time
+	// ReserveOverrideUntil 临时余量（OverrideReserve）到什么时候，零值 = 没有；有时
+	// Reserve 是临时的那个、Source 带「(override)」。
+	ReserveOverrideUntil time.Time
+	Mine                 uint64 // Go 运行时占的内存
+	Live                 uint64 // 存活堆
+	Level                Level  // 当前回收级别
+	Pressure             Pressure
 
 	LastRun       time.Time // 上一次回收（定时或手动）
 	LastRunLevel  Level
@@ -197,12 +202,16 @@ var (
 // publish controller 每轮结束时更新快照。
 func publish(c *controller, s sample) {
 	statusMu.Lock()
-	status.Source = c.source
+	now := time.Now()
+	paused, _, overrideUntil := controlNow(now)
+	status.Source = c.sourceNow(now)
 	status.Limit = c.effectiveLimit()
 	status.Reserve = 0
-	if c.reserve.set() && s.hostOK {
-		status.Reserve = int64(c.reserve.bytes(s.host.Total))
+	if r := c.reserveNow(now); r.set() && s.hostOK {
+		status.Reserve = int64(r.bytes(s.host.Total))
 	}
+	status.PausedUntil = paused
+	status.ReserveOverrideUntil = overrideUntil
 	status.Mine = s.mine
 	status.Live = s.live
 	status.Level = c.level

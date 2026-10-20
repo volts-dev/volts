@@ -154,15 +154,22 @@ func (self *controller) loop() {
 
 // tick 一轮：重算软上限、判级别、该回收就回收。
 func (self *controller) tick(s sample, now time.Time) {
-	if next := self.softLimit(s); next > 0 {
+	if next := self.softLimitAt(s, now); next > 0 {
 		// 变化不到 2% 不动：SetMemoryLimit 本身便宜，但没必要每 5 秒抖一次。
 		if d := next - self.limit; self.limit == 0 || d > self.limit/50 || -d > self.limit/50 {
 			debug.SetMemoryLimit(next)
 			self.limit = next
 		}
+	} else if self.source == "" {
+		// 临时余量到期 / 撤销，而本来就没有预算来源：还原成不设。有来源时算出 0 是
+		// 一时读不到（cgroup 用量），保持上一个值。
+		self.clearLimit()
 	}
 
 	run := self.step(s, now)
+	if paused, _, _ := controlNow(now); !paused.IsZero() {
+		run = None // 暂停的是丢缓存；级别照判，恢复时不用从头升
+	}
 	if run != None {
 		reclaimAll(run, reasonOf(s, self.effectiveLimit()))
 		self.lastRun = now
@@ -175,7 +182,9 @@ func (self *controller) tick(s sample, now time.Time) {
 
 // softLimit 按各预算来源算本轮的软上限，取小的；都没有回 0。GOMEMLIMIT 模式回 0
 // （不改它）。
-func (self *controller) softLimit(s sample) int64 {
+func (self *controller) softLimit(s sample) int64 { return self.softLimitAt(s, time.Now()) }
+
+func (self *controller) softLimitAt(s sample, now time.Time) int64 {
 	if self.fixed != 0 {
 		return 0
 	}
@@ -191,8 +200,8 @@ func (self *controller) softLimit(s sample) int64 {
 	if self.budget.Shared != 0 {
 		take(SharedLimit(self.budget.Shared, s.shared, s.mine))
 	}
-	if self.reserve.set() && s.hostOK {
-		take(HostLimit(s.host, self.reserve.bytes(s.host.Total), s.mine))
+	if reserve := self.reserveNow(now); reserve.set() && s.hostOK {
+		take(HostLimit(s.host, reserve.bytes(s.host.Total), s.mine))
 	}
 	return lim
 }
