@@ -203,15 +203,12 @@ var (
 func publish(c *controller, s sample) {
 	statusMu.Lock()
 	now := time.Now()
-	paused, _, overrideUntil := controlNow(now)
 	status.Source = c.sourceNow(now)
 	status.Limit = c.effectiveLimit()
 	status.Reserve = 0
 	if r := c.reserveNow(now); r.set() && s.hostOK {
 		status.Reserve = int64(r.bytes(s.host.Total))
 	}
-	status.PausedUntil = paused
-	status.ReserveOverrideUntil = overrideUntil
 	status.Mine = s.mine
 	status.Live = s.live
 	status.Level = c.level
@@ -228,11 +225,13 @@ func recordRun(level Level, reason string, at time.Time, entries int, bytes int6
 	statusMu.Unlock()
 }
 
-// Current 当前状态。各缓存的占用在这里现取（Usage 应当便宜）。
+// Current 当前状态。各缓存的占用与操控的期限在这里现取：刚下的暂停不该等下一轮
+// （≤ Interval）才看得见。软上限、余量字节、来源仍是上一轮的。
 func Current() Status {
 	statusMu.Lock()
 	s := status
 	statusMu.Unlock()
+	s.PausedUntil, _, s.ReserveOverrideUntil = controlNow(time.Now())
 	for _, r := range registered() {
 		s.Caches = append(s.Caches, CacheStatus{Name: r.String(), Usage: r.Usage()})
 	}
