@@ -62,6 +62,9 @@ type (
 		// proxyRoutes 记账 store() 实际建成的代理路由，供服务/端点下线时回收。
 		// 服务名 → map[proxyRouteKey]handlerId，见 proxy_route_reclaim.go。
 		proxyRoutes sync.Map
+		// proxyFingerprints 记每个服务上次建成代理路由时的输入指纹（服务名 → uint64），
+		// 没变就不重建，见 proxy_route_skip.go。
+		proxyFingerprints sync.Map
 		// compressor 是装配期编译好的响应压缩策略；nil 表示不压（默认）。
 		// 请求路径上只剩一次 nil 判断，见 compress.go 顶部对"分流放注册期"的说明。
 		compressor *compressor
@@ -1082,7 +1085,7 @@ func (self *TRouter) watch() {
 			}
 
 			// Update local endpoints.
-			self.store(services)
+			self.storeIfChanged(services, false)
 		}
 
 		cancel()
@@ -1106,6 +1109,7 @@ func (self *TRouter) refresh() {
 		attempts   int
 		maxRetry   = 10
 		deferRetry refreshBackoff
+		round      int
 	)
 
 	for {
@@ -1135,6 +1139,10 @@ func (self *TRouter) refresh() {
 		self.reconcileProxyRoutes(list)
 
 		deferred := false
+		// 每 proxyForceEvery 轮全量重建一次，其余轮次只重建记录变了的服务
+		// （见 proxy_route_skip.go：全量那一轮也是误回收的自愈）。
+		force := round%proxyForceEvery == 0
+		round++
 
 		if len(list) != 0 {
 			attempts = 0
@@ -1155,7 +1163,7 @@ func (self *TRouter) refresh() {
 					}
 					continue
 				}
-				if self.store(services) {
+				if self.storeIfChanged(services, force) {
 					deferred = true
 				}
 			}

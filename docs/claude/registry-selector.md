@@ -93,10 +93,33 @@ only one of them is load-bearing:
   strip is harmless; the check just avoids a pointless write-locked traversal and keeps
   `TTree.Count` (a display counter) honest.
 
-An erroneous reclamation is self-healing: the next `store()` rebuilds the route. Not
-reclaiming is permanent. That is the same bias as `isLocalService` — prefer one extra pass
+An erroneous reclamation is self-healing: the next **forced** `store()` rebuilds the route
+(see the next paragraph — within 10 minutes, no longer every 60s). Not reclaiming is permanent. That is the same bias as `isLocalService` — prefer one extra pass
 over a bad route nothing will ever correct. Regression:
 `router/proxy_route_reclaim_test.go`.
+
+**Unchanged records are not rebuilt** (`router/proxy_route_skip.go`). `refresh()` used to
+`store()` every remote service every 60s whether or not anything changed, and the cacher
+copied every record two or three times on the way (`Copy` before checking the TTL, again
+into the cache, again on return). The registry is dominated by kylin's records (2026-10-23:
+308 entries, 8.5MB, 7.6MB of them kylin's 154 services each carrying its full endpoint
+table), so every process that does *not* host them — connect_components, websvc — rebuilt
+thousands of routes a minute: measured 10.7GB allocated in 3 idle hours, ~32MB per round,
+`registry.Copy` alone 4.3GB against 0.55GB of actual etcd decoding. kylin skips
+its own services via `isLocalService`, which is why only the other two showed it. Now:
+
+- `storeIfChanged` fingerprints exactly what `store()` reads (name, version, node id /
+  address / metadata, endpoint path + methods, this process's identity) and skips when it
+  matches the last *successful* build. Deferred rounds record nothing; `dropProxyRoutes`
+  and the reconcile pass clear the fingerprint, so a service that comes back identical is
+  rebuilt. Every `proxyForceEvery` (10) rounds is a full rebuild — that is the self-heal.
+- The cacher copies under the lock and only when handing out: `update()` mutates cached
+  entries **in place** (`services[i] = …`, `service.Nodes = …`), so a copy outside the lock
+  is a race (`TestCacher_CopyDoesNotRaceWatchUpdate` goes red under `-race`). The cache
+  keeps the backend's object; callers always get their own copy — previously singleflight
+  handed the *same* slice to every concurrent caller.
+
+Regressions: `router/proxy_route_skip_test.go`, `registry/cacher_copy_test.go`.
 
 `registry.Service.Equal` decides (via `TRouter.isLocalService`) whether `refresh()` skips a service entirely, so a wrong `true` means **permanently no route**. It compares name, version, node count, and node ids — historically the whole comparison sat inside `if len(a.Nodes) == len(b.Nodes)` and fell through to `return true` when counts differed, which any zombie node (SIGKILL leaves the etcd lease un-revoked, so old+new nodes coexist and the count doubles) turned into "remote service misread as local". Keep the bias toward `false`: a false negative only costs one extra `store()` pass, where `filteSelf` filters precisely.
 

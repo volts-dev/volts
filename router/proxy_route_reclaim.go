@@ -86,6 +86,8 @@ func (self *TRouter) trackProxyRoutes(service string, created map[proxyRouteKey]
 
 // dropProxyRoutes 回收某个服务的全部代理路由。用于服务从注册中心整个消失时。
 func (self *TRouter) dropProxyRoutes(service string) {
+	// 指纹一起清：服务回来时记录多半与消失前一模一样，留着指纹会让它被当成"没变"跳过。
+	self.proxyFingerprints.Delete(service)
 	v, ok := self.proxyRoutes.LoadAndDelete(service)
 	if !ok {
 		return
@@ -195,4 +197,15 @@ func (self *TRouter) reconcileProxyRoutes(list []*registry.Service) {
 	for _, name := range gone {
 		self.dropProxyRoutes(name)
 	}
+
+	// 一条路由都没建成的服务（全被护盾挡下）不在 proxyRoutes 里，上面那轮碰不到它，
+	// 指纹要单独清（见 proxy_route_skip.go）。
+	self.proxyFingerprints.Range(func(k, _ any) bool {
+		if name, ok := k.(string); ok {
+			if _, alive := present[name]; !alive {
+				self.proxyFingerprints.Delete(name)
+			}
+		}
+		return true
+	})
 }

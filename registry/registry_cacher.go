@@ -166,25 +166,31 @@ func (c *registryCacher) get(service string) ([]*Service, error) {
 	services := c.cache[service]
 	// get cache ttl
 	ttl := c.ttls[service]
-	// make a copy
-	cp := Copy(services)
 
 	// got services && within ttl so return cache
-	if c.isValid(cp, ttl) {
+	//
+	// ★ 先判有效再复制。此前进门就 Copy，过期时这份副本只在回源失败时才用得上 ——
+	// 而 TTL 与 router 的刷新周期同为 60s，几乎每轮都过期，于是每次读都白拷一整份
+	// （connect_components 实测：这一处一天约 10GB）。
+	// ★★ 复制必须在锁里：update() 会**原地**改缓存（services[i] = …、service.Nodes = …）。
+	if c.isValid(services, ttl) {
+		cp := Copy(services)
 		c.RUnlock()
-		// return services
 		return cp, nil
 	}
 
 	// get does the actual request for a service and cache it
-	get := func(service string, cached []*Service) ([]*Service, error) {
+	get := func(service string) ([]*Service, error) {
 		// ask the registry
 		val, err, _ := c.sg.Do(service, func() (interface{}, error) {
 			return c.IRegistry.GetService(service)
 		})
 		services, _ := val.([]*Service)
 		if err != nil {
-			// check the cache
+			// check the cache（在锁里重取重拷，理由同上）
+			c.RLock()
+			cached := Copy(c.cache[service])
+			c.RUnlock()
 			if len(cached) > 0 {
 				// set the error status
 				c.setStatus(err)
@@ -201,12 +207,17 @@ func (c *registryCacher) get(service string) ([]*Service, error) {
 			c.setStatus(nil)
 		}
 
-		// cache results
+		// 缓存直接收下后端这份，交出去的永远是副本：一次回源一次复制（此前两次 ——
+		// 进门一次、入缓存一次），而且每个调用方各拿一份。此前这里把回源结果原样交出，
+		// singleflight 合并的几个并发调用方拿到的是**同一个**切片。缓存里的对象从不
+		// 交给任何人，所以它是不是后端新建的都无所谓；但 update() 会原地改它，
+		// 交出去的副本要在同一把锁里拷。
 		c.Lock()
-		c.set(service, Copy(services))
+		c.set(service, services)
+		cp := Copy(services)
 		c.Unlock()
 
-		return services, nil
+		return cp, nil
 	}
 
 	// watch service if not watched
@@ -232,7 +243,7 @@ func (c *registryCacher) get(service string) ([]*Service, error) {
 	}
 
 	// get and return services
-	return get(service, cp)
+	return get(service)
 }
 
 func (c *registryCacher) set(service string, services []*Service) {
@@ -571,13 +582,14 @@ func (c *registryCacher) match(endpoint string) ([]*Service, error) {
 // 调用方改到缓存里的对象。watch 事件会让缓存立即失效（见 update），所以
 // 新注册/注销的可见延迟不受 TTL 限制。
 func (c *registryCacher) ListServices() ([]*Service, error) {
+	// 与 get() 同理：先判有效再复制，过期时不白拷。listCache 只会被整体替换。
 	c.RLock()
-	cached := Copy(c.listCache)
+	cached := c.listCache
 	ttl := c.listTTL
 	c.RUnlock()
 
 	if c.isValid(cached, ttl) {
-		return cached, nil
+		return Copy(cached), nil
 	}
 
 	// ★ 拉取途中来了失效（watch 事件）：拿回来的清单可能早于那次注册，缓存它就等于把失效
@@ -598,7 +610,7 @@ func (c *registryCacher) ListServices() ([]*Service, error) {
 			c.Lock()
 			stable := c.listGen == gen
 			if stable {
-				c.listCache = Copy(got)
+				c.listCache = got // 交出去的是副本（见下），缓存收下这份即可
 				c.listTTL = time.Now().Add(c.config.TTL)
 			}
 			c.Unlock()
@@ -611,7 +623,7 @@ func (c *registryCacher) ListServices() ([]*Service, error) {
 	if err != nil {
 		if len(cached) > 0 {
 			c.setStatus(err)
-			return cached, nil
+			return Copy(cached), nil
 		}
 		return nil, err
 	}
