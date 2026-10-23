@@ -70,6 +70,14 @@ type (
 		// 还会被网络扩展接受后丢弃，表现成 `EOF` 而不是 connection refused，极难定位。
 		// 2026-07-28 一天内因此中断两次，每次只能靠重启恢复。
 		registeredAddr string
+
+		// registeredNames 是本服务器注册过的**全部**服务名，供注销时逐个摘除。
+		//
+		// 一个服务器常注册多个服务：vectors 的每个模块是一个 group、一个服务名，kylin 一个进程
+		// 就注册上百个。注销曾只摘 config.Name 那一个，其余记录要等租约过期（etcd 90 秒）才消失：
+		// 每次重启后别的进程还看得到旧节点、选点会打到已经停掉的进程上；本进程交出的服务描述
+		// （registry/descriptor.go）也一直没放掉。
+		registeredNames map[string]struct{}
 	}
 )
 
@@ -305,6 +313,7 @@ func (self *TServer) Register() error {
 		if err := regFunc(svc); err != nil {
 			return err
 		}
+		self.rememberRegistered(name)
 		servics = append(servics, svc)
 	}
 
@@ -431,15 +440,26 @@ func (self *TServer) Deregister() error {
 		Address: addr,
 	}
 
-	service := &registry.Service{
-		Name:    config.Name,
-		Version: config.Version,
-		Nodes:   []*registry.Node{node},
+	// 摘本服务器注册过的每一个服务。一个失败不影响其余的：停服时能摘几条是几条，
+	// 摘不掉的等租约过期。
+	names := self.takeRegistered(config.Name)
+	log.Infof("Registry [%s] Deregistering node: %s (%d services)", config.Registry.String(), node.Id, len(names))
+	var deregErr error
+	for _, name := range names {
+		service := &registry.Service{
+			Name:    name,
+			Version: config.Version,
+			Nodes:   []*registry.Node{node},
+		}
+		if err := config.Registry.Deregister(service); err != nil {
+			log.Warnf("Registry [%s] deregister %s/%s: %v", config.Registry.String(), name, node.Id, err)
+			if deregErr == nil {
+				deregErr = err
+			}
+		}
 	}
-
-	log.Infof("Registry [%s] Deregistering node: %s", config.Registry.String(), node.Id)
-	if err := config.Registry.Deregister(service); err != nil {
-		return err
+	if deregErr != nil {
+		return deregErr
 	}
 
 	self.Lock()
@@ -474,6 +494,34 @@ func (self *TServer) Deregister() error {
 	self.Unlock()
 
 	return nil
+}
+
+// rememberRegistered 记下一个已写进注册中心的服务名。
+func (self *TServer) rememberRegistered(name string) {
+	self.Lock()
+	if self.registeredNames == nil {
+		self.registeredNames = make(map[string]struct{})
+	}
+	self.registeredNames[name] = struct{}{}
+	self.Unlock()
+}
+
+// takeRegistered 取出并清空要注销的服务名（含 config.Name：还没注册过时也照旧摘它），按名排序。
+func (self *TServer) takeRegistered(defaultName string) []string {
+	self.Lock()
+	set := self.registeredNames
+	self.registeredNames = nil
+	self.Unlock()
+
+	names := make([]string, 0, len(set)+1)
+	if _, ok := set[defaultName]; !ok && defaultName != "" {
+		names = append(names, defaultName)
+	}
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (self *TServer) Start() error {
