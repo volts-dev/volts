@@ -163,3 +163,43 @@ func TestLocalIdentity_IncludesCachersReplacedByLaterServers(t *testing.T) {
 		}
 	}
 }
+
+// 停服注销逐个摘本地记录：摘完以后 LocalServices() 里已没有本进程的节点，而 watch 还在
+// 送没摘完的注册记录。认过的身份必须还算自己——否则 store() 把自家节点当远端，靠护盾
+// 挡住并报「filteSelf 没认出来」（每次停服一条，日志中心累计上千次）。
+func TestLocalIdentity_StaysKnownAfterDeregister(t *testing.T) {
+	cacher := registry.NewCacher(registry.NewNopRegistry())
+	svc := &registry.Service{Name: "website_sale_slides", Version: "1",
+		Nodes: []*registry.Node{{Id: "http-node", Address: "127.0.0.1:36399"}}}
+	_ = cacher.Register(svc)
+
+	cfg := &Config{}
+	WithRegistry(cacher)(cfg)
+	r := &TRouter{config: cfg}
+	if r.localIdentity() == nil {
+		t.Fatal("注册后 localIdentity 不应为 nil")
+	}
+
+	_ = cacher.Deregister(svc)
+	if n := len(cacher.LocalServices()); n != 0 {
+		t.Fatalf("前提不成立：注销后 LocalServices 仍有 %d 条", n)
+	}
+	me := r.localIdentity()
+	if me == nil {
+		t.Fatal("注销后 localIdentity = nil：停服窗口里认不出自己")
+	}
+	stale := &registry.Service{Name: "website_sale_slides",
+		Nodes: []*registry.Node{{Id: "http-node", Address: "127.0.0.1:36399"}}}
+	if got := r.filteSelf(stale, me); len(got.Nodes) != 0 {
+		t.Errorf("注销后 watch 送来的自家节点没被剔除：%+v", got.Nodes)
+	}
+}
+
+// 从没注册过时仍回 nil：store() 靠它整轮推迟，而不是对着空身份建路由。
+func TestLocalIdentity_NilBeforeAnyRegistration(t *testing.T) {
+	cfg := &Config{}
+	WithRegistry(registry.NewCacher(registry.NewNopRegistry()))(cfg)
+	if me := (&TRouter{config: cfg}).localIdentity(); me != nil {
+		t.Errorf("未注册时 localIdentity 应为 nil，得到 %+v", me)
+	}
+}

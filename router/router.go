@@ -89,6 +89,11 @@ type (
 		// shieldedServices 记录已经报过“本地路由优先”护盾的服务名（见 store）。
 		// refresh 每 60s 重跑，不去重就是每分钟一屏同样的告警。
 		shieldedServices sync.Map
+		// selfSeen 是本进程**认过的**全部自身身份（只增不减），见 localIdentity。
+		selfSeen struct {
+			sync.Mutex
+			ids, addrs map[string]struct{}
+		}
 	}
 )
 
@@ -698,15 +703,22 @@ type selfIdentity struct {
 // localIdentity 从 RegistryCacher.LocalServices()（本进程的注册记录，非 etcd 镜像
 // 缓存，因此不随 lease 抖动）收集自身身份。返回 nil 表示本地服务尚未注册上来、
 // 暂时无法确定“自己是谁”，由调用方 store() 决定护盾还是放行。
+//
+// 返回的是**本进程认过的全部身份**（只增不减），不只是此刻还登记着的那些。停服时
+// 注销逐个服务摘本地记录，摘到后面 LocalServices() 里已经没有本进程的节点了，而
+// watch 还在送尚未摘完的那几条注册记录（里面正是本进程的节点）——按「此刻」认，
+// 它们成了远端，store() 只靠 hasLocalRoute 护盾挡住，每次停服报一条「filteSelf 没认
+// 出来」（websvc 的 website_sale_slides、connect_components 的 connect_mouser，
+// 2026-10 日志中心累计上千次）。节点 id 是每个 server 启动时生成的，监听地址在进程
+// 存活期间也一直是自己的，所以认过一次就永远是自己。
 func (self *TRouter) localIdentity() *selfIdentity {
 	locals := self.localServices()
-	if len(locals) == 0 {
-		return nil
-	}
 
-	me := &selfIdentity{
-		ids:   make(map[string]struct{}),
-		addrs: make(map[string]struct{}),
+	self.selfSeen.Lock()
+	defer self.selfSeen.Unlock()
+	if self.selfSeen.ids == nil {
+		self.selfSeen.ids = make(map[string]struct{})
+		self.selfSeen.addrs = make(map[string]struct{})
 	}
 	for _, srv := range locals {
 		if srv == nil {
@@ -716,9 +728,24 @@ func (self *TRouter) localIdentity() *selfIdentity {
 			if n == nil {
 				continue
 			}
-			me.ids[n.Id] = struct{}{}
-			me.addrs[addr.LocalFormat(n.Address)] = struct{}{}
+			self.selfSeen.ids[n.Id] = struct{}{}
+			self.selfSeen.addrs[addr.LocalFormat(n.Address)] = struct{}{}
 		}
+	}
+	if len(self.selfSeen.ids) == 0 {
+		return nil
+	}
+
+	// 交出副本：调用方在锁外读，而下一次调用可能正往集合里加。
+	me := &selfIdentity{
+		ids:   make(map[string]struct{}, len(self.selfSeen.ids)),
+		addrs: make(map[string]struct{}, len(self.selfSeen.addrs)),
+	}
+	for k := range self.selfSeen.ids {
+		me.ids[k] = struct{}{}
+	}
+	for k := range self.selfSeen.addrs {
+		me.addrs[k] = struct{}{}
 	}
 	return me
 }
