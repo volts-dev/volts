@@ -117,7 +117,10 @@ Endpoint，只复制服务与节点（节点必须复制：客户端会改 `node
 
 - 经网关的前台页面（catp4 / catp4.parts）与直连 websvc 字节一致；后台跨进程 `call_kw/<模型>/read`
   （res.partner、sale.order、website.page、connect.monitor）都正常。
-- 进程起来的头一两秒会记「没有能答描述的节点（TCP）」：同一进程的 http 记录先于 rpc 记录写进
-  注册中心，那一瞬间别人只看得到 http 节点。几秒内自愈，不是故障。
+- 部署时会记「N 份服务描述没取到」「没有能答描述的节点（TCP）」。当初以为是同一进程的 http 记录先于
+  rpc 记录写进注册中心；**实际是死进程留下的记录**：那时 SIGTERM 不走停服流程（volts `Config.Signal`
+  从没开过），旧进程的记录挂到租约过期（90 秒），属主已经不在，自然取不到；rpc 记录先过期、http
+  记录多挂几秒时就是「没有能答」。volts c7fc288 起停服会注销，干净重启时这两条都不再出现
+  （2026-10-23 实测）。进程被 kill -9 / OOM 时仍会出现，那时它是真信号。
 - 部署后 kylin 头十分钟每分钟约 1GB 分配，是定时任务 `AutoUpdateModules` 给各租户升级模块，
   与本改动无关。
