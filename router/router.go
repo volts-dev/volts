@@ -1078,6 +1078,16 @@ func (self *TRouter) watch() {
 		for {
 			res, err := w.Next()
 			if err != nil {
+				// 停服：server.Stop 调 router.Close，上面那个协程随即 w.Stop()，Next 就以
+				// 「could not get next」返回。这是我们自己关的，不是故障 —— 此前按 ERR 记，
+				// 每个进程每次停服一条（日志中心累计上百次，全落在 Deregistering 那一秒）。
+				select {
+				case <-self.exit:
+					cancel()
+					<-done
+					return
+				default:
+				}
 				if errors.Is(err, registry.ErrWatchHistoryLost) {
 					// etcd 压缩掉了 watch 续接所需的历史：重建 watcher 即可，空档里的
 					// 变更由 refresh() 的下一轮全量对账补上。这是自愈的常态，不是故障 ——
