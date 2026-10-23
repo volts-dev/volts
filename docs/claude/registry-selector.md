@@ -174,7 +174,11 @@ could pick it, and the resolver never released those descriptors (`unpublishLoca
 `Deregister`). `Register` now records every name it wrote (`registeredNames`) and `Deregister`
 removes each one, continuing past failures.
 
-Regression: `server/deregister_test.go`.
+None of this ran until 2026-10-23 anyway: `Run` never subscribed to signals (`Config.Signal` was never
+set), so SIGTERM killed the process before `Stop`. Both fixed; on the local stack a restart's old
+records now vanish in 1–3s (cc 3+3, websvc 24+24 records) instead of 80–100s.
+
+Regression: `server/deregister_test.go`, `signal_test.go`.
 
 **Backends must carry service-level metadata and key instances per (service, node).** Found
 while doing the above (2026-10-23):
