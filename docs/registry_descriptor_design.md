@@ -1,6 +1,6 @@
 # 注册记录瘦身：服务描述按哈希寻址，留在所属进程的内存里
 
-状态：代码与测试完成（2026-10-23），待真栈切换复测。断点见文末清单。
+状态：已上线（2026-10-23），真栈结果见第 6 节。
 
 ## 1. 为什么
 
@@ -103,4 +103,20 @@ Endpoint，只复制服务与节点（节点必须复制：客户端会改 `node
 - [x] volts `router/proxy_route_skip.go`：有 Digest 时指纹用它
 - [x] vectors `module/service_index.go`：不变不重建、按哈希缓存解析、合并窗口
 - [x] 测试（见各文件）；`docs/claude/registry-selector.md` 补一节
-- [ ] 真栈：三进程一起重编重启，etcd 数据量、各进程分配量复测，故意重启一次 kylin 看另外两个
+- [x] 真栈：三进程一起重编重启，etcd 数据量、各进程分配量复测，故意重启一次 kylin 看另外两个
+
+## 6. 真栈结果（2026-10-23，volts fd2290f + vectors 25983380，三进程 14:20 上线）
+
+| | 之前 | 之后 |
+|---|---|---|
+| etcd 注册数据 | 8.6 MB（308 条） | 155 KB（308 条，全部瘦身） |
+| connect_components 安静时分配 | 59 MB/分钟 | 23.5 MB/分钟（11 分钟 259MB） |
+| connect_components 跨一次 websvc 重启（2 分钟） | 一次重启数 GB | 44 MB |
+| connect_components 跨一次 kylin 重启（7 分钟，同一份二进制） | 30 分钟两次重启 11.9GB，其中索引重建 8.1GB | 294 MB，其中索引 59MB、etcd 读 60MB，描述 0 次重取 |
+
+- 经网关的前台页面（catp4 / catp4.parts）与直连 websvc 字节一致；后台跨进程 `call_kw/<模型>/read`
+  （res.partner、sale.order、website.page、connect.monitor）都正常。
+- 进程起来的头一两秒会记「没有能答描述的节点（TCP）」：同一进程的 http 记录先于 rpc 记录写进
+  注册中心，那一瞬间别人只看得到 http 节点。几秒内自愈，不是故障。
+- 部署后 kylin 头十分钟每分钟约 1GB 分配，是定时任务 `AutoUpdateModules` 给各租户升级模块，
+  与本改动无关。
