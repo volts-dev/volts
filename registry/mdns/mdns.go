@@ -59,7 +59,11 @@ type (
 		Service   string
 		Version   string
 		Endpoints []*registry.Endpoint
-		Metadata  map[string]string
+		Metadata  map[string]string // 节点 metadata
+
+		// ServiceMetadata 是服务级 metadata。曾整个不发：读回来的服务只有端点。注册记录瘦身后
+		// （registry/descriptor.go）描述哈希就在这里，丢了它读侧拿到的是空服务。
+		ServiceMetadata map[string]string `json:",omitempty"`
 	}
 )
 
@@ -230,8 +234,9 @@ func (m *mdnsRegistry) Register(service *registry.Service, opts ...registry.Opti
 		txt, err := encode(&mdnsTxt{
 			Service:   service.Name,
 			Version:   service.Version,
-			Endpoints: service.Endpoints,
-			Metadata:  node.Metadata,
+			Endpoints:       service.Endpoints,
+			Metadata:        node.Metadata,
+			ServiceMetadata: service.Metadata,
 		})
 
 		if err != nil {
@@ -357,13 +362,17 @@ func (m *mdnsRegistry) GetService(service string) ([]*registry.Service, error) {
 					continue
 				}
 
-				s, ok := serviceMap[txt.Version]
+				cand := &registry.Service{
+					Name:      txt.Service,
+					Version:   txt.Version,
+					Endpoints: txt.Endpoints,
+					Metadata:  txt.ServiceMetadata,
+				}
+				// 同版本、描述不同的两个进程分开（registry.GroupKey）。
+				key := txt.Version + "\x00" + registry.GroupKey(cand)
+				s, ok := serviceMap[key]
 				if !ok {
-					s = &registry.Service{
-						Name:      txt.Service,
-						Version:   txt.Version,
-						Endpoints: txt.Endpoints,
-					}
+					s = cand
 				}
 				addr := ""
 				// prefer ipv4 addrs
@@ -384,7 +393,7 @@ func (m *mdnsRegistry) GetService(service string) ([]*registry.Service, error) {
 					Metadata: txt.Metadata,
 				})
 
-				serviceMap[txt.Version] = s
+				serviceMap[key] = s
 			case <-p.Context.Done():
 				close(done)
 				return
@@ -588,6 +597,7 @@ func (m *mdnsWatcher) Next() (*registry.Result, error) {
 				Name:      txt.Service,
 				Version:   txt.Version,
 				Endpoints: txt.Endpoints,
+				Metadata:  txt.ServiceMetadata,
 			}
 
 			// skip anything without the domain we care about

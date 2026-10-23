@@ -34,8 +34,9 @@
 
 - 哈希 = `sha256(规范字节)`，规范字节 = `json.Marshal({name, version, metadata, endpoints})`。
   端点顺序由 `server.sortEndpoints` 固定，map 键由 `encoding/json` 排序。
-- **用 metadata 键而不是新的线上字段**：etcd / memory / consul / mdns 本来就原样传 metadata，
-  四个后端都不用改编码；vectors 的记录签名本来就覆盖 metadata，签名因此自动绑定了哈希。
+- **用 metadata 键而不是新的线上字段**：vectors 的记录签名本来就覆盖 metadata，签名因此自动绑定了哈希。
+  etcd / memory 原样传服务级 metadata；**consul 与 mdns 原先只传节点 metadata**，服务级的整个丢掉，
+  2026-10-23 补上（consul 加 `s-` 标签、mdns 的 TXT 加 `ServiceMetadata`），分组同样改用 `GroupKey`。
 - 没有 `volts.desc` 的记录（旧二进制、没开描述服务的进程）原样放行 —— 新旧可以混跑，etcd 前缀不变。
 
 ### 2.2 描述在哪、谁来答

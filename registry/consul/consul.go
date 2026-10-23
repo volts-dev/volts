@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -171,19 +172,47 @@ func (c *consulRegistry) Init(opts ...registry.Option) error {
 	return nil
 }
 
+// serviceID 是一个 (服务, 节点) 在 consul 里的服务实例 id。
+//
+// consul 的服务 id 在一个 agent 上唯一，而一个进程注册的所有服务共用一个节点 id（vectors 每个
+// 模块一个服务名）。曾直接拿节点 id 当服务 id：后注册的服务把先注册的整个覆盖掉，注销一个就
+// 把整个进程摘了。
+func serviceID(name, nodeID string) string {
+	return name + idSep + nodeID
+}
+
+// nodeIDOf 从服务实例 id 还原节点 id。不带服务名前缀的（旧二进制注册的）原样返回。
+func nodeIDOf(name, id string) string {
+	return strings.TrimPrefix(id, name+idSep)
+}
+
+const idSep = "~"
+
+// groupKey 是同名服务下哪些实例并成一个 registry.Service：版本 + 描述（registry.GroupKey）。
+func groupKey(s *registry.Service) string {
+	return s.Version + "\x00" + registry.GroupKey(s)
+}
+
 func (c *consulRegistry) Deregister(s *registry.Service, opts ...registry.Option) error {
 	if len(s.Nodes) == 0 {
 		return errors.New("Require at least one node")
 	}
 
-	// delete our hash and time check of the service
-	c.Lock()
-	delete(c.register, s.Name)
-	delete(c.lastChecked, s.Name)
-	c.Unlock()
+	var gerr error
+	for _, node := range s.Nodes {
+		id := serviceID(s.Name, node.Id)
 
-	node := s.Nodes[0]
-	return c.Client().Agent().ServiceDeregister(node.Id)
+		// delete our hash and time check of the service
+		c.Lock()
+		delete(c.register, id)
+		delete(c.lastChecked, id)
+		c.Unlock()
+
+		if err := c.Client().Agent().ServiceDeregister(id); err != nil {
+			gerr = err
+		}
+	}
+	return gerr
 }
 
 func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) error {
@@ -219,11 +248,15 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// use first node
 	node := s.Nodes[0]
+	id := serviceID(s.Name, node.Id)
 
 	// get existing hash and last checked time
+	//
+	// 按服务实例 id 记，不按服务名：同一进程的 http 与 rpc 两个服务器用两个节点注册同一个服务名，
+	// 按名字记的话两边的哈希来回顶替，每一轮都当成「变了」整条重新注册。
 	c.Lock()
-	v, ok := c.register[s.Name]
-	lastChecked := c.lastChecked[s.Name]
+	v, ok := c.register[id]
+	lastChecked := c.lastChecked[id]
 	c.Unlock()
 
 	// if it's already registered and matches then just pass the check
@@ -236,7 +269,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 			services, _, err := c.Client().Health().Checks(s.Name, c.queryOptions)
 			if err == nil {
 				for _, v := range services {
-					if v.ServiceID == node.Id {
+					if v.ServiceID == id {
 						return nil
 					}
 				}
@@ -244,7 +277,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 		} else {
 			// if the err is nil we're all good, bail out
 			// if not, we don't know what the state is, so full re-register
-			if err := c.Client().Agent().PassTTL("service:"+node.Id, ""); err == nil {
+			if err := c.Client().Agent().PassTTL("service:"+id, ""); err == nil {
 				return nil
 			}
 		}
@@ -252,6 +285,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// encode the tags
 	tags := encodeMetadata(node.Metadata)
+	tags = append(tags, encodeServiceMetadata(s.Metadata)...)
 	tags = append(tags, encodeEndpoints(s.Endpoints)...)
 	tags = append(tags, encodeVersion(s.Version)...)
 
@@ -284,7 +318,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// register the service
 	asr := &consul.AgentServiceRegistration{
-		ID:      node.Id,
+		ID:      id,
 		Name:    s.Name,
 		Tags:    tags,
 		Port:    port,
@@ -305,8 +339,8 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 
 	// save our hash and time check of the service
 	c.Lock()
-	c.register[s.Name] = h
-	c.lastChecked[s.Name] = time.Now()
+	c.register[id] = h
+	c.lastChecked[id] = time.Now()
 	c.Unlock()
 
 	// if the TTL is 0 we don't mess with the checks
@@ -315,7 +349,7 @@ func (c *consulRegistry) Register(s *registry.Service, opts ...registry.Option) 
 	}
 
 	// pass the healthcheck
-	return c.Client().Agent().PassTTL("service:"+node.Id, "")
+	return c.Client().Agent().PassTTL("service:"+id, "")
 }
 
 
@@ -342,10 +376,7 @@ func (c *consulRegistry) GetService(name string) ([]*registry.Service, error) {
 
 		// version is now a tag
 		version, _ := decodeVersion(s.Service.Tags)
-		// service ID is now the node id
-		id := s.Service.ID
-		// key is always the version
-		key := version
+		id := nodeIDOf(name, s.Service.ID)
 
 		// address is service address
 		address := s.Service.Address
@@ -355,13 +386,16 @@ func (c *consulRegistry) GetService(name string) ([]*registry.Service, error) {
 			address = s.Node.Address
 		}
 
+		cand := &registry.Service{
+			Endpoints: decodeEndpoints(s.Service.Tags),
+			Name:      s.Service.Service,
+			Version:   version,
+			Metadata:  decodeServiceMetadata(s.Service.Tags),
+		}
+		key := groupKey(cand)
 		svc, ok := serviceMap[key]
 		if !ok {
-			svc = &registry.Service{
-				Endpoints: decodeEndpoints(s.Service.Tags),
-				Name:      s.Service.Service,
-				Version:   version,
-			}
+			svc = cand
 			serviceMap[key] = svc
 		}
 

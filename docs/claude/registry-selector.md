@@ -165,6 +165,32 @@ re-parse 8.5MB. Now `registry.Use()` wraps every backend in a resolver (`registr
 
 Regressions: `registry/descriptor_test.go`, `internal/test/client/describe_test.go`.
 
+## Deregister removes every service the server registered
+
+One server registers many services (one per vectors module — kylin alone writes 127 per node).
+`TServer.Deregister` used to remove only `config.Name`; every other record stayed until its lease
+expired (etcd: 90s), so after each restart readers still saw the stopped node and the selector
+could pick it, and the resolver never released those descriptors (`unpublishLocal` runs in
+`Deregister`). `Register` now records every name it wrote (`registeredNames`) and `Deregister`
+removes each one, continuing past failures.
+
+Regression: `server/deregister_test.go`.
+
+**Backends must carry service-level metadata and key instances per (service, node).** Found
+while doing the above (2026-10-23):
+
+- consul used the node id as the consul service id. Every service of one process shares that node
+  id, so each registration overwrote the previous one and one deregister removed them all. The id
+  is now `<service>~<node id>` (`serviceID` / `nodeIDOf`). The hash/last-checked maps are keyed by
+  it too; keyed by name, a process's http and rpc nodes flip each other's hash and re-register
+  every round.
+- consul (tags) and mdns (TXT) wrote only **node** metadata. Service metadata — where the descriptor
+  digest lives — never left the process, so a stripped record read back as an empty service. consul
+  now writes `s-` tags, mdns a `ServiceMetadata` field; both group by version + `registry.GroupKey`.
+
+Regressions: `registry/consul/service_id_test.go`, `registry/mdns/mdns_test.go`
+(`TestEncoding_CarriesServiceMetadata`).
+
 ## Record signing: who wrote this entry?
 
 `registry.SetRecordSecurity(&RecordSecurity{Sign, Verify})` (`registry/record_security.go`)

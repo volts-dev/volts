@@ -187,6 +187,7 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 - **etcd 后端不许用只读 Txn**：etcd 3.5.4 下客户端一超时就把 etcd 整个 panic 掉（10-14 一天 14 次）。同一快照的多次读用几个 `Get` + `WithRev(第一次的 Revision)`。
 - 注册中心驱动的路由更新：**只给 HTTP 端点建代理路由**（RPC 侧没有反向代理实现）；**本地路由永远赢过发现来的代理路由**（`hasLocalRoute` 那道盾）；服务下线的代理路由要**回收**，否则那条路径永远回 503。**记录没变不重建**（指纹，每 10 轮强制全量一次＝自愈）；缓存器的 `Copy` **只能在锁里做**（`update()` 原地改缓存）。
 - **注册记录只带描述哈希**（`metadata["volts.desc"]`），描述留在所属进程内存里、经 RPC 保留端点按哈希取，取回校验哈希、解一次缓存（`registry/descriptor.go`）。补全出来的 **Metadata / Endpoints 是共用的、只读**；取不到描述的记录**不可见**；分组用 `registry.GroupKey`。
+- **停服注销要摘本服务器注册过的每一个服务名**（`registeredNames`），不是只摘 `config.Name`：一个进程常注册上百个模块服务，漏摘的要等 90 秒租约，期间别人还会选到已停的节点。后端要**带服务级 metadata**（描述哈希在里面）、实例按**(服务, 节点)** 区分：consul / mdns 曾都没做到（10-23 已修）。
 
 ### 消息总线 — [docs/claude/broker.md](docs/claude/broker.md)
 

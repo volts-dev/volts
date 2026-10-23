@@ -64,10 +64,7 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 		serviceName = e.Service.Service
 		// version is now a tag
 		version, _ := decodeVersion(e.Service.Tags)
-		// service ID is now the node id
-		id := e.Service.ID
-		// key is always the version
-		key := version
+		id := nodeIDOf(e.Service.Service, e.Service.ID)
 		// address is service address
 		address := e.Service.Address
 
@@ -76,13 +73,16 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 			address = e.Node.Address
 		}
 
+		cand := &registry.Service{
+			Endpoints: decodeEndpoints(e.Service.Tags),
+			Name:      e.Service.Service,
+			Version:   version,
+			Metadata:  decodeServiceMetadata(e.Service.Tags),
+		}
+		key := groupKey(cand)
 		svc, ok := serviceMap[key]
 		if !ok {
-			svc = &registry.Service{
-				Endpoints: decodeEndpoints(e.Service.Tags),
-				Name:      e.Service.Service,
-				Version:   version,
-			}
+			svc = cand
 			serviceMap[key] = svc
 		}
 
@@ -135,9 +135,9 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 		action := "create"
 
 		for _, oldService := range oldServices {
-			// does this version exist?
+			// does this version (and descriptor) exist?
 			// no? then default to create
-			if oldService.Version != newService.Version {
+			if groupKey(oldService) != groupKey(newService) {
 				continue
 			}
 
@@ -176,7 +176,7 @@ func (cw *consulWatcher) serviceHandler(idx uint64, data interface{}) {
 	for _, old := range rservices[serviceName] {
 		// old version does not exist in new version map
 		// kill it with fire!
-		if _, ok := serviceMap[old.Version]; !ok {
+		if _, ok := serviceMap[groupKey(old)]; !ok {
 			cw.next <- &registry.Result{Action: "delete", Service: old}
 		}
 	}

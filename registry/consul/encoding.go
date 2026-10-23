@@ -106,26 +106,57 @@ func decodeEndpoints(tags []string) []*registry.Endpoint {
 	return en
 }
 
+// 节点 metadata 用 't' 前缀，服务级 metadata 用 's' 前缀。
+//
+// 服务级 metadata 曾整个不进 consul：一个服务读回来只有端点、没有 metadata。注册记录瘦身后
+// （registry/descriptor.go）描述哈希就在服务级 metadata 里，丢了它读侧拿到的是一个既没端点
+// 又没哈希的空服务。
+const (
+	tagNodeMeta    = 't'
+	tagServiceMeta = 's'
+)
+
 func encodeMetadata(md map[string]string) []string {
+	return encodeMetadataTags(tagNodeMeta, md)
+}
+
+func decodeMetadata(tags []string) map[string]string {
+	return decodeMetadataTags(tagNodeMeta, tags)
+}
+
+func encodeServiceMetadata(md map[string]string) []string {
+	return encodeMetadataTags(tagServiceMeta, md)
+}
+
+// decodeServiceMetadata 没有服务级标签时回 nil（旧记录）。
+func decodeServiceMetadata(tags []string) map[string]string {
+	md := decodeMetadataTags(tagServiceMeta, tags)
+	if len(md) == 0 {
+		return nil
+	}
+	return md
+}
+
+func encodeMetadataTags(prefix byte, md map[string]string) []string {
 	var tags []string
 	for k, v := range md {
 		if b, err := json.Marshal(map[string]string{
 			k: v,
 		}); err == nil {
 			// new encoding
-			tags = append(tags, "t-"+encode(b))
+			tags = append(tags, string(prefix)+"-"+encode(b))
 		}
 	}
 	return tags
 }
 
-func decodeMetadata(tags []string) map[string]string {
+func decodeMetadataTags(prefix byte, tags []string) map[string]string {
 	md := make(map[string]string)
 
 	var ver byte
 
 	for _, tag := range tags {
-		if len(tag) == 0 || tag[0] != 't' {
+		if len(tag) < 2 || tag[0] != prefix {
 			continue
 		}
 

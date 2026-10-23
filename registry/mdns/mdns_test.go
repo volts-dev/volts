@@ -369,3 +369,26 @@ func waitEvent(t *testing.T, w registry.Watcher, name, action string) *registry.
 		return nil
 	}
 }
+
+// 服务级 metadata（描述哈希在里面）要随记录发出、原样解回来。
+func TestEncoding_CarriesServiceMetadata(t *testing.T) {
+	encoded, err := encode(&mdnsTxt{
+		Service:         "sale",
+		Version:         "1",
+		Metadata:        map[string]string{"protocol": "TCP"},
+		ServiceMetadata: map[string]string{registry.MetaDescriptor: "abc"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decode(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ServiceMetadata[registry.MetaDescriptor] != "abc" {
+		t.Fatalf("服务级 metadata 丢了：%v", decoded.ServiceMetadata)
+	}
+	if decoded.Metadata["protocol"] != "TCP" {
+		t.Fatalf("节点 metadata 丢了：%v", decoded.Metadata)
+	}
+}
