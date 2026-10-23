@@ -80,6 +80,7 @@ func New(opts ...Option) *TServer {
 		exit:   make(chan chan error),
 		wg:     &sync.WaitGroup{},
 	}
+	enableDescriptorServing(srv.config) // 见 describe.go
 	return srv
 }
 
@@ -493,6 +494,8 @@ func (self *TServer) Start() error {
 	if cfg.Router.Config().UseOpenAPI {
 		cfg.Router.RegisterGroup(router.OpenAPIGroup(cfg.Router))
 	}
+	// 传输层可能在 New 之后才换成 TCP（volts.Transport），这里再兜一次；必须在 Register 之前。
+	enableDescriptorServing(cfg)
 	// 打印
 	cfg.Router.PrintRoutes()
 

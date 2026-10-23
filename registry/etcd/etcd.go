@@ -415,7 +415,10 @@ func (e *etcdRegistry) GetService(name string) ([]*registry.Service, error) {
 			// registry.EndpointsKey 的注释（含真栈实测）。
 			//
 			// 端点集相同的注册项照旧合并成一个 Service，所以常态下形状不变。
-			key := sn.Version + "\x00" + registry.EndpointsKey(sn.Endpoints)
+			//
+			// 瘦身记录（只带描述哈希、端点表为空，见 registry/descriptor.go）按哈希分：
+			// 只看 EndpointsKey 会把描述不同的两个进程并成一份。
+			key := sn.Version + "\x00" + registry.GroupKey(sn)
 			s, ok := serviceMap[key]
 			if !ok {
 				s = &registry.Service{

@@ -186,6 +186,7 @@ On macOS, browser/curl access via LAN IP to a locally-running server is intercep
 - **注册项签名是进程级的 `registry.SetRecordSecurity`**：写入前在节点**副本**上签（一次注册里所有服务共用一个 `*Node`），读出后**合并之前**逐条验，验不过的不进结果、不进缓存；watch 的删除不验。只有 etcd 后端接了。
 - **etcd 后端不许用只读 Txn**：etcd 3.5.4 下客户端一超时就把 etcd 整个 panic 掉（10-14 一天 14 次）。同一快照的多次读用几个 `Get` + `WithRev(第一次的 Revision)`。
 - 注册中心驱动的路由更新：**只给 HTTP 端点建代理路由**（RPC 侧没有反向代理实现）；**本地路由永远赢过发现来的代理路由**（`hasLocalRoute` 那道盾）；服务下线的代理路由要**回收**，否则那条路径永远回 503。**记录没变不重建**（指纹，每 10 轮强制全量一次＝自愈）；缓存器的 `Copy` **只能在锁里做**（`update()` 原地改缓存）。
+- **注册记录只带描述哈希**（`metadata["volts.desc"]`），描述留在所属进程内存里、经 RPC 保留端点按哈希取，取回校验哈希、解一次缓存（`registry/descriptor.go`）。补全出来的 **Metadata / Endpoints 是共用的、只读**；取不到描述的记录**不可见**；分组用 `registry.GroupKey`。
 
 ### 消息总线 — [docs/claude/broker.md](docs/claude/broker.md)
 

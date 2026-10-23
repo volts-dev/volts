@@ -43,6 +43,14 @@ type (
 		Metadata  map[string]string `json:"metadata"`
 		Endpoints []*Endpoint       `json:"endpoints"`
 		Nodes     []*Node           `json:"nodes"`
+
+		// Digest 是描述（Name/Version/Metadata/Endpoints）的内容哈希，由 Use() 返回的解析层在
+		// 补全瘦身记录时填上；完整记录（旧二进制、没开描述服务的进程）为空。不进线上格式 ——
+		// 线上用 metadata 的 MetaDescriptor 键带它，见 descriptor.go。
+		//
+		// ★ 补全出来的 Metadata / Endpoints 是各次调用共用的那一份：**只读**，改了就改到了
+		// 进程里所有人看到的描述。
+		Digest string `json:"-"`
 	}
 
 	// 微服务节点 相当于每个程序/Port一个节点
@@ -135,7 +143,9 @@ func Use(name string, opts ...Option) IRegistry {
 	}
 
 	if fn, has := registryMap[name]; has {
-		reg := fn(opts...)
+		// 套上描述解析层：注册时剥离描述、读出时按哈希补全（descriptor.go）。缓存里存的是
+		// 套好的那个，于是同名同地址的所有持有者拿到的都是它。
+		reg := wrapResolver(fn(opts...))
 		for _, addr := range reg.Config().Addrs {
 			if addr == "" {
 				continue

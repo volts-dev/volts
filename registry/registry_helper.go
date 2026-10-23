@@ -63,14 +63,11 @@ func CopyService(service *Service) *Service {
 	}
 	s.Nodes = nodes
 
-	// copy endpoints
-	eps := make([]*Endpoint, len(service.Endpoints))
-	for j, ep := range service.Endpoints {
-		e := new(Endpoint)
-		*e = *ep
-		eps[j] = e
-	}
-	s.Endpoints = eps
+	// 端点不再逐个复制：Endpoints 与 Metadata 是只读的（见 Service.Digest 的说明），解析层补全出来
+	// 的本来就是所有调用方共用的那一份。逐个复制曾是 registry.Copy 的大头 —— 一份全量清单
+	// 4.2MB，connect_components 实测每分钟十几 MB 都花在这里。切片按长度截住容量，调用方
+	// append 不会写进共用的底层数组。
+	s.Endpoints = service.Endpoints[:len(service.Endpoints):len(service.Endpoints)]
 	return s
 }
 

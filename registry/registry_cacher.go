@@ -292,11 +292,14 @@ func (c *registryCacher) update(res *Result) {
 	// 会被并成一条，并且 endpoints 被**最后一次事件**覆盖 —— 节点与端点的对应
 	// 关系丢失，请求轮询到不实现该端点的进程上就是一句 NotFound。
 	// 详见 EndpointsKey 的注释。
-	key := EndpointsKey(res.Service.Endpoints)
+	//
+	// 有描述哈希时按哈希认（GroupKey）：delete 事件里的记录可能没补全描述、端点表为空，
+	// 只看 EndpointsKey 就对不上缓存里补全过的那份。
+	key := GroupKey(res.Service)
 	var service *Service
 	var index int
 	for i, s := range services {
-		if s.Version == res.Service.Version && EndpointsKey(s.Endpoints) == key {
+		if s.Version == res.Service.Version && GroupKey(s) == key {
 			service = s
 			index = i
 		}

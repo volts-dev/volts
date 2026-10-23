@@ -108,6 +108,12 @@ func proxyFingerprint(services []*registry.Service, me *selfIdentity) uint64 {
 			h = fnvStr(h, n.Address)
 			h = fnvNum(h, mapHash(n.Metadata))
 		}
+		if s.Digest != "" {
+			// 描述的内容哈希（registry/descriptor.go）已经覆盖了端点表的每一个字节，不必再逐条走。
+			h = fnvStr(h, "\x01digest")
+			h = fnvStr(h, s.Digest)
+			continue
+		}
 		h = fnvNum(h, uint64(len(s.Endpoints)))
 		for _, ep := range s.Endpoints {
 			if ep == nil {

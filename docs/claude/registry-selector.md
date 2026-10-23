@@ -133,6 +133,38 @@ Regressions: `router/store_local_route_shield_test.go`, `registry/cacher_registe
 
 (The former `handler.Services`/`SetServices` field — once documented here as a data race — is gone: it had no readers and `SetServices` was never called, so the race could not occur. Removed rather than locked.)
 
+## Descriptors: the registry holds a hash, the owner holds the bytes
+
+Design and measurements: `docs/registry_descriptor_design.md`. A record used to be node
+(changes per process) + descriptor (metadata and the endpoint table, changes per build), and the
+descriptor was 99% of it — so one sibling restart made every reader re-transfer, re-decode and
+re-parse 8.5MB. Now `registry.Use()` wraps every backend in a resolver (`registry/resolver.go`):
+
+- **Register strips** Metadata/Endpoints down to `metadata["volts.desc"] = sha256(canonical bytes)`
+  and keeps the bytes in a process table. Only when this process answers descriptors
+  (`SetDescriptorServing`, set by a TCP server at construction) — an HTTP-only process keeps
+  writing full records, nobody could fetch its descriptor. Records without metadata/endpoints
+  (broker subscriptions) are never stripped.
+- **Reads resolve**: own table → descriptor cache → batch fetch over the reserved RPC endpoint
+  `registry.DescribeEndpoint` (`server/describe.go`, TCP side only, in an `IsService=false` group
+  so it is never advertised). The fetch is injected by `client` (`client/describe.go`) because
+  registry cannot import client. Fetched bytes must hash to the digest and name the referencing
+  service; the record's signature covers the digest (it is in metadata), so any node may serve it.
+- **Unresolvable = not visible.** A record whose descriptor cannot be fetched is left out of the
+  result (`GetService` → `ErrNotFound` if nothing is left); the same digest is not re-fetched for
+  2s. A watch create/update that cannot be resolved is skipped (the next refresh picks it up) —
+  handing out an endpoint-less record would look like "all endpoints gone". Deletes pass with
+  `Digest` set.
+- **Group by `registry.GroupKey`** (digest, else `EndpointsKey`) — stripped records have empty
+  endpoint tables, so `EndpointsKey` alone would merge two processes with different descriptors.
+- **Metadata and Endpoints of a resolved Service are shared and read-only.** `CopyService` no longer
+  copies Endpoint structs (it was the bulk of `registry.Copy`); nodes are still copied — clients
+  rewrite `node.Address`.
+- Old full records (no `volts.desc`) pass through untouched, so mixed binaries work and the etcd
+  prefix is unchanged. vectors' record signature needed no change: it covers metadata.
+
+Regressions: `registry/descriptor_test.go`, `internal/test/client/describe_test.go`.
+
 ## Record signing: who wrote this entry?
 
 `registry.SetRecordSecurity(&RecordSecurity{Sign, Verify})` (`registry/record_security.go`)
