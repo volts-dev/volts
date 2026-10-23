@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/volts-dev/volts/client"
 	"github.com/volts-dev/volts/config"
@@ -186,11 +187,25 @@ func (self *service) Run() error {
 	ch := make(chan os.Signal, 1)
 	if self.config.Signal {
 		signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+		defer signal.Stop(ch)
 	}
 
 	select {
 	// wait on kill signal
-	case <-ch:
+	case sig := <-ch:
+		// 不再接后续信号：停服卡住时再发一次，按系统默认处理当场终止。
+		signal.Stop(ch)
+		timeout := self.config.StopTimeout
+		if timeout <= 0 {
+			timeout = DefaultStopTimeout
+		}
+		log.Infof("收到信号 %v，开始停服（时限 %v）", sig, timeout)
+		// 停服时限：一次 SIGTERM 必须最终让进程退出，不能指望部署脚本补一刀 SIGKILL。
+		timer := time.AfterFunc(timeout, func() {
+			log.Errf("停服 %v 内没有完成，直接退出进程", timeout)
+			os.Exit(1)
+		})
+		defer timer.Stop()
 	// wait on context cancel
 	case <-self.config.Context.Done():
 	}

@@ -123,6 +123,8 @@ app.Run()  // blocks until SIGTERM/SIGINT/SIGQUIT or context cancel
 
 `Run()` → `Start()` → signals server.Start() → listens on transport → waits for OS signal → `Stop()`.
 
+**`Run` 接管 SIGTERM/SIGINT/SIGQUIT 默认开**（`Config.Signal`，`HandleSignal(false)` 关）。这个开关 2021 年起从没人置成 true，进程收到 SIGTERM 当场终止、停服流程（注销注册、钩子）一次都没跑过（2026-10-23 修）。收到信号后有停服时限（`StopTimeout`，默认 30s，到点 `os.Exit(1)`），第二个信号按系统默认处理。回归：`signal_test.go`。
+
 ### Address Configuration
 
 `server.Address(":PORT")` must be used to bind all interfaces. `localhost:PORT` and `127.0.0.1:PORT` are automatically normalized to `:PORT` by `internal/net.Listen()` via `normalizeBindAddr()`.
