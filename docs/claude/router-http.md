@@ -73,6 +73,15 @@ Four rules that are easy to get wrong:
   frame (SSE `: connected`) is far under the threshold and must go out *now*, not sit in a
   buffer waiting for a threshold that will never arrive. Regression:
   `TestCompress_StreamingFlushIsNotStalled` (it hangs, not fails, when this is wrong).
+- **…which is why the *upstream* must send `Content-Length` (2026-10-23).** On a gateway,
+  `httputil.ReverseProxy` treats an upstream response without a length as a stream and
+  **flushes after every read**; each flush forces the decision above, and a first read under
+  `minSize` means passthrough. So large proxied pages were compressed *at random* (real stack:
+  `/shop/brands` 5/10, a 31MB sitemap shard sent raw). `Apply()` now sets `Content-Length`
+  for a body handed over whole via `Respond` (unless the handler declared one; never on
+  204/304). Symptom if it regresses: same URL, `Content-Encoding` present on some requests
+  and not others, `Transfer-Encoding: chunked` on the upstream hop. Regression:
+  `TestRespond_SetsContentLength`, `TestCompress_ThroughProxyIsDeterministic`.
 - **Compressing rewrites the entity, so three headers must follow.** `Content-Length` is
   deleted (net/http recomputes it — leave the original and the client waits forever for
   bytes that never come), a strong `ETag` is weakened to `W/`, and `Vary: Accept-Encoding`

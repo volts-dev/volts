@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -287,6 +288,18 @@ func (self *THttpContext) Apply() {
 			// WriteHeader 现在是延迟提交的，所以 `WriteHeader(422)` 之后再
 			// `RespondByJson(x)`，Result 照样能带着 422 出去 —— 旧实现在这里把它
 			// 静默丢掉，客户端拿到的是 body 为空的状态码。
+			//
+			// 正文是整块交来的，长度已知：补上 Content-Length。不补的话超过 net/http 内部缓冲
+			// （约 4KB）的正文会以 chunked 发出，而网关的 httputil.ReverseProxy 对没有长度的
+			// 上游响应**每读一块就 Flush 一次**（它当流式处理）—— 网关上的压缩层一遇 Flush
+			// 就得当场决定，第一块不够 minSize 就只能直通。于是经网关的大页面、站点地图
+			// 有时压有时不压（真栈量到 /shop/brands 10 次里 5 次没压，1.6MB 原样发出）。
+			// handler 自己声明过长度的不动；204 / 304 本就不许带正文。
+			if n := len(self.Result); n > 0 && self.response.Header().Get("Content-Length") == "" {
+				if st := self.response.Status(); st != http.StatusNoContent && st != http.StatusNotModified {
+					self.response.Header().Set("Content-Length", strconv.Itoa(n))
+				}
+			}
 			self.Write(self.Result)
 		}
 
