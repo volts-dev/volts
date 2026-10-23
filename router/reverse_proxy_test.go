@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,58 +30,110 @@ func (h *hijackableResponseWriter) Header() http.Header {
 	return h.ResponseRecorder.Header()
 }
 
-// TestWebSocketBothGoroutinesComplete 验证 WebSocket 代理两个 goroutine 均完成，无泄漏
+// TestWebSocketBothGoroutinesComplete 验证 WebSocket 代理真的双向转发了数据，返回后两个拷贝协程都退出、无泄漏。
+//
+// 此前这条用例传的请求没有 URL，serveWebSocket 在 req.Write 那一步就报错返回（100 次里 100 次），
+// 从没走到 proxyBidir —— 它测的是一条早退路径，却一直显示通过。
 func TestWebSocketBothGoroutinesComplete(t *testing.T) {
-	// 模拟后端 WebSocket 服务：接受连接，发送一条消息，然后关闭
+	// 模拟后端 WebSocket 服务：读完代理转来的升级请求，回一条消息，然后关闭
 	backend, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer backend.Close()
 
+	gotReq := make(chan string, 1)
 	go func() {
 		conn, err := backend.Accept()
 		if err != nil {
 			return
 		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			gotReq <- "read error: " + err.Error()
+			return
+		}
+		gotReq <- req.URL.Path
 		conn.Write([]byte("hello"))
-		conn.Close()
 	}()
-
-	goroutinesBefore := runtime.NumGoroutine()
 
 	// 模拟 HTTP 连接劫持：clientConn 是"浏览器侧"，serverConn 是"服务器侧"
 	clientConn, serverConn := net.Pipe()
 
 	w := &hijackableResponseWriter{conn: serverConn}
-	r := &http.Request{
-		Header:     make(http.Header),
-		RemoteAddr: "127.0.0.1:9999",
-	}
+	r := httptest.NewRequest("GET", "http://example.com/ws", nil)
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Upgrade", "websocket")
+	r.RemoteAddr = "127.0.0.1:9999"
 
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		serveWebSocket("http", backend.Addr().String(), w, r)
+		done <- serveWebSocket("http", backend.Addr().String(), w, r)
 	}()
 
-	// 读取后端发来的数据后关闭客户端连接，触发两个 cp goroutine 均返回
-	io.Copy(io.Discard, clientConn)
+	// 读到后端发来的全部数据（后端关闭 → 代理关闭两侧 → 这里读到 EOF）。带期限：代理不关浏览器侧
+	// 的话这里会一直等下去，挂起比失败更糟。
+	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	got, err := io.ReadAll(clientConn)
 	clientConn.Close()
+	if err != nil {
+		t.Fatalf("后端关闭后浏览器侧没读到 EOF（代理没有关掉被劫持的连接？）：%v", err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("浏览器侧收到 %q，想要后端发的 %q", got, "hello")
+	}
+	select {
+	case p := <-gotReq:
+		if p != "/ws" {
+			t.Fatalf("后端收到的请求不对：%s", p)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("后端没收到代理转来的请求")
+	}
 
 	select {
-	case <-done:
-		// serveWebSocket 正常返回
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serveWebSocket 没走到转发就返回了：%v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("serveWebSocket goroutines did not finish within 2s")
 	}
 
-	// 等待 goroutine 完全退出
-	time.Sleep(50 * time.Millisecond)
-	goroutinesAfter := runtime.NumGoroutine()
-	if goroutinesAfter > goroutinesBefore+2 {
-		t.Errorf("possible goroutine leak: before=%d after=%d", goroutinesBefore, goroutinesAfter)
+	// 只看这段代码自己的协程还在不在。曾比进程级的 runtime.NumGoroutine() 前后差：整包跑时
+	// 背景里有两百多个别的用例留下的协程，窗口里起落几个就误报泄漏（单跑 300 次不红，整包约四次红一次）。
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		left := goroutinesIn("router.proxyBidir")
+		if left == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutine leak: %d proxyBidir goroutines still running after serveWebSocket returned", left)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// goroutinesIn 数栈里含 frame 的协程。
+func goroutinesIn(frame string) int {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+	count := 0
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, frame) {
+			count++
+		}
+	}
+	return count
 }
 
 // TestProxyBidir_OneSideClosedUnblocksOther 验证：
