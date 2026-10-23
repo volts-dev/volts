@@ -2,6 +2,7 @@
 package registry
 
 import (
+	"errors"
 	"math"
 	"math/rand"
 	"sort"
@@ -669,6 +670,32 @@ func (c *registryCacher) GetService(service string) ([]*Service, error) {
 
 	// return services
 	return services, nil
+}
+
+// Fresh 绕过缓存读一次后端，并把结果写回缓存。
+//
+// 给"手里的事件比缓存新"的调用方用：缓存靠自己的 watch 增量更新，调用方若另有一条 watch（router），
+// 两条流谁先收到同一个事件没有保证，读缓存可能拿到事件之前的样子（见 router.servicesAfterEvent）。
+// 后端这一读发生在事件提交之后，至少与事件一样新；写回之后缓存自己的 watch 再应用同一事件是幂等的
+// （create 按节点 id 合并、delete 按节点 id 剔除）。
+func (c *registryCacher) Fresh(service string) ([]*Service, error) {
+	services, err := c.IRegistry.GetService(service)
+	if err != nil || len(services) == 0 {
+		if err == nil || errors.Is(err, ErrNotFound) {
+			c.Lock()
+			if _, ok := c.cache[service]; ok {
+				c.del(service)
+			}
+			c.Unlock()
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	c.Lock()
+	c.set(service, services)
+	cp := Copy(services)
+	c.Unlock()
+	return cp, nil
 }
 
 func (c *registryCacher) LocalServices() []*Service {

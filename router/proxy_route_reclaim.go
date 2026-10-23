@@ -2,6 +2,7 @@ package router
 
 import (
 	"strings"
+	"time"
 
 	"github.com/volts-dev/volts/registry"
 )
@@ -40,6 +41,21 @@ import (
 //     回归 `TestReclaim_KeepsPathClaimedByAnotherService` 必须下线**当前挂在树上的
 //     那个**；反过来测什么也证明不了，闸一在回查树时就已经放弃了。
 
+//
+// # 宽限期：先 503，到期才 404
+//
+// 回收不是当场做，而是等 proxyReclaimGrace（与注册租约同为 90s）。一个服务"消失"绝大多数时候
+// 是它在重启：volts 起停服会注销（2026-10-23 之前进程被直接杀掉、记录挂到租约过期，所以没人
+// 撞见），新进程三四十秒后同一批端点再注册回来。当场回收的话这段时间整站经网关回 0 字节的 404
+// （10-23 真栈：websvc 重启，/、/store 404 了 66 秒）—— 对爬虫，404 是"这页没了"，503 才是
+// "稍后再来"。宽限期内路由还在、选不到节点回 503 + Retry-After；服务回来时节点一出现就通，
+// 不必等 store() 重建。到期时这条路由若已被重新登记（handler id 是确定的，回来的同一条端点
+// id 不变）就不动，否则照常回收。真正下线的服务多挂 90 秒 503，与被 kill 的进程记录多挂
+// 90 秒是同一个量级。
+
+// proxyReclaimGrace 是代理路由从"服务不再广告"到真正回收的宽限期。0 = 当场回收（测试用）。
+var proxyReclaimGrace = 90 * time.Second
+
 // proxyRouteKey 唯一标识一条被建出来的代理路由。
 //
 // 用「方法集 + 路径」而不是只用路径：注册中心里 GET /x 与 POST /x 是**两条**独立端点
@@ -76,12 +92,59 @@ func (self *TRouter) trackProxyRoutes(service string, created map[proxyRouteKey]
 		self.proxyRoutes.Store(service, created)
 	}
 
+	var stale map[proxyRouteKey]int
 	for key, handlerId := range prev {
 		if _, still := created[key]; still {
 			continue
 		}
-		self.reclaimProxyRoute(service, key, handlerId)
+		if stale == nil {
+			stale = make(map[proxyRouteKey]int)
+		}
+		stale[key] = handlerId
 	}
+	self.reclaimLater(service, stale)
+}
+
+// reclaimLater 在宽限期满时回收 stale 里的代理路由（见文件头「宽限期」）。到期时已被重新
+// 登记的（同一服务、同一条端点、同一个 handler id）跳过。宽限为 0 时当场回收。
+func (self *TRouter) reclaimLater(service string, stale map[proxyRouteKey]int) {
+	if len(stale) == 0 {
+		return
+	}
+	reclaim := func() int {
+		n := 0
+		for key, handlerId := range stale {
+			if self.proxyRouteWanted(service, key, handlerId) {
+				continue
+			}
+			self.reclaimProxyRoute(service, key, handlerId)
+			n++
+		}
+		return n
+	}
+	if proxyReclaimGrace <= 0 {
+		reclaim()
+		return
+	}
+	time.AfterFunc(proxyReclaimGrace, func() {
+		if self.isClosed() {
+			return
+		}
+		if n := reclaim(); n > 0 {
+			log.Infof("router: 服务 %q 宽限期满仍未回来，回收 %d 条代理路由（此后这些路径回 404）", service, n)
+		}
+	})
+}
+
+// proxyRouteWanted 报告这条代理路由此刻是否又被 store() 登记着（服务回来了）。
+func (self *TRouter) proxyRouteWanted(service string, key proxyRouteKey, handlerId int) bool {
+	v, ok := self.proxyRoutes.Load(service)
+	if !ok {
+		return false
+	}
+	routes, _ := v.(map[proxyRouteKey]int)
+	id, ok := routes[key]
+	return ok && id == handlerId
 }
 
 // dropProxyRoutes 回收某个服务的全部代理路由。用于服务从注册中心整个消失时。
@@ -96,11 +159,14 @@ func (self *TRouter) dropProxyRoutes(service string) {
 	if len(routes) == 0 {
 		return
 	}
-	for key, handlerId := range routes {
-		self.reclaimProxyRoute(service, key, handlerId)
+	self.reclaimLater(service, routes)
+	if proxyReclaimGrace > 0 {
+		log.Infof("router: 服务 %q 已从注册中心消失，它的 %d 条代理路由先留 %s（期间回 503，回来就接着用），到期仍未回来再回收",
+			service, len(routes), proxyReclaimGrace)
+	} else {
+		log.Infof("router: 服务 %q 已从注册中心消失，回收它的 %d 条代理路由（此后这些路径回 404 而不是 503）",
+			service, len(routes))
 	}
-	log.Infof("router: 服务 %q 已从注册中心消失，回收它的 %d 条代理路由（此后这些路径回 404 而不是 503）",
-		service, len(routes))
 }
 
 // reclaimProxyRoute 从路由树上剥掉一条代理路由。

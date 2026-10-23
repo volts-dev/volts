@@ -98,6 +98,30 @@ An erroneous reclamation is self-healing: the next **forced** `store()` rebuilds
 over a bad route nothing will ever correct. Regression:
 `router/proxy_route_reclaim_test.go`.
 
+**Reclamation waits a grace period (`proxyReclaimGrace`, 90s).** A service "disappearing" is
+almost always a restart: since `Run` deregisters on SIGTERM (2026-10-23), the old process's
+records vanish within seconds and the new one registers the same endpoints 30–40s later.
+Reclaiming on the spot made every websvc restart answer **0-byte 404** through the gateway for
+`/`, `/store`, `/contactus` (66s measured) — to a crawler that reads "page gone", where 503 is
+"come back later". During the grace the route stays, the proxy finds no node and answers **503
+with `Retry-After: 30`**; once the new node registers it serves immediately, without waiting for
+`store()`. At expiry a route that has been re-registered (the handler id is deterministic, so the
+returning endpoint has the same id) is left alone; anything else is reclaimed as before and then
+404s. A service that is really gone answers 503 for 90s first — the same order as a killed
+process's records outliving it by the lease TTL. Regression: `router/proxy_route_grace_test.go`
+(the package's other tests run with the grace at 0).
+
+**A watch event can be newer than the cacher.** `RegistryCacher` updates from **its own** watch;
+the router's watch is a second, independent stream, and either may see an event first. Reading
+the cache right after an event can return the pre-event state — typically the new process's rpc
+record without its http record yet — so `store()` builds zero HTTP routes, records that
+fingerprint, and nothing corrects it until the next `refresh()` (35s of 404 after websvc was
+already up, 2026-10-23). `servicesAfterEvent` checks the cache reflects the event (created nodes
+present, deleted nodes absent) and otherwise reads the backend through `cacher.Fresh`, which also
+writes the fresh result back. In production the router's `Registry` **is** the cacher (server wraps
+it), so "read `config.Registry` directly" would not bypass anything. Regression:
+`TestServicesAfterEvent_StaleCacheReadsFresh`, `registry/cacher_fresh_test.go`.
+
 **Unchanged records are not rebuilt** (`router/proxy_route_skip.go`). `refresh()` used to
 `store()` every remote service every 60s whether or not anything changed, and the cacher
 copied every record two or three times on the way (`Copy` before checking the TTL, again

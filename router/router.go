@@ -1067,7 +1067,7 @@ func (self *TRouter) watch() {
 			}
 
 			// Fetch full service information from the cache after a change update.
-			services, err := self.config.RegistryCacher.GetService(res.Service.Name)
+			services, err := self.servicesAfterEvent(res)
 			if err != nil {
 				if errors.Is(err, registry.ErrNotFound) {
 					// 服务的最后一个节点注销后，delete 事件紧跟着这次 GetService，
@@ -1091,6 +1091,66 @@ func (self *TRouter) watch() {
 		cancel()
 		<-done // Wait for the goroutine to finish.
 	}
+}
+
+// servicesAfterEvent 取 watch 事件之后这个服务的全部记录。
+//
+// 先读缓存；缓存还没反映这条事件（create / update 的节点不在里面、delete 的节点还在）就直接读
+// 一次注册中心。缓存（RegistryCacher）靠**它自己的** watch 增量更新，与这里的 watch 是两条
+// 独立的流，谁先收到同一个事件没有保证。读到落后的那份，store() 就按旧数据建（常见的是只有 rpc
+// 节点、建出零条 HTTP 路由）并记下指纹，之后没有新事件来纠正，要等下一轮 refresh（60s）——
+// 10-23 真栈：websvc 重启后它已经能直连，网关还 404 了 35 秒。只在落后时多一次读。
+func (self *TRouter) servicesAfterEvent(res *registry.Result) ([]*registry.Service, error) {
+	services, err := self.config.RegistryCacher.GetService(res.Service.Name)
+	if err == nil && reflectsEvent(services, res) {
+		return services, nil
+	}
+	if err != nil && !errors.Is(err, registry.ErrNotFound) {
+		return services, err
+	}
+	if res.Action == "delete" && errors.Is(err, registry.ErrNotFound) {
+		return services, err // 服务整个没了，与事件一致
+	}
+	// 生产里 router 拿到的 Registry 就是这个缓存（server 用 NewCacher 包过），读它没用；要的是缓存
+	// 背后的后端。可选接口：别的 IRegistryCacher 实现没有它时照旧用缓存的结果（等下一轮 refresh）。
+	if f, ok := self.config.RegistryCacher.(interface {
+		Fresh(string) ([]*registry.Service, error)
+	}); ok {
+		return f.Fresh(res.Service.Name)
+	}
+	return services, err
+}
+
+// reflectsEvent 报告 services 是否已经反映了这条事件：create / update 的每个节点都在，
+// delete 的节点一个都不在。只比节点 id —— 事件与缓存里的记录是同一个注册项的两份拷贝。
+func reflectsEvent(services []*registry.Service, res *registry.Result) bool {
+	have := map[string]bool{}
+	for _, s := range services {
+		if s == nil {
+			continue
+		}
+		for _, n := range s.Nodes {
+			if n != nil {
+				have[n.Id] = true
+			}
+		}
+	}
+	for _, n := range res.Service.Nodes {
+		if n == nil {
+			continue
+		}
+		switch res.Action {
+		case "delete":
+			if have[n.Id] {
+				return false
+			}
+		default:
+			if !have[n.Id] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // refresh periodically pulls the full service list from the registry.

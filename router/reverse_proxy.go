@@ -196,6 +196,9 @@ func HttpReverseProxy(ctx *THttpContext) {
 		// 注销后，store() 不会回收它建过的路由，请求仍会落到这里。
 		log.Errf("http: proxy has no upstream for service %q: %v | Method: %s | Path: %s",
 			ctx.Handler().Service(), err, inReq.Method, inReq.URL.Path)
+		// 最常见的成因是上游在重启（代理路由在宽限期内还留着，见 proxy_route_reclaim.go）：
+		// 告诉爬虫与客户端多久后再来，而不是让它们自己猜。
+		ctx.SetHeader(true, "Retry-After", "30")
 		ctx.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
