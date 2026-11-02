@@ -216,15 +216,18 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	reqMsg.SetMessageType(transport.MT_REQUEST)
 	reqMsg.SetSerializeType(self.config.Serialize)
 
-	// init header
-	for k, v := range req.Header() {
-		reqMsg.Header[k] = v[0]
-	}
+	// Inherited metadata supplies defaults; this hop's explicit headers (including
+	// empty values masking inbound credentials) must win after request hooks run.
 	md, ok := metadata.FromContext(ctx)
 	if ok {
 		for k, v := range md {
-			reqMsg.Header[k] = v
+			if req.Header().Values(k) == nil { // Header lookup is case-insensitive.
+				reqMsg.Header[k] = v
+			}
 		}
+	}
+	for k, v := range req.Header() {
+		reqMsg.Header[k] = v[0]
 	}
 
 	// set timeout in nanoseconds

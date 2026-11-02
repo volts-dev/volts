@@ -93,3 +93,20 @@ in config.json, had **no reader at all** and was a knob that did nothing) and
 - The RPC client never consults the policy when the server answered with a non-OK status bit;
   it returns immediately. So on the RPC side the connect-only policy covers every case that is
   retryable at all.
+
+## RPC: this hop's headers win over inherited metadata
+
+A request context may contain the **inbound** frame headers (router restores them as metadata).
+Propagating that context is necessary for cancellation and tracing, but the outbound request hooks
+have already issued credentials for the **next** target. Copying metadata last silently replaced
+that new OBO token with the previous hop's token. Real-stack regression: VectorsSystem opening
+`connect.monitor` called registry → connect_components, which received an OBO token addressed to
+registry and returned `service token audience mismatch`; the browser mistook the forwarded 401
+for an expired login and signed the user out.
+
+Context metadata is defaults only. Explicit request headers win **case-insensitively**, including
+an explicit empty value that masks an inherited header. Do not use `Del` to suppress an inherited
+credential: removing the request entry leaves the metadata default eligible again. Preserve the
+context deadline/cancellation and unrelated metadata; do not fix this by dropping RequestContext
+or relaxing token audience validation. `client/rpc_metadata_test.go` checks the outgoing frame,
+replacement and empty masking, a lowercase alias, trace propagation, and no mutation of the parent.
