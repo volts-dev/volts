@@ -429,6 +429,17 @@ type rotator struct {
 	nextRsv int
 }
 
+// CloseIdleConnections implements http.Client's idle-connection hook. Policy changes
+// can discard old routes without rebuilding identities or clearing their cooldowns.
+func (r *rotator) CloseIdleConnections() {
+	r.mu.Lock()
+	personas := append([]*persona(nil), r.all()...)
+	r.mu.Unlock()
+	for _, p := range personas {
+		p.closeIdle()
+	}
+}
+
 func (r *rotator) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.once.Do(r.build)
 	if err := r.err(); err != nil {
@@ -760,6 +771,8 @@ func (r *rotator) all() []*persona {
 }
 
 func (r *rotator) build() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.idle = make(chan struct{}, 1)
 
 	active, reserve, err := buildPersonas(cfg)

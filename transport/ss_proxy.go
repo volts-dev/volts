@@ -120,7 +120,7 @@ func newShadowsocksDialer(scheme, rest string) (proxy.Dialer, error) {
 		p:    p,
 		spec: spec,
 		key:  evpBytesToKey(p.Password, spec.keyLen),
-		fwd:  &net.Dialer{Timeout: ssDialTimeout},
+		fwd:  &proxyForwardDialer{fallback: &net.Dialer{Timeout: ssDialTimeout}},
 	}, nil
 }
 
@@ -507,7 +507,7 @@ type ssDialer struct {
 	p    *ssParams
 	spec *ssCipherSpec
 	key  []byte
-	fwd  *net.Dialer
+	fwd  proxy.ContextDialer
 }
 
 func (d *ssDialer) Dial(network, addr string) (net.Conn, error) {

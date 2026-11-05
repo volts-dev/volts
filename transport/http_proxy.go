@@ -112,7 +112,7 @@ func NewProxyDialer(proxyURLStr string, UserAgent string) (proxy.Dialer, error) 
 			password, _ := proxyURL.User.Password()
 			auth = &proxy.Auth{User: proxyURL.User.Username(), Password: password}
 		}
-		return proxy.SOCKS5("tcp", proxyURL.Host, auth, proxy.Direct)
+		return proxy.SOCKS5("tcp", proxyURL.Host, auth, &proxyForwardDialer{fallback: &net.Dialer{}})
 	case "":
 		return nil, errors.New("specify scheme explicitly (https://)")
 	default:
@@ -238,7 +238,7 @@ func (c *connectDialer) DialContext(ctx context.Context, network, address string
 	negotiatedProtocol := ""
 	switch c.ProxyURL.Scheme {
 	case "http":
-		rawConn, err = c.Dialer.DialContext(ctx, network, c.ProxyURL.Host)
+		rawConn, err = (&proxyForwardDialer{fallback: &c.Dialer}).DialContext(ctx, network, c.ProxyURL.Host)
 		if err != nil {
 			return nil, err
 		}
@@ -253,12 +253,13 @@ func (c *connectDialer) DialContext(ctx context.Context, network, address string
 				NextProtos: []string{"h2", "http/1.1"},
 				ServerName: c.ProxyURL.Hostname(),
 			}
-			tlsConn, err := tls.Dial(network, c.ProxyURL.Host, &tlsConf)
+			raw, err := (&proxyForwardDialer{fallback: &c.Dialer}).DialContext(ctx, network, c.ProxyURL.Host)
 			if err != nil {
 				return nil, err
 			}
-			err = tlsConn.Handshake()
-			if err != nil {
+			tlsConn := tls.Client(raw, &tlsConf)
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				_ = raw.Close()
 				return nil, err
 			}
 			negotiatedProtocol = tlsConn.ConnectionState().NegotiatedProtocol
