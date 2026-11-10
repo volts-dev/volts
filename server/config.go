@@ -61,6 +61,8 @@ type (
 		Logger     logger.ILogger
 		TLSConfig  *tls.Config `field:"-"` // TLSConfig specifies tls.Config for secure serving
 
+		ownedCachers []registry.IRegistryCacher
+
 		// Other options for implementations of the interface
 		// can be stored in a context
 		Context       context.Context
@@ -118,7 +120,7 @@ func newConfig(opts ...Option) *Config {
 	// 初始化 registry（共享实例，按类型与地址引用）
 	if cfg.Registry == nil {
 		if reg := registry.Use(cfg.RegistryType, registry.Addrs(cfg.RegistryHost...)); reg != nil {
-			cfg.Init(WithRegistry(registry.NewCacher(reg)))
+			cfg.Init(WithRegistry(reg))
 		}
 	}
 
@@ -258,20 +260,23 @@ func WithBroker(bk broker.IBroker) Option {
 // Registry used for discovery
 func WithRegistry(r registry.IRegistry) Option {
 	return func(cfg *Config) {
-		if _, ok := r.(registry.IRegistryCacher); !ok {
-			r = registry.NewCacher(r)
+		reg := r
+		if _, ok := reg.(registry.IRegistryCacher); !ok {
+			c := registry.NewCacher(reg)
+			cfg.ownedCachers = append(cfg.ownedCachers, c)
+			reg = c
 		}
-		cfg.Registry = r
-		cfg.RegistryType = r.Config().Name
-		cfg.RegistryHost = r.Config().Addrs
+		cfg.Registry = reg
+		cfg.RegistryType = reg.Config().Name
+		cfg.RegistryHost = reg.Config().Addrs
 
 		// Update Broker
 		if cfg.Broker != nil {
-			cfg.Broker.Init(broker.WithRegistry(r))
+			cfg.Broker.Init(broker.WithRegistry(reg))
 		}
 
 		if cfg.Router != nil {
-			cfg.Router.Config().Init(vrouter.WithRegistry(r))
+			cfg.Router.Config().Init(vrouter.WithRegistry(reg))
 		}
 	}
 }

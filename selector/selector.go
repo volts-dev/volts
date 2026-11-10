@@ -49,7 +49,7 @@ func New(opts ...Option) ISelector {
 	s := &registrySelector{
 		config: newConfig(opts...),
 	}
-	s.rc = s.newCache()
+	s.rc, s.releaseCache = acquireSelectorCache(s.config)
 	return s
 }
 

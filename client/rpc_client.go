@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -77,41 +78,28 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 		opt(&callOpts)
 	}
 
-	next, err := self.next(request, callOpts)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx := callOpts.Context
+	if ctx == nil {
+		ctx = request.Options().Context
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	// check if we already have a deadline
-	d, ok := ctx.Deadline()
-	if !ok {
-		// no deadline so we create a new one
-		if t := request.Options().RequestTimeout; t > 0 {
-			callOpts.RequestTimeout = t
-		}
-
+	budget := callOpts.RequestTimeout
+	if t := request.Options().RequestTimeout; t > 0 {
+		budget = t
+	}
+	callOpts.RequestTimeout = budget
+	if budget > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, callOpts.RequestTimeout)
+		ctx, cancel = context.WithTimeout(ctx, budget) // 不得延长已有的、更短父级预算。
 		defer cancel()
-	} else {
-		// got a deadline so no need to setup context
-		// but we need to set the timeout we pass along
-		callOpts.RequestTimeout = time.Until(d)
-		//opt := WithRequestTimeout(time.Until(d))
-		//opt(&callOpts)
 	}
-
-	// should we noop right here?
-	select {
-	case <-ctx.Done():
-		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
-	default:
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Timeout("volts.client", err.Error())
 	}
+	var next selector.Next
+	var err error
 
 	// 出站请求钩子：横切信息（调用方身份、追踪 id 等）统一在这里盖上，见 hook.go。
 	// 位置在重试循环**之外** —— 每个请求盖一次，不是每次重试盖一次。
@@ -137,7 +125,17 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 
 		// select next node
 		// selector 可能因为过滤后得不到合适服务器
-		node, err := next()
+		// selector 接口没有 Context：只取消等待，不改共享 selector，也不发送晚到的请求。
+		node, err := waitRPCNode(ctx, func() (*registry.Node, error) {
+			if next == nil {
+				it, err := self.next(request, callOpts)
+				if err != nil {
+					return nil, err
+				}
+				next = it
+			}
+			return next()
+		})
 		if err != nil {
 			gerr = err
 		} else {
@@ -148,7 +146,7 @@ func (self *RpcClient) Call(request IRequest, opts ...CallOption) (IResponse, er
 			// 上报调用结果，供 selector 做失败节点摘除与熔断。
 			// 此前 RPC 路径完全不上报，挂掉的节点会被反复选中直到注册中心
 			// TTL 过期（分钟级）。
-			if self.config.Selector != nil {
+			if self.config.Selector != nil && ctx.Err() == nil {
 				self.config.Selector.Mark(request.Service(), node, err)
 			}
 
@@ -190,28 +188,65 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 		return nil, errors.UnsupportedCodec("volts.client", self.config.SerializeType)
 	}
 
-	// 获取空闲链接
-	dOpts := []transport.DialOption{
-		transport.WithStream(),
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Timeout("volts.client", err.Error())
 	}
-
-	if opts.DialTimeout >= 0 {
-		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout, opts.RequestTimeout, opts.RequestTimeout))
+	remaining := opts.RequestTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining = time.Until(deadline)
 	}
-
-	conn, err := self.pool.Get(node.Address, dOpts...)
-	if err != nil {
-		// 标成"连接没建成"：这是唯一可以证明重试安全的一档 —— 请求的一个字节都还
-		// 没写出去，服务端不可能执行过它。见 RetryOnConnectError。
-		// 仍然是一个带 500 码的 *errors.Error（errors.As 照样取得到码），只是链上
-		// 多挂了一个可判定的哨兵。
-		return nil, errors.Wrap(ErrConnectFailed, "volts.client",
-			500, fmt.Sprintf("dial %s: %v", node.Address, err))
+	if remaining <= 0 {
+		return nil, errors.Timeout("volts.client", "request budget exhausted before connection acquisition")
+	}
+	// 池 key 包含传输超时，不能塞每次略有不同的 remaining，否则每个请求都新建一个池桶。
+	// 拨号仍有固定上限；调用方取消立即返回，晚到连接由获取协程关闭，绝不发送请求。
+	dialTimeout := opts.DialTimeout
+	if dialTimeout <= 0 {
+		dialTimeout = transport.DefaultTimeout
+	}
+	if opts.RequestTimeout > 0 && dialTimeout > opts.RequestTimeout {
+		dialTimeout = opts.RequestTimeout
+	}
+	dOpts := []transport.DialOption{transport.WithStream(), transport.WithTimeout(dialTimeout, opts.RequestTimeout, opts.RequestTimeout)}
+	type acquired struct {
+		conn pool.Conn
+		err  error
+	}
+	acquiredConn := make(chan acquired)
+	go func() {
+		var result acquired
+		defer func() {
+			if r := recover(); r != nil {
+				result.err = errors.InternalServerError("volts.client", "panic acquiring connection: %v", r)
+			}
+			select {
+			case acquiredConn <- result:
+			case <-ctx.Done():
+				if result.conn != nil {
+					_ = self.pool.Release(result.conn, ctx.Err())
+				}
+			}
+		}()
+		result.conn, result.err = self.pool.Get(node.Address, dOpts...)
+	}()
+	var conn pool.Conn
+	var err error
+	select {
+	case result := <-acquiredConn:
+		if result.err != nil {
+			return nil, errors.Wrap(ErrConnectFailed, "volts.client", 500, fmt.Sprintf("dial %s: %v", node.Address, result.err))
+		}
+		conn = result.conn
+	case <-ctx.Done():
+		return nil, errors.Timeout("volts.client", ctx.Err().Error())
+	}
+	if err := ctx.Err(); err != nil {
+		self.pool.Release(conn, err)
+		return nil, errors.Timeout("volts.client", err.Error())
 	}
 
 	// 获取请求消息载体
 	reqMsg := transport.GetMessageFromPool()
-	defer transport.PutMessageToPool(reqMsg)
 
 	reqMsg.SetMessageType(transport.MT_REQUEST)
 	reqMsg.SetSerializeType(self.config.Serialize)
@@ -231,17 +266,26 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	}
 
 	// set timeout in nanoseconds
-	reqMsg.Header["Timeout"] = fmt.Sprintf("%d", opts.RequestTimeout)
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining = time.Until(deadline)
+	}
+	if remaining <= 0 {
+		transport.PutMessageToPool(reqMsg)
+		self.pool.Release(conn, context.DeadlineExceeded)
+		return nil, errors.Timeout("volts.client", "request budget exhausted")
+	}
+	reqMsg.Header["Timeout"] = fmt.Sprintf("%d", remaining)
 	// set the content type for the request
 	reqMsg.Header["Content-Type"] = req.ContentType()
 	// set the accept header
 	reqMsg.Header["Accept"] = req.ContentType()
 
 	reqMsg.Path = req.Method()
-	data := req.Body().Data.Bytes()
+	data := append([]byte(nil), req.Body().Data.Bytes()...) // IO 可能晚于调用方取消返回；不借请求正文。
 	if len(data) > 1024 && self.config.CompressType == transport.Gzip {
 		data, err = transport.Zip(data)
 		if err != nil {
+			transport.PutMessageToPool(reqMsg)
 			self.pool.Release(conn, nil)
 			return nil, err
 		}
@@ -257,6 +301,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	ch := make(chan callResult, 1)
 
 	go func() {
+		defer transport.PutMessageToPool(reqMsg) // 帧只由使用它的 IO 协程归还。
 		defer func() {
 			if r := recover(); r != nil {
 				ch <- callResult{nil, errors.InternalServerError("volts.client", "panic recovered: %v", r)}
@@ -279,7 +324,7 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 
 		// 解码响应
 		bd := body.New(codec.IdentifyCodec(respMsg.SerializeType()))
-		bd.Data.Write(respMsg.Payload)
+		*bd.Data = *bytes.NewBuffer(respMsg.TakePayload())
 		resp := &rpcResponse{
 			contentType: respMsg.SerializeType(),
 			body:        bd,
@@ -309,11 +354,8 @@ func (self *RpcClient) call(ctx context.Context, node *registry.Node, req IReque
 	case <-ctx.Done():
 		// 超时，关闭连接（使阻塞的 Send/Recv 立即返回 error）
 		self.pool.Release(conn, ctx.Err())
-		// 等待 goroutine 退出，防止 goroutine 泄漏
-		select {
-		case <-ch:
-		case <-time.After(2 * time.Second):
-		}
+		// IO 协程独占帧与正文，且结果通道有一格缓冲；迟到的退出自行归池。
+		// 不再额外等两秒，否则过载时取消仍占着 HTTP 调用方与上游资源。
 		return nil, errors.Timeout("volts.client", fmt.Sprintf("%v:%v", self.config.CallOptions.Address, ctx.Err()))
 	}
 }
@@ -367,4 +409,30 @@ func (r *RpcClient) next(request IRequest, opts CallOptions) (selector.Next, err
 
 func (self *RpcClient) String() string {
 	return "RpcClient"
+}
+
+// waitRPCNode 的结果通道有界；取消后晚到结果只丢弃，不触碰调用方的连接/帧。
+// 实际 discovery 仍由后端自己的超时终止，不能强行中断不支持 Context 的第三方 selector。
+func waitRPCNode(ctx context.Context, selectNode func() (*registry.Node, error)) (*registry.Node, error) {
+	type result struct {
+		node *registry.Node
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		var value result
+		defer func() {
+			if r := recover(); r != nil {
+				value.err = errors.InternalServerError("volts.client", "panic selecting node: %v", r)
+			}
+			ch <- value
+		}()
+		value.node, value.err = selectNode()
+	}()
+	select {
+	case value := <-ch:
+		return value.node, value.err
+	case <-ctx.Done():
+		return nil, errors.Timeout("volts.client", ctx.Err().Error())
+	}
 }

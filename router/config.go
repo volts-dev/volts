@@ -60,6 +60,8 @@ type (
 		RegistryCacher registry.IRegistryCacher // registry cache
 		// priorCachers 是先前挂过、后来被 WithRegistry 换掉的 cacher（见 TRouter.localServices）。
 		priorCachers   []registry.IRegistryCacher
+		ownedCachers   []registry.IRegistryCacher
+		ownsSelector   bool
 		RecoverHandler func(IContext)
 		PathRewriter   PathRewriter // 路由匹配前的路径改写(多语言 URL 前缀),见类型注释
 
@@ -161,14 +163,18 @@ func newConfig(opts ...Option) *Config {
 
 	if cfg.Registry == nil {
 		cfg.Registry = registry.NewNopRegistry()
-		cfg.RegistryCacher = registry.NewCacher(cfg.Registry)
-	} else if rc, ok := cfg.Registry.(registry.IRegistryCacher); ok {
-		cfg.RegistryCacher = rc
-	} else {
-		cfg.RegistryCacher = registry.NewCacher(cfg.Registry)
+	}
+	if cfg.RegistryCacher == nil {
+		if rc, ok := cfg.Registry.(registry.IRegistryCacher); ok {
+			cfg.RegistryCacher = rc
+		} else {
+			cfg.RegistryCacher = registry.NewCacher(cfg.Registry)
+			cfg.ownedCachers = append(cfg.ownedCachers, cfg.RegistryCacher)
+		}
 	}
 
 	if cfg.Selector == nil {
+		cfg.ownsSelector = true
 		cfg.Selector = selector.New(
 			selector.WithConfig(cfg.SelectorConfig), // 拥有：配置节 router.<name>.selector
 			selector.Registry(cfg.Registry),
@@ -273,6 +279,7 @@ func WithRegistry(r registry.IRegistry) Option {
 			cfg.RegistryCacher = rc
 		} else {
 			cfg.RegistryCacher = registry.NewCacher(r)
+			cfg.ownedCachers = append(cfg.ownedCachers, cfg.RegistryCacher)
 		}
 		if cfg.Selector != nil {
 			cfg.Selector.Init(selector.Registry(r))

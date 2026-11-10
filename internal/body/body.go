@@ -104,6 +104,12 @@ func (self *TBody) Encode(in interface{}) (int, error) {
 			return 0, err
 		}
 
+		if self.Data.Len() == 0 && codec.EncodedBytesAreOwned(self.Codec) {
+			// JSON's encoded bytes are ours. Keep the existing Data pointer for
+			// callers holding it, but avoid copying a whole RPC response into it.
+			*self.Data = *bytes.NewBuffer(data)
+			return len(data), nil
+		}
 		return self.Data.Write(data)
 	}
 	return 0, errors.New("body not support convert to this type")

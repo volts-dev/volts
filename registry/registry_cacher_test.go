@@ -11,15 +11,18 @@ import (
 // 让"Stop 没等待 watch goroutine 真正退出"的 bug 在时间维度上可观测。
 type fakeWatcher struct {
 	release  chan struct{}
+	entered  chan struct{}
+	nextOnce sync.Once
 	released bool
 	mu       sync.Mutex
 }
 
 func newFakeWatcher() *fakeWatcher {
-	return &fakeWatcher{release: make(chan struct{})}
+	return &fakeWatcher{release: make(chan struct{}), entered: make(chan struct{})}
 }
 
 func (w *fakeWatcher) Next() (*Result, error) {
+	w.nextOnce.Do(func() { close(w.entered) })
 	<-w.release
 	return nil, errors.New("watcher stopped")
 }
@@ -42,8 +45,8 @@ type fakeRegistry struct {
 	w *fakeWatcher
 }
 
-func (r *fakeRegistry) Init(...Option) error            { return nil }
-func (r *fakeRegistry) Config() *Config                 { return &Config{} }
+func (r *fakeRegistry) Init(...Option) error                 { return nil }
+func (r *fakeRegistry) Config() *Config                      { return &Config{} }
 func (r *fakeRegistry) Register(*Service, ...Option) error   { return nil }
 func (r *fakeRegistry) Deregister(*Service, ...Option) error { return nil }
 func (r *fakeRegistry) GetService(name string) ([]*Service, error) {
@@ -70,22 +73,11 @@ func TestCacher_StopWaitsForBackgroundGoroutines(t *testing.T) {
 		t.Fatalf("GetService: %v", err)
 	}
 
-	// 等待 run() 真正起来（最多 500ms）—— 检查 c.running 标志
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		c.RLock()
-		running := c.running
-		c.RUnlock()
-		if running {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	c.RLock()
-	running := c.running
-	c.RUnlock()
-	if !running {
-		t.Fatal("run() never started; cacher state precondition broken")
+	// running 是启动预留标记；要量清理耗时，必须先等后端 Next 真正在执行。
+	select {
+	case <-w.entered:
+	case <-time.After(time.Second):
+		t.Fatal("watcher never entered Next")
 	}
 
 	// 触发 Stop —— 测算同步等待时长

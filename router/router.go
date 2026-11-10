@@ -562,13 +562,11 @@ func (self *TRouter) ServeRPC(w *transport.RpcResponse, r *transport.RpcRequest)
 		//
 		// 复用安全性依赖 TRpcContext.reset 清空 self.context（见 rpc.go 里那段注释）：
 		// 不清就会把上一个请求的身份串给下一个。
-		if len(reqMessage.Header) > 0 {
-			base := r.Context
-			if base == nil {
-				base = context.Background()
-			}
-			ctx.Context(metadata.MergeContext(base, reqMessage.Header, true))
+		base := r.Context
+		if base == nil {
+			base = context.Background()
 		}
+		ctx.Context(metadata.MergeContext(base, reqMessage.Header, true))
 
 		// Execute the controller.
 		self.route(route, ctx)
@@ -681,7 +679,15 @@ func (self *TRouter) isClosed() bool {
 // 由 server 的 Stop 路径调用——此前 exit 通道从无人关闭，这些 goroutine 在
 // 服务器停止后仍永久运行并继续轮询 registry。
 func (self *TRouter) Close() {
-	self.closeOnce.Do(func() { close(self.exit) })
+	self.closeOnce.Do(func() {
+		close(self.exit)
+		if self.config.ownsSelector {
+			_ = self.config.Selector.Close()
+		}
+		for _, c := range self.config.ownedCachers {
+			c.Stop()
+		}
+	})
 }
 
 // filteSelf filters out the nodes that belong to the current instance from a service.

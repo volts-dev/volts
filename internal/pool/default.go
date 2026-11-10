@@ -167,8 +167,9 @@ func (p *poolConn) Key() any {
 	return p.key
 }
 
-// connClosedByPeer reports whether the remote end has already closed conn. It
-// runs a short non-blocking read probe on the underlying net.Conn:
+// connClosedByPeer reports whether the remote end has already closed conn.
+// Native TCP and in-process connections can be checked without waiting. Other
+// transports retain the short read probe on the underlying net.Conn:
 //   - a timeout means the socket is idle but still alive  -> not closed
 //   - io.EOF / reset / unexpected data means it is dead    -> closed
 //
@@ -181,10 +182,17 @@ func connClosedByPeer(c transport.IClient) bool {
 	if nc == nil {
 		return false
 	}
+	if state, ok := nc.(interface{ IsClosed() bool }); ok {
+		return state.IsClosed()
+	}
+	if closed, supported := tcpClosedByPeer(nc); supported {
+		return closed
+	}
 
 	// Small positive deadline so the first read syscall is actually attempted
 	// (an already-elapsed deadline would return immediately and miss a pending
-	// EOF). The 1ms cost is only paid when reusing a genuinely live connection.
+	// EOF). Do not unwrap TLS/proxy connections to probe their raw sockets: readable
+	// control records need not mean the application connection is unusable.
 	if err := nc.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return true // can't probe safely -> treat as dead and dial fresh
 	}

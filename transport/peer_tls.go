@@ -176,9 +176,6 @@ type prefixConn struct {
 
 func (c *prefixConn) Read(b []byte) (int, error) { return c.r.Read(b) }
 
-// inprocConn 标记进程内直连的服务端那一端，供 PeerOf 认出来。
-type inprocConn struct{ net.Conn }
-
 // PeerOf 报告一条服务端连接的对端。
 //
 //   - TLS 连接：返回握手时对端出示的证书链（已经过 tls.Config 里的校验）；

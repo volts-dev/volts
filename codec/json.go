@@ -60,3 +60,12 @@ func (c jsonCodec) Decode(data []byte, i interface{}) error {
 	// 非指针时不会报错而是静默写进那个临时 interface。
 	return dec.Decode(i)
 }
+
+// EncodedBytesAreOwned reports whether a codec's Encode returns independent
+// bytes that a response buffer can retain without copying. Do not infer this
+// from a codec name: Bytes returns the caller's slice, and registered codecs
+// may use borrowed or pooled storage.
+func EncodedBytesAreOwned(c ICodec) bool {
+	_, ok := c.(*jsonCodec)
+	return ok
+}

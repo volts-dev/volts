@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
+	"sync"
 	"time"
 )
 
@@ -116,38 +118,107 @@ func (self *tcpTransportListener) Serve(handler Handler) error {
 // 出在 net.Conn 上，不能出在这里。
 func (self *tcpTransportListener) serveConn(hd rpcHandler, conn net.Conn) {
 	sock := NewTcpTransportSocket(conn, self.transport.config.ReadTimeout, self.transport.config.WriteTimeout)
-
+	base, stop := context.WithCancel(context.WithValue(context.Background(), RemoteConnContextKey, conn))
+	type incomingRPC struct {
+		message *Message
+		ctx     context.Context
+		cancel  context.CancelFunc
+	}
+	messages := make(chan incomingRPC) // 最多一个等待交付的帧，不建立无界请求队列。
+	var mu sync.Mutex
+	pending := 0
+	setReadDeadline := func() {
+		deadline := time.Time{}
+		if rt := self.transport.config.ReadTimeout; pending == 0 && rt > 0 {
+			deadline = time.Now().Add(rt)
+		}
+		_ = conn.SetReadDeadline(deadline)
+	}
 	defer func() {
+		stop()
+		_ = sock.Close()
+		// socket 关闭使唯一读者退出；未交给 handler 的帧由这里/读者归还。
+		for frame := range messages {
+			frame.cancel()
+			PutMessageToPool(frame.message)
+		}
 		if r := recover(); r != nil {
 			log.Errf("rpc: panic serving %s: %v", conn.RemoteAddr(), r)
 		}
-		sock.Close()
 	}()
-
-	for {
-		msg := GetMessageFromPool()
-
-		// slowloris 防护：客户端必须在 ReadTimeout 内发起下一条消息
-		// （正常请求或心跳）。设为 0 可关闭此保护，但会让恶意 idle 连接
-		// 持有 fd 直到 OS 默认 keepalive 触发，不推荐。
-		if rt := self.transport.config.ReadTimeout; rt > 0 {
-			conn.SetReadDeadline(time.Now().Add(rt))
-		} else {
-			conn.SetReadDeadline(time.Time{})
+	go func() {
+		var held *Message
+		var heldCancel context.CancelFunc
+		defer func() {
+			if heldCancel != nil {
+				heldCancel()
+			}
+			if held != nil {
+				PutMessageToPool(held)
+			}
+			if r := recover(); r != nil {
+				log.Errf("rpc: panic reading %s: %v", conn.RemoteAddr(), r)
+			}
+			stop()
+			close(messages)
+		}()
+		for {
+			mu.Lock()
+			setReadDeadline()
+			mu.Unlock()
+			held = GetMessageFromPool()
+			if err := held.Decode(conn); err != nil {
+				return
+			}
+			ctx, cancel, err := rpcRequestContext(base, held.Header["Timeout"])
+			if err != nil {
+				return
+			}
+			heldCancel = cancel // 预算从完整帧到达起算，排在前一个 handler 后面也不能重获预算。
+			mu.Lock()
+			pending++
+			setReadDeadline()
+			mu.Unlock()
+			select {
+			case messages <- incomingRPC{message: held, ctx: ctx, cancel: cancel}:
+				held = nil
+				heldCancel = nil
+			case <-base.Done():
+				return
+			}
 		}
-
-		// 等待读取客户端信号
-		err := msg.Decode(conn)
-		if err != nil {
+	}()
+	for frame := range messages {
+		msg := frame.message
+		if frame.ctx.Err() != nil {
+			frame.cancel()
 			PutMessageToPool(msg)
-			return // 连接断开(EOF)或读取错误，退出循环
+			return
 		}
-
-		ctx := context.WithValue(context.Background(), RemoteConnContextKey, conn)
-		req := NewRpcRequest(ctx, msg, sock)
-		rsp := NewRpcResponse(ctx, req, sock)
-
-		hd.ServeRPC(rsp, req)
-		PutMessageToPool(msg)
+		func() {
+			defer frame.cancel()
+			defer PutMessageToPool(msg)
+			req := NewRpcRequest(frame.ctx, msg, sock)
+			rsp := NewRpcResponse(frame.ctx, req, sock)
+			hd.ServeRPC(rsp, req)
+		}()
+		mu.Lock()
+		pending--
+		setReadDeadline()
+		mu.Unlock()
 	}
+}
+
+// 沿用 Timeout（纳秒）线格式。缺席的旧客户端仍无 handler 截止时间，但断连可取消。
+// 不用读超时限制 handler：合法开户/上传的执行预算可长于连接空闲超时。
+func rpcRequestContext(base context.Context, raw string) (context.Context, context.CancelFunc, error) {
+	if raw == "" {
+		return base, func() {}, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return nil, nil, fmt.Errorf("rpc: invalid Timeout header")
+	}
+	ctx, cancel := context.WithTimeout(base, time.Duration(n))
+	return ctx, cancel, nil
 }

@@ -126,7 +126,9 @@ type (
 		Header  map[string]string // 消息头
 		Body    []byte            // 消息主体
 		Payload []byte            // 消息主体中的内容
-
+		// Only native Recv certifies ownership. Decode alone is also used by
+		// custom transports, which may retain/reuse the decoded storage.
+		receivedPayload []byte
 	}
 )
 
@@ -385,6 +387,7 @@ func (m Message) Encode() []byte {
 
 // Decode decodes a message from reader.
 func (m *Message) Decode(r io.Reader) error {
+	m.receivedPayload = nil
 	_, err := io.ReadFull(r, m.Bom[:1])
 	if err != nil {
 		return err
@@ -409,7 +412,7 @@ func (m *Message) Decode(r io.Reader) error {
 	l := binary.BigEndian.Uint32(*lenData)
 	poolUint32Data.Put(lenData)
 
-	if MaxMessageLength > 0 && int(l) > MaxMessageLength {
+	if uint64(l) > uint64(^uint(0)>>1) || (MaxMessageLength > 0 && uint64(l) > uint64(MaxMessageLength)) {
 		return ErrMessageToLong
 	}
 
@@ -421,13 +424,10 @@ func (m *Message) Decode(r io.Reader) error {
 	// 反复发送即可轻松打爆内存 —— 长度上限拦住的是"单条消息多大"，
 	// 拦不住"用一个数字换一块内存"。
 	//
-	// bytes.Buffer 随 CopyN 逐步扩容，对端不发数据就不会占内存；预分配只取
-	// 一个小的起步值，避免小消息反复扩容。
-	var buf bytes.Buffer
-	if l > 0 {
-		buf.Grow(min(int(l), initialBodyBuffer))
-	}
-	if _, err = io.CopyN(&buf, r, int64(l)); err != nil {
+	// 小帧只分配一个有上限的缓冲；大帧先收进可复用分块，收齐才分配最终正文。
+	// 最终正文不复用：Header/Path 的字符串可能仍由调用方持有。
+	data, err := readFrameBody(r, int(l))
+	if err != nil {
 		if err == io.EOF {
 			// 声明了 l 字节却提前结束：按畸形包处理，与 ReadFull 的语义一致
 			err = io.ErrUnexpectedEOF
@@ -435,7 +435,6 @@ func (m *Message) Decode(r io.Reader) error {
 		return err
 	}
 
-	data := buf.Bytes()
 	m.Body = data
 
 	// readField 从 data[n:] 解析一段 length-prefixed 字节，返回字段 bytes 与新偏移；
@@ -513,6 +512,7 @@ func (m Message) CloneTo(msg *Message) *Message {
 
 // Reset clean data of this message but keep allocated data
 func (m *Message) Reset() {
+	m.receivedPayload = nil
 	resetHeader(m.Bom)
 	m.Header = make(map[string]string)
 	m.Payload = m.Payload[:0]

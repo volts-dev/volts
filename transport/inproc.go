@@ -4,6 +4,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	vaddr "github.com/volts-dev/volts/internal/addr"
 )
@@ -94,6 +95,22 @@ func inprocFor(addr string) inprocServeFunc {
 // dialInproc 建一条进程内连接：返回调用方那一端，另一端交给监听的服务循环。
 func dialInproc(serve inprocServeFunc) net.Conn {
 	client, server := net.Pipe()
-	go serve(&inprocConn{server}) // 包一层让服务端认得出这是本进程（PeerOf）
-	return client
+	closed := new(atomic.Bool)
+	go serve(&inprocConn{Conn: server, closed: closed})
+	return &inprocConn{Conn: client, closed: closed}
+}
+
+// Both ends share their close state so pool reuse does not need a timed Read.
+// The pipe is private to our RPC stack; unlike a TCP peer it cannot inject
+// unsolicited bytes from outside this process. PeerOf also recognizes this type.
+type inprocConn struct {
+	net.Conn
+	closed *atomic.Bool
+}
+
+func (c *inprocConn) IsClosed() bool { return c.closed.Load() }
+
+func (c *inprocConn) Close() error {
+	c.closed.Store(true)
+	return c.Conn.Close()
 }

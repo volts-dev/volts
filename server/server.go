@@ -686,6 +686,11 @@ func (self *TServer) Start() error {
 			log.Errf("Broker [%s] Disconnect error: %v", bname, brokerErr)
 		}
 
+		// 请求与通知已结束，再释放本 server 创建的发现缓存；注入的共享实例只借用。
+		for _, c := range cfg.ownedCachers {
+			c.Stop()
+		}
+
 		// 聚合全部关闭错误（deregister/transport/broker），任何一步失败都不被吞掉
 		ch <- errors.Join(deregErr, tsErr, brokerErr)
 	}, func(err error) { log.Err(err.Error()) })

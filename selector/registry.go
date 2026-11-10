@@ -2,46 +2,42 @@ package selector
 
 import (
 	"sync"
-	"time"
 
 	"github.com/volts-dev/volts/registry"
 )
 
 type (
 	registrySelector struct {
-		config *Config
-		// mu 保护 rc：Init 会 Stop 旧 cacher 然后替换为 newCache()。
-		// 并发的 Match / Select / Close 必须看到一致的 rc，否则会调到已 Stop 的旧实例或 nil。
-		mu sync.RWMutex
-		rc registry.IRegistryCacher
+		config    *Config
+		lifecycle sync.Mutex
+		// mu 保护 rc 与租约交换；lifecycle 串行化 Init/Close，等待清理不占读锁。
+		mu           sync.RWMutex
+		rc           registry.IRegistryCacher
+		releaseCache func()
 		// health 追踪各节点的失败情况，用于摘除/熔断（见 breaker.go）。
 		health healthTracker
 	}
 )
 
-func (self *registrySelector) newCache() registry.IRegistryCacher {
-	var opts []registry.Option
-	if self.config.Context != nil {
-		if t, ok := self.config.Context.Value("selector_ttl").(time.Duration); ok {
-			opts = append(opts, registry.RegisterTTL(t))
+func (self *registrySelector) Init(opts ...Option) error {
+	self.lifecycle.Lock()
+	defer self.lifecycle.Unlock()
+	self.mu.Lock()
+	if self.rc == nil {
+		self.mu.Unlock()
+		return registry.ErrWatcherStopped
+	}
+	for _, o := range opts {
+		if o != nil {
+			o(self.config)
 		}
 	}
-	return registry.NewCacher(self.config.Registry, opts...)
-}
-
-func (self *registrySelector) Init(opts ...Option) error {
-	for _, o := range opts {
-		o(self.config)
-	}
-
-	self.mu.Lock()
-	old := self.rc
-	self.rc = self.newCache()
+	// 先获取新租约再放旧租约。同配置 Init 不重建 watcher，也不冲掉热缓存。
+	rc, release := acquireSelectorCache(self.config)
+	oldRelease := self.releaseCache
+	self.rc, self.releaseCache = rc, release
 	self.mu.Unlock()
-	// 在锁外 Stop 旧实例，避免 Stop().WaitGroup 与持有 mu 的并发 Match 形成依赖环
-	if old != nil {
-		old.Stop()
-	}
+	oldRelease()
 	return nil
 }
 
@@ -50,12 +46,13 @@ func (self *registrySelector) Config() *Config {
 }
 
 func (self *registrySelector) Match(endpoint string, opts ...SelectOption) (Next, error) {
-	sopts := &SelectConfig{
-		Strategy: self.config.Strategy,
-	}
 	self.mu.RLock()
+	sopts := &SelectConfig{Strategy: self.config.Strategy}
 	rc := self.rc
 	self.mu.RUnlock()
+	if rc == nil {
+		return nil, registry.ErrWatcherStopped
+	}
 	services, err := rc.Match(endpoint)
 	if err != nil {
 		if err == registry.ErrNotFound {
@@ -78,9 +75,10 @@ func (self *registrySelector) Match(endpoint string, opts ...SelectOption) (Next
 }
 
 func (self *registrySelector) Select(service string, opts ...SelectOption) (Next, error) {
-	sopts := &SelectConfig{
-		Strategy: self.config.Strategy,
-	}
+	self.mu.RLock()
+	sopts := &SelectConfig{Strategy: self.config.Strategy}
+	rc := self.rc
+	self.mu.RUnlock()
 
 	for _, opt := range opts {
 		opt(sopts)
@@ -89,9 +87,9 @@ func (self *registrySelector) Select(service string, opts ...SelectOption) (Next
 	// get the service
 	// try the cache first
 	// if that fails go directly to the registry
-	self.mu.RLock()
-	rc := self.rc
-	self.mu.RUnlock()
+	if rc == nil {
+		return nil, registry.ErrWatcherStopped
+	}
 	services, err := rc.GetService(service)
 	if err != nil {
 		if err == registry.ErrNotFound {
@@ -142,12 +140,14 @@ func (self *registrySelector) Reset(service string) {
 
 // Close stops the watcher and destroys the cache
 func (self *registrySelector) Close() error {
+	self.lifecycle.Lock()
+	defer self.lifecycle.Unlock()
 	self.mu.Lock()
-	rc := self.rc
-	self.rc = nil
+	release := self.releaseCache
+	self.rc, self.releaseCache = nil, nil
 	self.mu.Unlock()
-	if rc != nil {
-		rc.Stop()
+	if release != nil {
+		release()
 	}
 	return nil
 }

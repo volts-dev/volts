@@ -112,6 +112,20 @@ Rules:
 - Server idle `ReadTimeout` applies to pipes too (`net.Pipe` honours deadlines); the pool's
   liveness probe sees EOF on a pipe the server closed, same as a TCP FIN.
 
+Connection reuse must not wait for a healthy peer to send data. The old pool probe
+performed a timed Read on every reuse, adding roughly 1ms to every RPC, even over a
+pipe. Native TCP on Darwin/Linux now peeks once with `MSG_PEEK | MSG_DONTWAIT`, under
+`SyscallConn.Control` so the descriptor cannot close/recycle during the syscall. EOF,
+reset and unexpected bytes still discard the connection; EAGAIN means idle. It neither
+consumes bytes nor changes deadlines. Do not unwrap TLS/proxy connections to use this
+probe: their readable control records need not be application data. Other connection
+types/platforms keep the original bounded Read fallback. In-process pipe ends share an
+atomic close flag, so the pool can detect either end closing without a timer.
+
+Regressions: `internal/pool/liveness_tcp_unix_test.go`, `transport/inproc_close_test.go`.
+`internal/pool/reuse_bench_test.go` measures both reuse alone and a small framed RPC
+round trip; its numbers are transport costs, not menu/view API latency or capacity.
+
 How to tell which path a request took: `req.Context.Value(transport.RemoteConnContextKey)`
 is a `net.Conn` whose `RemoteAddr().Network()` is `"pipe"`. Regressions:
 `transport/inproc_test.go`, `internal/test/client/rpc_inproc_test.go`
@@ -152,3 +166,18 @@ step processes in adjacent modes interoperate, so restarts can go one by one.
   can reach it.
 
 Regressions: `transport/peer_tls_test.go`.
+
+## RPC frame bodies: grow with delivered bytes, preserve ownership
+
+A peer's length prefix must never trigger a full-sized allocation before the data
+arrives. Bodies up to 64 KiB use one bounded allocation. Larger bodies are read into
+64 KiB scratch chunks; only after every declared byte arrives is the final contiguous
+body allocated. The process retains at most 64 scratch chunks (4 MiB), registers them
+for memory-pressure reclamation, and fences returns from pre-reclaim decodes.
+
+The final body is always a fresh, owned allocation. Do not recycle it as scratch:
+Path and metadata strings alias it, and callers can retain those strings after the
+Message returns to its pool. Fragmentation, truncation, forged lengths, concurrent
+scratch reuse and old-response ownership are covered by `transport/frame_body_test.go`
+and the existing message safety/fuzz tests. `message_decode_bench_test.go` measures
+decoder allocation and throughput only, not complete API latency.

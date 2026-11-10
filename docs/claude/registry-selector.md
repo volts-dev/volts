@@ -258,3 +258,48 @@ don't get to pick their etcd.
 
 Regression: `registry/etcd/register_rewrite_test.go` `TestRangePrefix_ReusesUntilSomethingChanges`
 (live etcd, test-only prefix).
+
+
+## Discovery cache ownership and compatible sharing
+
+`selector` shares only discovery data. Its private lease table is keyed by **backend pointer
+identity + effective cache TTL**, never just a hostname: separately constructed backends may
+carry different credentials, TLS settings, wrappers or namespaces at the same address. Value
+backends use private caches. Do not mutate a live backend in place to switch its identity;
+construct a new backend and pass it through `Init` instead.
+
+- An injected `IRegistryCacher` is borrowed only when its optional `CacheTTL()` accessor
+  confirms the effective TTL matches. `Config()` remains the **backend** configuration and
+  cannot identify the wrapper's cache policy. Unknown or different policies get a separately
+  owned cache. The interface itself is not widened.
+- Compatible raw-backend selectors acquire reference-counted leases. `Init` acquires first,
+  releases second, so repeated same-config Init preserves the hot cache and watcher. Last
+  release removes the table entry and Stops outside the global lock. A concurrent new owner
+  can briefly overlap a draining watcher; completed lifecycles converge, rather than keeping
+  a permanent global cache or relying on GC/finalizers.
+- Breaker state, filters and strategies remain per selector; user tokens, company sets and
+  request contexts do not enter the discovery cache. `Close` is idempotent; closed Select,
+  Match and Init return `registry.ErrWatcherStopped` instead of dereferencing nil.
+- server/router remember **only their own** constructed cachers. Final shutdown Stops those;
+  it never Stops injected caches. A reusable server option must not rewrite its captured
+  backend: each application wraps a raw backend independently, with its own owner.
+  Router also closes its own selector, but not an injected
+  one. HTTP/RPC servers keep separate local-registration ledgers: sharing their discovery
+  reads does not merge or discard local node identity.
+
+`registryCacher.get` reserves `running` and calls `wg.Add` **before** spawning, under the
+same lock as Stop. Setting running in `run` itself allowed many first lookups to spawn
+watchers before any goroutine ran. Once exit is closed, lookup cannot restart the loop.
+**Every** concurrent Stop waits for cleanup, including a second caller; jitter/backoff is
+interruptible. Backends must still make `Watcher()` return under their own timeout and
+make `Watcher.Stop()` unblock Next — a context-less third-party implementation cannot be
+forcibly preempted.
+
+Existing registry debug logs report cumulative `created`/`stopped` and active `runs`/`watchers`.
+Created includes never-started objects; created minus stopped is **not** a leak detector.
+At default info level these diagnostics stay silent. pprof remains the live independent
+check; no new public monitoring endpoint was introduced.
+
+Regressions: `registry/cacher_lifecycle_test.go`, `selector/cache_test.go`,
+`router/cache_ownership_test.go`, `server/cache_ownership_test.go`. The fanout benchmark
+measures **watcher count**, not latency (it deliberately waits for watcher startup).

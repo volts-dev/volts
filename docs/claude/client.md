@@ -110,3 +110,22 @@ credential: removing the request entry leaves the metadata default eligible agai
 context deadline/cancellation and unrelated metadata; do not fix this by dropping RequestContext
 or relaxing token audience validation. `client/rpc_metadata_test.go` checks the outgoing frame,
 replacement and empty masking, a lowercase alias, trace propagation, and no mutation of the parent.
+
+## Cancellation must release the caller without an extra IO grace period
+
+The RPC IO goroutine owns its frame until Send/Recv exits, and holds an independent
+copy of the request payload. Its result channel has room for one late result. Once a
+cancelled call closes/discards the connection, returning immediately is therefore safe;
+waiting up to another two seconds only retains the HTTP caller and its upstream work.
+Do not return the frame from the caller's defer or borrow its mutable body: a custom
+transport can finish IO after Call returns. `TestRPCCancelKeepsFrameAndPayloadOwnedByIOUntilExit`
+blocks Send past cancellation and then mutates the request body to check both ownership
+and prompt return. Native IO should still exit when Close unblocks it.
+
+Native TCP Recv certifies that its decoded payload has fresh storage. The RPC client
+uses Message.TakePayload to transfer that storage into the response buffer, detaching
+it before returning the message to its pool. Custom transports, direct Decode callers
+and replaced payloads retain the copying path. Never infer ownership from a public
+Payload slice alone. The transferred slice has capacity limited to its length; header
+strings remain valid when the response buffer is consumed, appended or reset.
+Regressions: transport/message_payload_test.go and client/rpc_payload_test.go.

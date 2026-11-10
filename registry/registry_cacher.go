@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	igoroutine "github.com/volts-dev/volts/internal/goroutine"
@@ -74,15 +75,22 @@ type (
 
 var (
 	DefaultTTL = time.Minute
+	// 进程累计计数；通过既有 debug 日志观察，不登记新的 HTTP/RPC 端点。
+	cacherCreated  atomic.Int64
+	cacherStopped  atomic.Int64
+	cacherRuns     atomic.Int64
+	cacherWatchers atomic.Int64
 )
 
-// NewCacher returns a new registry cacher instance with the given registry and options.
+// NewCacher returns an owned cacher; its creator must Stop it after all borrowers finish.
 func NewCacher(r IRegistry, opts ...Option) IRegistryCacher {
 	var defaultOpts []Option
 	defaultOpts = append(defaultOpts,
 		//WithName(""),
 		RegisterTTL(DefaultTTL))
 
+	cacherCreated.Add(1)
+	logCacherLifecycle("create")
 	return &registryCacher{
 		IRegistry:   r,
 		config:      newCacheConfig(append(defaultOpts, opts...)...),
@@ -92,6 +100,23 @@ func NewCacher(r IRegistry, opts ...Option) IRegistryCacher {
 		ttls:        make(map[string]time.Time),
 		readBack:    make(map[string]string),
 		exit:        make(chan bool),
+	}
+}
+
+func logCacherLifecycle(event string) {
+	log.Dbgf("rcache lifecycle %s: created=%d stopped=%d runs=%d watchers=%d", event,
+		cacherCreated.Load(), cacherStopped.Load(), cacherRuns.Load(), cacherWatchers.Load())
+}
+
+// 等待重连也受 Stop 控制；不能为一次退避把停服拖长几秒。
+func (c *registryCacher) pause(d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-c.exit:
+		return false
+	case <-timer.C:
+		return !c.quit()
 	}
 }
 
@@ -163,6 +188,11 @@ func (c *registryCacher) get(service string) ([]*Service, error) {
 	// read lock
 	c.RLock()
 
+	if c.quit() {
+		c.RUnlock()
+		return nil, ErrWatcherStopped
+	}
+
 	// check the cache first
 	services := c.cache[service]
 	// get cache ttl
@@ -231,11 +261,15 @@ func (c *registryCacher) get(service string) ([]*Service, error) {
 	if !ok {
 		c.Lock()
 
-		// set to watched
+		if c.quit() {
+			c.Unlock()
+			return nil, ErrWatcherStopped
+		}
 		c.watched[service] = true
 
-		// only kick it off if not running
+		// 发布 running 与登记 wg 必须和 Stop 共用一把锁，不能等 goroutine 自己标记。
 		if !c.running {
+			c.running = true
 			c.wg.Add(1)
 			go c.run()
 		}
@@ -392,9 +426,9 @@ func (c *registryCacher) update(res *Result) {
 func (c *registryCacher) run() {
 	defer c.wg.Done()
 
-	c.Lock()
-	c.running = true
-	c.Unlock()
+	cacherRuns.Add(1)
+	logCacherLifecycle("run")
+	defer func() { cacherRuns.Add(-1); logCacherLifecycle("run-exit") }()
 
 	// reset watcher on exit
 	defer func() {
@@ -414,7 +448,9 @@ func (c *registryCacher) run() {
 
 		// jitter before starting
 		j := rand.Int63n(100)
-		time.Sleep(time.Duration(j) * time.Millisecond)
+		if !c.pause(time.Duration(j) * time.Millisecond) {
+			return
+		}
 
 		// create new watcher
 		w, err := c.IRegistry.Watcher()
@@ -433,7 +469,9 @@ func (c *registryCacher) run() {
 				a = 0
 			}
 
-			time.Sleep(d)
+			if !c.pause(d) {
+				return
+			}
 			a++
 
 			continue
@@ -441,6 +479,11 @@ func (c *registryCacher) run() {
 
 		if w == nil {
 			break
+		}
+
+		if c.quit() {
+			w.Stop()
+			return
 		}
 
 		// reset a
@@ -462,7 +505,9 @@ func (c *registryCacher) run() {
 				b = 0
 			}
 
-			time.Sleep(d)
+			if !c.pause(d) {
+				return
+			}
 			b++
 
 			continue
@@ -481,8 +526,13 @@ func (c *registryCacher) watch(w Watcher) error {
 		return nil
 	}
 
+	cacherWatchers.Add(1)
+	logCacherLifecycle("watch")
+	defer func() { cacherWatchers.Add(-1); logCacherLifecycle("watch-exit") }()
+
 	// used to stop the watch
 	stop := make(chan bool)
+	defer close(stop)
 
 	// manage this loop —— wg.Add 必须在 go 启动前完成，确保 Stop().Wait() 能正确同步
 	c.wg.Add(1)
@@ -503,7 +553,6 @@ func (c *registryCacher) watch(w Watcher) error {
 	for {
 		res, err := w.Next()
 		if err != nil {
-			close(stop)
 			return err
 		}
 
@@ -864,15 +913,22 @@ func (c *registryCacher) Stop() {
 	c.Lock()
 	select {
 	case <-c.exit:
-		c.Unlock()
-		return
 	default:
 		close(c.exit)
+		cacherStopped.Add(1)
+		logCacherLifecycle("stop")
 	}
 	c.Unlock()
 
+	// 每个调用者都等退出，重复 Stop 也不能在首个 Stop 清理完之前返回。
 	// 持锁阶段已结束，wg.Wait 必须在锁外 —— 否则 run() 的 defer 想取写锁会死锁。
 	c.wg.Wait()
+}
+
+// CacheTTL exposes the discovery cache policy without changing IRegistryCacher.
+// Config() remains the backend configuration, not this wrapper's private policy.
+func (c *registryCacher) CacheTTL() time.Duration {
+	return c.config.TTL
 }
 
 func (c *registryCacher) String() string {

@@ -44,7 +44,11 @@ func (t *tcpTransportSocket) Recv(m *Message) error {
 		t.conn.SetReadDeadline(time.Now().Add(t.ReadTimeout))
 	}
 
-	return m.Decode(t.conn)
+	if err := m.Decode(t.conn); err != nil {
+		return err
+	}
+	m.receivedPayload = m.Payload
+	return nil
 }
 
 func (t *tcpTransportSocket) Send(m *Message) error {
